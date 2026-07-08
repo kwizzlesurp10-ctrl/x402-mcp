@@ -36,6 +36,7 @@ const REQUIRED_PROOF_PATHS = [
 /** Subfolders to drill into after opening a top-level dir. */
 const NESTED: Record<string, string[]> = {
   code: ['app'],
+  scripts: ['drive'],
 };
 
 const UI_NOISE =
@@ -57,13 +58,25 @@ function isLikelyDriveItem(name: string): boolean {
   if (
     REQUIRED_TOP.includes(base) ||
     base === 'app' ||
+    base === 'drive' ||
     base === 'DRIVE_STAGING_MANIFEST.txt' ||
     base === 'Dockerfile' ||
-    base.startsWith('.env')
+    base.startsWith('.env') ||
+    base.startsWith('__')
   ) {
     return true;
   }
   return /\.[a-z0-9]+$/i.test(base);
+}
+
+/** Drive sometimes surfaces dunder names without underscores in labels. */
+function nameMatches(expected: string, actual: string): boolean {
+  const e = normalizeItemName(expected).toLowerCase();
+  const a = normalizeItemName(actual).toLowerCase();
+  if (e === a) return true;
+  if (e.replace(/_/g, '') === a.replace(/_/g, '')) return true;
+  if (e.endsWith(a) || a.endsWith(e)) return true;
+  return false;
 }
 
 async function walkStaging(staging: string): Promise<ListingEntry[]> {
@@ -257,27 +270,35 @@ async function navigateToTargetFolder(page: import('playwright').Page, scratch: 
 async function listVisibleItemNames(page: import('playwright').Page): Promise<string[]> {
   const names: string[] = [];
 
-  const gridCells = page.locator('[role="gridcell"][data-tooltip], [role="gridcell"][aria-label]');
-  const gridCount = await gridCells.count();
-  for (let i = 0; i < Math.min(gridCount, 120); i++) {
-    const cell = gridCells.nth(i);
-    const tooltip = (await cell.getAttribute('data-tooltip').catch(() => null)) ?? '';
-    const aria = (await cell.getAttribute('aria-label').catch(() => null)) ?? '';
-    const candidate = normalizeItemName(tooltip || aria);
-    if (candidate && isLikelyDriveItem(candidate)) {
-      names.push(candidate);
+  const selectors = [
+    '[role="gridcell"][data-tooltip]',
+    '[role="gridcell"][aria-label]',
+    '[data-tooltip]',
+    'div[aria-label]',
+    '[role="option"][aria-label]',
+  ];
+  for (const sel of selectors) {
+    const nodes = page.locator(sel);
+    const count = await nodes.count().catch(() => 0);
+    for (let i = 0; i < Math.min(count, 200); i++) {
+      const node = nodes.nth(i);
+      const tooltip = (await node.getAttribute('data-tooltip').catch(() => null)) ?? '';
+      const aria = (await node.getAttribute('aria-label').catch(() => null)) ?? '';
+      const text = (await node.innerText().catch(() => ''))?.split('\n')[0]?.trim() ?? '';
+      for (const raw of [tooltip, aria, text]) {
+        const candidate = normalizeItemName(raw);
+        if (candidate && isLikelyDriveItem(candidate)) names.push(candidate);
+      }
     }
   }
 
-  if (names.length === 0) {
-    const rows = page.getByRole('row');
-    const count = await rows.count();
-    for (let i = 0; i < Math.min(count, 120); i++) {
-      const text = await rows.nth(i).innerText().catch(() => '');
-      const first = (text.split('\n')[0] ?? '').trim();
-      if (first && first !== 'Keith Severson' && !/^name$/i.test(first)) {
-        names.push(normalizeItemName(first));
-      }
+  const rows = page.getByRole('row');
+  const rowCount = await rows.count().catch(() => 0);
+  for (let i = 0; i < Math.min(rowCount, 120); i++) {
+    const text = await rows.nth(i).innerText().catch(() => '');
+    const first = (text.split('\n')[0] ?? '').trim();
+    if (first && first !== 'Keith Severson' && !/^name$/i.test(first)) {
+      names.push(normalizeItemName(first));
     }
   }
 
@@ -321,10 +342,35 @@ async function openFolderByName(page: import('playwright').Page, name: string): 
   return openItemByName(page, name, true);
 }
 
+async function gotoResilient(
+  page: import('playwright').Page,
+  url: string,
+  timeout = 120_000,
+): Promise<void> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+      await page.waitForTimeout(2000);
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.error(`goto attempt ${attempt} failed for ${url}: ${(err as Error).message}`);
+      await page.waitForTimeout(2000 * attempt);
+    }
+  }
+  // Final attempt with looser wait condition
+  try {
+    await page.goto(url, { waitUntil: 'commit', timeout });
+    await page.waitForTimeout(4000);
+  } catch {
+    throw lastErr;
+  }
+}
+
 async function returnToTargetRoot(page: import('playwright').Page, scratch: string): Promise<void> {
   if (targetFolderUrl && isFolderViewUrl(targetFolderUrl)) {
-    await page.goto(targetFolderUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-    await page.waitForTimeout(2500);
+    await gotoResilient(page, targetFolderUrl);
     return;
   }
 
@@ -366,13 +412,19 @@ async function collectViaScopedSearch(
 
   for (const line of manifestLines) {
     const fileName = line.split('/').pop()!;
+    const bareName = fileName.replace(/_/g, '');
     const queries = [
       `"${fileName}" "${TARGET_FOLDER}"`,
       `"${fileName}" ${PARENT_PATH}`,
       `"${fileName}"`,
+      `"${bareName}" "${TARGET_FOLDER}"`,
     ];
     if (fileName.startsWith('.')) {
       queries.unshift(`"${fileName.slice(1)}" "${TARGET_FOLDER}"`);
+    }
+    if (fileName.startsWith('__') && fileName.endsWith('.py')) {
+      // Drive often strips leading underscores in search UI labels
+      queries.unshift(`"${fileName.replace(/^_+/, '')}" "${TARGET_FOLDER}"`);
     }
     let matched: string | undefined;
     for (const query of queries) {
@@ -382,7 +434,7 @@ async function collectViaScopedSearch(
       );
       await page.waitForTimeout(2000);
       const hits = await listVisibleItemNames(page);
-      matched = hits.find((h) => h.toLowerCase() === fileName.toLowerCase());
+      matched = hits.find((h) => nameMatches(fileName, h));
       if (matched) break;
     }
     if (matched && !seen.has(line)) {
@@ -416,7 +468,7 @@ async function collectFolderTree(
     const nestedTargets = NESTED[top] ?? [];
 
     for (const item of level1) {
-      const isNestedFolder = nestedTargets.some((n) => n.toLowerCase() === item.toLowerCase());
+      const isNestedFolder = nestedTargets.some((n) => nameMatches(n, item));
       if (isNestedFolder) {
         if (await openFolderByName(page, item)) {
           const level2 = await listVisibleItemNames(page);
@@ -430,11 +482,18 @@ async function collectFolderTree(
           await returnToTargetRoot(page, scratch);
           if (!(await openFolderByName(page, top))) continue;
         }
-      } else if (item.includes('.') || item === 'app') {
+      } else if (item.includes('.') || item === 'app' || item === 'drive' || item.startsWith('__')) {
         entries.push({
           name: item,
           path: `${top}/${item}`.replace(/\\/g, '/'),
           source: 'remote_in_folder',
+        });
+      } else if (!item.includes('.')) {
+        // Unknown folder-like entry: record it so nested layout is visible.
+        entries.push({
+          name: item,
+          path: `${top}/${item}`.replace(/\\/g, '/'),
+          source: 'remote_in_folder_maybe_dir',
         });
       }
     }
@@ -544,6 +603,8 @@ function remotePathSet(entries: ListingEntry[]): Set<string> {
     const normName = normalizeItemName(e.name);
     paths.add(normPath);
     paths.add(normName);
+    paths.add(normPath.replace(/_/g, ''));
+    paths.add(normName.replace(/_/g, ''));
     if (normPath.includes('/')) {
       paths.add(normPath.split('/').pop()!);
     }
@@ -563,14 +624,79 @@ function manifestSatisfied(manifestLines: string[], remoteEntries: ListingEntry[
     const found =
       remote.has(normLine) ||
       remote.has(fileName) ||
+      remote.has(normLine.replace(/_/g, '')) ||
+      remote.has(fileName.replace(/_/g, '')) ||
       remoteEntries.some((e) => {
         const p = normalizeItemName(e.path);
         const n = normalizeItemName(e.name);
-        return p === normLine || p.endsWith(`/${fileName}`) || n === fileName;
+        return (
+          nameMatches(normLine, p) ||
+          nameMatches(fileName, n) ||
+          p.endsWith(`/${fileName}`) ||
+          p.toLowerCase().endsWith(`/${fileName.toLowerCase()}`)
+        );
       });
     if (!found) missing.push(line);
   }
   return { missing, ok: missing.length === 0 };
+}
+
+async function repairMissingFiles(
+  page: import('playwright').Page,
+  scratch: string,
+  staging: string,
+  missingPaths: string[],
+  uploadedFolders: string[],
+): Promise<void> {
+  for (const missingPath of missingPaths) {
+    const localFile = path.join(staging, missingPath);
+    try {
+      await fs.access(localFile);
+    } catch {
+      continue;
+    }
+    const parts = missingPath.split('/');
+    const fileName = parts[parts.length - 1]!;
+    await navigateToTargetFolder(page, scratch);
+    let parentOk = true;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const segment = parts[i]!;
+      if (!(await openFolderByName(page, segment))) {
+        await createFolder(page, segment);
+        if (!(await openFolderByName(page, segment))) {
+          console.error(`repair: failed to open/create segment ${segment} for ${missingPath}`);
+          parentOk = false;
+          break;
+        }
+      }
+    }
+    if (!parentOk) {
+      uploadedFolders.push(`repair-nav-failed:${missingPath}`);
+      continue;
+    }
+    // Avoid duplicate uploads if already visible in parent
+    const before = await listVisibleItemNames(page);
+    if (before.some((n) => nameMatches(fileName, n))) {
+      uploadedFolders.push(`repair-already-visible:${missingPath}`);
+      continue;
+    }
+    await uploadFile(page, localFile);
+    await page.waitForTimeout(4000);
+    const after = await listVisibleItemNames(page);
+    if (after.some((n) => nameMatches(fileName, n))) {
+      uploadedFolders.push(`repair-ok:${missingPath}`);
+    } else {
+      // retry once
+      await uploadFile(page, localFile);
+      await page.waitForTimeout(6000);
+      const after2 = await listVisibleItemNames(page);
+      uploadedFolders.push(
+        after2.some((n) => nameMatches(fileName, n))
+          ? `repair-retry-ok:${missingPath}`
+          : `repair-unconfirmed:${missingPath}`,
+      );
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -656,26 +782,17 @@ async function main(): Promise<void> {
     let remoteEntries = await collectFolderTree(page, folderUrl, scratch, manifestLines);
     let parity = manifestSatisfied(manifestLines, remoteEntries);
 
-    if (!parity.ok && parity.missing.length > 0 && parity.missing.length <= 12) {
-      for (const missingPath of parity.missing) {
-        const localFile = path.join(staging, missingPath);
-        try {
-          await fs.access(localFile);
-        } catch {
-          continue;
-        }
-        const parts = missingPath.split('/');
-        await navigateToTargetFolder(page, scratch);
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (!(await openFolderByName(page, parts[i]!))) {
-            await createFolder(page, parts[i]!);
-            await openFolderByName(page, parts[i]!);
-          }
-        }
-        await uploadFile(page, localFile);
-        (result.uploadedFolders as string[]).push(`repair:${missingPath}`);
-      }
-      await page.waitForTimeout(5000);
+    // Up to two repair passes for small missing sets.
+    for (let pass = 1; pass <= 2 && !parity.ok && parity.missing.length > 0 && parity.missing.length <= 20; pass++) {
+      console.error(`repair pass ${pass}: missing ${parity.missing.length} -> ${parity.missing.join(', ')}`);
+      await repairMissingFiles(
+        page,
+        scratch,
+        staging,
+        parity.missing,
+        result.uploadedFolders as string[],
+      );
+      await page.waitForTimeout(6000);
       remoteEntries = await collectFolderTree(page, folderUrl, scratch, manifestLines);
       parity = manifestSatisfied(manifestLines, remoteEntries);
     }

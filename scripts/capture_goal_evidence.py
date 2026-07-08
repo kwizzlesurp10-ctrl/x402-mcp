@@ -106,10 +106,24 @@ def step_scope_anchor() -> None:
     parent_patch = PARENT_ROOT / "x402-mcp-changes.patch"
     parent_patch.write_text(patch_body, encoding="utf-8")
 
-    parent_changed = [".gitignore", "x402-mcp", "x402-mcp-changes.patch"]
+    # Parent tracks gitlink + patch; sub-repo holds the real source edits.
+    name_only = run_cmd(["git", "-C", str(ROOT), "diff", "--name-only", f"{base}..HEAD"])
+    sub_paths = [
+        f"x402-mcp/{line.strip()}"
+        for line in name_only.stdout.splitlines()
+        if line.strip()
+    ]
+    parent_changed = [
+        ".gitignore",
+        ".gitmodules",
+        "x402-mcp",
+        "x402-mcp-changes.patch",
+        *sub_paths,
+    ]
     (SCRATCH / "CHANGED_FILES").write_text("\n".join(parent_changed) + "\n", encoding="utf-8")
     (SCRATCH / "goal_scope_files.txt").write_text(
-        "\n".join(parent_changed) + f"\n# sub_repo_head={sub_head}\n",
+        "\n".join(parent_changed)
+        + f"\n# sub_repo={ROOT}\n# sub_repo_head={sub_head}\n# base_sha={base}\n",
         encoding="utf-8",
     )
 
@@ -186,8 +200,15 @@ def step_drive_upload() -> int:
         env=drive_env,
     )
 
-    for stale in SCRATCH.glob("drive_remote_listing_collect*.json"):
-        stale.unlink(missing_ok=True)
+    # Drop stale/failed collect-only artifacts so evidence tests only see current run.
+    for pattern in (
+        "drive_remote_listing_collect*.json",
+        "drive_upload_result_collect*.json",
+        "drive_remote_listing_search*.json",
+        "drive_upload_run*.log",
+    ):
+        for stale in SCRATCH.glob(pattern):
+            stale.unlink(missing_ok=True)
 
     log_body = [
         "=== Drive upload + remote tree (same session) ===",

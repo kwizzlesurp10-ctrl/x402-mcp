@@ -14,12 +14,25 @@ import {
   type LaunchOptions,
 } from 'playwright';
 
-export const SKILL_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
+/** Directory containing this vendored script pair (`scripts/drive`). */
+export const VENDOR_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+/** Prefer skill session; fall back to local vendor path. */
+const SKILL_AUTH = path.join(
+  process.env.USERPROFILE ?? process.env.HOME ?? '',
+  '.grok',
+  'skills',
+  'google-drive-playwright',
+  'drive-auth.json',
 );
 
-export const DEFAULT_STORAGE_STATE_PATH = path.join(SKILL_ROOT, 'drive-auth.json');
+export const SKILL_ROOT = path.resolve(VENDOR_DIR, '..', '..');
+
+export const DEFAULT_STORAGE_STATE_PATH = process.env.DRIVE_AUTH_PATH
+  ? process.env.DRIVE_AUTH_PATH
+  : fs.existsSync(SKILL_AUTH)
+    ? SKILL_AUTH
+    : path.join(VENDOR_DIR, 'drive-auth.json');
 
 export const USER_DATA_DIR =
   process.env.DRIVE_USER_DATA_DIR ||
