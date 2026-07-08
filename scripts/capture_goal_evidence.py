@@ -22,6 +22,8 @@ if not PYTHON.exists():
 
 DRIVE_SKILL = Path(r"C:\Users\Keith\.grok\skills\google-drive-playwright")
 UPLOAD_SCRIPT = DRIVE_SKILL / "scripts" / "upload-x402-folders.ts"
+LIST_REMOTE_SCRIPT = DRIVE_SKILL / "scripts" / "list-x402-drive-folder.ts"
+PARENT_ROOT = Path(r"C:\Users\Keith")
 
 EXPECTED_TOOLS = [
     "discover_services",
@@ -57,6 +59,21 @@ def step_scope_anchor() -> None:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     result = run_cmd(["git", "-C", str(ROOT), "ls-files"])
     (SCRATCH / "goal_scope_files.txt").write_text(result.stdout, encoding="utf-8")
+
+    diff = run_cmd(
+        ["git", "-C", str(ROOT), "diff", "9f9217d..HEAD", "--", "README.md", "scripts/", "tests/test_readme.py", "tests/test_docker_evidence.py", ".gitignore"]
+    )
+    stat = run_cmd(["git", "-C", str(ROOT), "diff", "9f9217d..HEAD", "--stat"])
+    patch_body = diff.stdout + "\n" + stat.stdout
+    (SCRATCH / "goal_changes.patch").write_text(patch_body, encoding="utf-8")
+    parent_patch = PARENT_ROOT / "x402-mcp-changes.patch"
+    parent_patch.write_text(patch_body, encoding="utf-8")
+
+    changed = run_cmd(["git", "-C", str(ROOT), "diff", "9f9217d..HEAD", "--name-only"])
+    new_files = run_cmd(["git", "-C", str(ROOT), "ls-files", "--others", "--exclude-standard"])
+    lines = sorted(set((changed.stdout + new_files.stdout).splitlines()))
+    scoped = [f"x402-mcp/{line}" for line in lines if line.strip()]
+    (SCRATCH / "CHANGED_FILES").write_text("\n".join(scoped) + "\n", encoding="utf-8")
 
 
 def step_readme() -> int:
@@ -155,6 +172,29 @@ def step_drive_upload() -> int:
     }
     if not required.issubset(proof):
         return 1
+
+    remote_path = SCRATCH / "drive_remote_listing.json"
+    if LIST_REMOTE_SCRIPT.exists():
+        remote_proc = run_cmd(
+            [
+                _resolve_npx(),
+                "tsx",
+                str(LIST_REMOTE_SCRIPT),
+                "--output",
+                str(remote_path),
+                "--scratch",
+                str(SCRATCH),
+            ],
+            cwd=DRIVE_SKILL,
+        )
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write("\n=== Remote Drive listing ===\n")
+            fh.write(remote_proc.stdout)
+            fh.write(remote_proc.stderr)
+            if remote_path.exists():
+                fh.write(remote_path.read_text(encoding="utf-8"))
+        if remote_proc.returncode != 0:
+            return remote_proc.returncode
     return 0
 
 
@@ -234,7 +274,7 @@ def main() -> int:
         ("git", step_git),
         ("docker", step_docker),
         ("pytest", step_pytest),
-    ]
+    ]  # scope_anchor writes goal_changes.patch + CHANGED_FILES for harness
 
     exit_code = 0
     for name, fn in steps:

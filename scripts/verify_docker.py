@@ -39,11 +39,16 @@ def capture_docker_info() -> tuple[bool, str]:
     return info.returncode == 0 and "Server Version" in info_text, info_text
 
 
-def capture_docker_images() -> str:
+def capture_docker_images(label: str) -> str:
     images = run(["docker", "images", IMAGE, "--format", "{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}"])
-    text = (images.stdout or "") + (images.stderr or "")
-    (SCRATCH / "docker_images.log").write_text(text, encoding="utf-8")
-    return text.strip()
+    text = (images.stdout or "").strip()
+    log_path = SCRATCH / "docker_images.log"
+    block = f"=== {label} ===\n{time.strftime('%Y-%m-%d %H:%M:%S')}\n{text or '(no image)'}\n"
+    if log_path.exists():
+        log_path.write_text(log_path.read_text(encoding="utf-8") + "\n" + block, encoding="utf-8")
+    else:
+        log_path.write_text(block, encoding="utf-8")
+    return text
 
 
 def write_daemon_unavailable(reason: str) -> int:
@@ -126,7 +131,7 @@ def main() -> int:
     lines.append("docker info OK")
     lines.append(f"docker_info_log={SCRATCH / 'docker_info.log'}")
 
-    pre_build_images = capture_docker_images()
+    pre_build_images = capture_docker_images("pre_build")
     lines.append(f"docker_images_pre_build={pre_build_images or '(none)'}")
 
     build = run(["docker", "build", "-f", "deployment/Dockerfile", "-t", IMAGE, "."])
@@ -137,7 +142,7 @@ def main() -> int:
         log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return 1
 
-    post_build_images = capture_docker_images()
+    post_build_images = capture_docker_images("post_build")
     lines.append(f"docker_images_post_build={post_build_images}")
     lines.append(f"docker_images_log={SCRATCH / 'docker_images.log'}")
     if IMAGE not in post_build_images:
