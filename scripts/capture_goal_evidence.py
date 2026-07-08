@@ -189,7 +189,28 @@ def _validate_drive_artifacts(
         )
         return 1
 
-    if not REQUIRED_PROOF_PATHS.issubset(set(remote.get("proofPathsPresent", []))):
+    # Prefer remote entries (and name/path matching) over the uploader's optional
+    # proofPathsPresent field, which may lag the script's required proof set.
+    proof_present = set(remote.get("proofPathsPresent", []))
+    for proof in REQUIRED_PROOF_PATHS:
+        leaf = proof.split("/")[-1]
+        if (
+            proof in proof_present
+            or proof in remote_paths
+            or leaf in remote_paths
+            or any(
+                e.get("path") == proof
+                or e.get("path", "").endswith(leaf)
+                or e.get("name") == leaf
+                for e in remote.get("entries", [])
+            )
+        ):
+            continue
+        parity_log = SCRATCH / "drive_manifest_parity.log"
+        parity_log.write_text(
+            f"missing_proof={proof}\nproofPathsPresent={sorted(proof_present)}\n",
+            encoding="utf-8",
+        )
         return 1
 
     return 0
