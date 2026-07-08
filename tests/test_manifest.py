@@ -1,0 +1,54 @@
+"""Manifest and HTTP endpoint tests."""
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+client = TestClient(app)
+
+
+def test_health() -> None:
+    response = client.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "x402-micropayments-mcp"
+
+
+def test_well_known_mcp() -> None:
+    response = client.get("/.well-known/mcp")
+    assert response.status_code == 200
+    manifest = response.json()
+
+    assert manifest["name"] == "x402-micropayments"
+    assert manifest["protocol"] == "mcp"
+    assert "free" in manifest["tiers"]
+    assert manifest["tiers"]["free"]["monthly_quota"] == 500
+    assert manifest["tiers"]["free"]["rate_limit_per_minute"] == 10
+    assert manifest["upgrade_url"]
+    assert len(manifest["tools"]) >= 6
+    tool_names = {t["name"] for t in manifest["tools"]}
+    assert "get_pro_upgrade_requirements" in tool_names
+    assert "activate_pro_tier" in tool_names
+    assert manifest["tiers"]["pro"]["payment_tools"]
+    assert manifest["x402"]["protocol_version"] == "v2"
+    assert "PAYMENT-REQUIRED" in manifest["x402"]["headers"]["payment_required"]
+
+
+def test_quota_peek_no_consume() -> None:
+    agent = "peek-agent-unique"
+    first = client.get(f"/quota/{agent}").json()
+    second = client.get(f"/quota/{agent}").json()
+    assert first["meta"]["calls_this_month"] == second["meta"]["calls_this_month"]
+
+
+def test_upgrade_endpoint() -> None:
+    response = client.get("/upgrade")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["upgrade_url"]
+    assert "pro" in body["tiers"]
+    assert "get_tool_credits_requirements" in body["mcp_tools"]["tool_credits"]
+    assert body["tool_credits"]["pack_size"] == 100
+    assert body["manifest"] == "/.well-known/mcp"

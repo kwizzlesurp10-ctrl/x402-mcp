@@ -1,0 +1,110 @@
+# x402 Micropayments MCP
+
+Production MCP server for the [x402](https://x402.org) HTTP micropayment protocol. Enables AI agents to discover paid services, probe `402 Payment Required` responses, pay with stablecoins, and build/verify seller payment configs.
+
+## Features
+
+- **10 MCP tools** for buyer, seller, and commerce x402 flows
+- **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
+- **FastMCP** + **FastAPI** with `/.well-known/mcp` manifest
+- **stdio** (Cursor/Grok local) and **HTTP/SSE** (remote connector) transports
+- **Redis-ready** quota store (in-memory default)
+
+## Quick Start
+
+```bash
+cd x402-mcp
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+### Local stdio (Cursor)
+
+```bash
+python run_stdio.py
+```
+
+Add to Cursor MCP config (`manifests/cursor-mcp.json`).
+
+### HTTP server
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8402
+curl http://localhost:8402/.well-known/mcp
+curl http://localhost:8402/health
+```
+
+## MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `discover_services` | Query x402 Bazaar for paid HTTP APIs |
+| `get_payment_requirements` | Probe URL for `PAYMENT-REQUIRED` on 402 |
+| `pay_and_fetch` | Auto-pay and fetch protected resource |
+| `build_seller_requirements` | Build seller payment requirements |
+| `verify_payment_payload` | Verify payment via facilitator |
+| `get_supported_networks` | Networks, facilitators, v2 headers |
+| `get_pro_upgrade_requirements` | Build x402 payment requirements for Pro tier upgrade |
+| `activate_pro_tier` | Verify x402 payment and unlock Pro tier quota |
+| `get_tool_credits_requirements` | Build x402 payment requirements for per-use tool credits |
+| `purchase_tool_credits` | Verify x402 payment and add per-use tool credits |
+
+## Environment
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EVM_PRIVATE_KEY` | For `pay_and_fetch` | Buyer wallet private key |
+| `X402_PAY_TO_ADDRESS` | For seller tools | Recipient wallet address |
+| `X402_FACILITATOR_URL` | No | Default: `https://x402.org/facilitator` |
+| `UPGRADE_URL` | No | Commerce tier upgrade link |
+
+## Commerce Meta Envelope
+
+Every tool response includes:
+
+```json
+{
+  "data": { "...": "..." },
+  "meta": {
+    "tier": "free",
+    "calls_this_month": 1,
+    "quota_remaining": 499,
+    "quota_warning": false,
+    "rate_limit_remaining": 9,
+    "upgrade_url": "https://forge.example.com/upgrade",
+    "agent_id": "..."
+  }
+}
+```
+
+## Testing
+
+```bash
+pytest -v
+```
+
+## Docker
+
+```bash
+docker build -f deployment/Dockerfile -t x402-mcp .
+docker run -p 8402:8402 x402-mcp
+```
+
+## Drive Project Folder
+
+Target: `/Forge/MCP_Projects/x402-micropayments/`
+
+```
+code/          → this repository
+tests/         → pytest suite
+docs/          → architecture.md
+screenshots/   → verification images
+manifests/     → cursor-mcp.json, /.well-known/mcp
+deployment/    → Dockerfile
+```
+
+## License
+
+Apache-2.0 compatible with x402 Foundation ecosystem.

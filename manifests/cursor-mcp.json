@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "x402-micropayments": {
+      "command": "python",
+      "args": ["C:\\Users\\Keith\\x402-mcp\\run_stdio.py"],
+      "env": {
+        "EVM_PRIVATE_KEY": "${EVM_PRIVATE_KEY}",
+        "X402_PAY_TO_ADDRESS": "${X402_PAY_TO_ADDRESS}",
+        "X402_FACILITATOR_URL": "https://x402.org/facilitator",
+        "UPGRADE_URL": "https://forge.example.com/upgrade"
+      }
+    }
+  }
+}
