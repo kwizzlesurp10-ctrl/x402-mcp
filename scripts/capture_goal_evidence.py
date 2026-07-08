@@ -155,6 +155,46 @@ def step_drive_staging() -> int:
     return 0
 
 
+def _validate_drive_artifacts(
+    result_path: Path,
+    remote_path: Path,
+) -> int:
+    if not result_path.exists() or not remote_path.exists():
+        return 1
+
+    data = json.loads(result_path.read_text(encoding="utf-8"))
+    remote = json.loads(remote_path.read_text(encoding="utf-8"))
+    if not data.get("ok") or not remote.get("ok"):
+        return 1
+
+    manifest_lines = _parse_manifest_lines()
+    remote_paths = _remote_paths_from_listing(remote)
+    missing = [
+        line
+        for line in manifest_lines
+        if not (
+            line in remote_paths
+            or line.split("/")[-1] in remote_paths
+            or any(
+                e.get("path") == line or e.get("path", "").endswith(line.split("/")[-1])
+                for e in remote.get("entries", [])
+            )
+        )
+    ]
+    if missing:
+        parity_log = SCRATCH / "drive_manifest_parity.log"
+        parity_log.write_text(
+            f"missing_count={len(missing)}\nmissing={missing}\n",
+            encoding="utf-8",
+        )
+        return 1
+
+    if not REQUIRED_PROOF_PATHS.issubset(set(remote.get("proofPathsPresent", []))):
+        return 1
+
+    return 0
+
+
 def step_drive_upload() -> int:
     staging = SCRATCH / "x402-drive-staging"
     result_path = SCRATCH / "drive_upload_result.json"
@@ -162,6 +202,27 @@ def step_drive_upload() -> int:
     remote_path = SCRATCH / "drive_remote_listing.json"
     manifest_path = SCRATCH / "drive_staging_manifest.txt"
     log_path = SCRATCH / "drive_upload.log"
+
+    # Reuse a successful same-session upload when SKIP_DRIVE_UPLOAD=1 (fast re-verify).
+    if os.environ.get("SKIP_DRIVE_UPLOAD", "").strip() in {"1", "true", "yes"}:
+        code = _validate_drive_artifacts(result_path, remote_path)
+        if code == 0:
+            existing = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+            log_path.write_text(
+                existing
+                + "\n=== Drive upload REUSED (SKIP_DRIVE_UPLOAD=1) ===\n"
+                + f"result={result_path}\nremote={remote_path}\nvalidated=ok\n",
+                encoding="utf-8",
+            )
+            for pattern in (
+                "drive_remote_listing_collect*.json",
+                "drive_upload_result_collect*.json",
+                "drive_remote_listing_search*.json",
+                "drive_upload_run*.log",
+            ):
+                for stale in SCRATCH.glob(pattern):
+                    stale.unlink(missing_ok=True)
+            return 0
 
     if result_path.exists():
         result_path.unlink()
@@ -224,40 +285,7 @@ def step_drive_upload() -> int:
 
     if proc.returncode != 0:
         return proc.returncode
-    if not result_path.exists() or not remote_path.exists():
-        return 1
-
-    data = json.loads(result_path.read_text(encoding="utf-8"))
-    remote = json.loads(remote_path.read_text(encoding="utf-8"))
-    if not data.get("ok") or not remote.get("ok"):
-        return 1
-
-    manifest_lines = _parse_manifest_lines()
-    remote_paths = _remote_paths_from_listing(remote)
-    missing = [
-        line
-        for line in manifest_lines
-        if not (
-            line in remote_paths
-            or line.split("/")[-1] in remote_paths
-            or any(
-                e.get("path") == line or e.get("path", "").endswith(line.split("/")[-1])
-                for e in remote.get("entries", [])
-            )
-        )
-    ]
-    if missing:
-        parity_log = SCRATCH / "drive_manifest_parity.log"
-        parity_log.write_text(
-            f"missing_count={len(missing)}\nmissing={missing}\n",
-            encoding="utf-8",
-        )
-        return 1
-
-    if not REQUIRED_PROOF_PATHS.issubset(set(remote.get("proofPathsPresent", []))):
-        return 1
-
-    return 0
+    return _validate_drive_artifacts(result_path, remote_path)
 
 
 def step_git() -> int:
