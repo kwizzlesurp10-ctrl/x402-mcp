@@ -159,7 +159,10 @@ def step_drive_upload() -> int:
         log_path.write_text("=== Drive upload SKIPPED ===\n" + body, encoding="utf-8")
         return 1
 
-    drive_cwd = DRIVE_SKILL if (DRIVE_SKILL / "node_modules").exists() else ROOT / "scripts" / "drive"
+    drive_deps = DRIVE_SKILL / "node_modules"
+    drive_env: dict[str, str] = {}
+    if drive_deps.exists():
+        drive_env["NODE_PATH"] = str(drive_deps)
     proc = run_cmd(
         [
             _resolve_npx(),
@@ -176,7 +179,8 @@ def step_drive_upload() -> int:
             "--manifest",
             str(manifest_path),
         ],
-        cwd=drive_cwd,
+        cwd=DRIVE_SKILL if drive_deps.exists() else ROOT,
+        env=drive_env,
     )
 
     for stale in SCRATCH.glob("drive_remote_listing_collect*.json"):
