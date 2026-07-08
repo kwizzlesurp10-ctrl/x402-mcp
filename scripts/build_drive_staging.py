@@ -35,6 +35,7 @@ REQUIRED_PROOF_PATHS = (
     "scripts/run_goal_verification.ps1",
     "scripts/verify_docker.py",
     "scripts/build_drive_staging.py",
+    "scripts/capture_goal_evidence.py",
 )
 
 

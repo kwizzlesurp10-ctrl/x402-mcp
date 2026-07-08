@@ -22,7 +22,6 @@ if not PYTHON.exists():
 
 DRIVE_SKILL = Path(r"C:\Users\Keith\.grok\skills\google-drive-playwright")
 UPLOAD_SCRIPT = DRIVE_SKILL / "scripts" / "upload-x402-folders.ts"
-LIST_REMOTE_SCRIPT = DRIVE_SKILL / "scripts" / "list-x402-drive-folder.ts"
 PARENT_ROOT = Path(r"C:\Users\Keith")
 
 EXPECTED_TOOLS = [
@@ -37,6 +36,15 @@ EXPECTED_TOOLS = [
     "get_tool_credits_requirements",
     "purchase_tool_credits",
 ]
+
+REQUIRED_PROOF_PATHS = {
+    "code/app/main.py",
+    "deployment/Dockerfile",
+    "scripts/run_goal_verification.ps1",
+    "scripts/verify_docker.py",
+    "scripts/build_drive_staging.py",
+    "scripts/capture_goal_evidence.py",
+}
 
 
 def _resolve_npx() -> str:
@@ -55,24 +63,67 @@ def run_cmd(cmd: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = No
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=merged, shell=False)
 
 
+def _initial_commit_sha() -> str:
+    proc = run_cmd(["git", "-C", str(ROOT), "rev-list", "--max-parents=0", "HEAD"])
+    sha = proc.stdout.strip()
+    if not sha:
+        raise RuntimeError("could not resolve initial commit sha")
+    return sha
+
+
+def _parse_manifest_lines() -> list[str]:
+    manifest_path = SCRATCH / "drive_staging_manifest.txt"
+    if not manifest_path.exists():
+        return []
+    return [
+        line.strip()
+        for line in manifest_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("===")
+    ]
+
+
+def _remote_paths_from_listing(data: dict) -> set[str]:
+    paths: set[str] = set()
+    for entry in data.get("entries", []):
+        p = entry.get("path", "")
+        name = entry.get("name", "")
+        if p:
+            paths.add(p)
+            paths.add(p.split("/")[-1])
+        if name:
+            paths.add(name)
+    return paths
+
+
 def step_scope_anchor() -> None:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     result = run_cmd(["git", "-C", str(ROOT), "ls-files"])
     (SCRATCH / "goal_scope_files.txt").write_text(result.stdout, encoding="utf-8")
 
+    base = _initial_commit_sha()
     diff = run_cmd(
-        ["git", "-C", str(ROOT), "diff", "9f9217d..HEAD", "--", "README.md", "scripts/", "tests/test_readme.py", "tests/test_docker_evidence.py", ".gitignore"]
+        [
+            "git",
+            "-C",
+            str(ROOT),
+            "diff",
+            f"{base}..HEAD",
+            "--",
+            "README.md",
+            "scripts/",
+            "tests/test_readme.py",
+            "tests/test_docker_evidence.py",
+            "tests/test_drive_evidence.py",
+            ".gitignore",
+        ]
     )
-    stat = run_cmd(["git", "-C", str(ROOT), "diff", "9f9217d..HEAD", "--stat"])
-    patch_body = diff.stdout + "\n" + stat.stdout
+    stat = run_cmd(["git", "-C", str(ROOT), "diff", f"{base}..HEAD", "--stat"])
+    patch_body = f"# base_sha={base}\n" + diff.stdout + "\n" + stat.stdout
     (SCRATCH / "goal_changes.patch").write_text(patch_body, encoding="utf-8")
     parent_patch = PARENT_ROOT / "x402-mcp-changes.patch"
     parent_patch.write_text(patch_body, encoding="utf-8")
 
-    changed = run_cmd(["git", "-C", str(ROOT), "diff", "9f9217d..HEAD", "--name-only"])
-    new_files = run_cmd(["git", "-C", str(ROOT), "ls-files", "--others", "--exclude-standard"])
-    lines = sorted(set((changed.stdout + new_files.stdout).splitlines()))
-    scoped = [f"x402-mcp/{line}" for line in lines if line.strip()]
+    scoped = [f"x402-mcp/{line}" for line in result.stdout.splitlines() if line.strip()]
     (SCRATCH / "CHANGED_FILES").write_text("\n".join(scoped) + "\n", encoding="utf-8")
 
 
@@ -106,15 +157,15 @@ def step_drive_staging() -> int:
 def step_drive_upload() -> int:
     staging = SCRATCH / "x402-drive-staging"
     result_path = SCRATCH / "drive_upload_result.json"
-    listing_path = SCRATCH / "drive_folder_listing.json"
+    staging_listing_path = SCRATCH / "drive_staging_listing.json"
+    remote_path = SCRATCH / "drive_remote_listing.json"
+    manifest_path = SCRATCH / "drive_staging_manifest.txt"
     log_path = SCRATCH / "drive_upload.log"
-
-    staging_listing = SCRATCH / "drive_staging_listing.json"
-    if staging_listing.exists():
-        listing_path.write_text(staging_listing.read_text(encoding="utf-8"), encoding="utf-8")
 
     if result_path.exists():
         result_path.unlink()
+    if remote_path.exists():
+        remote_path.unlink()
 
     if not UPLOAD_SCRIPT.exists():
         body = f"upload script missing: {UPLOAD_SCRIPT}\n"
@@ -131,82 +182,63 @@ def step_drive_upload() -> int:
             "--output",
             str(result_path),
             "--listing",
-            str(listing_path),
+            str(staging_listing_path),
+            "--remote",
+            str(remote_path),
+            "--manifest",
+            str(manifest_path),
         ],
         cwd=DRIVE_SKILL,
     )
 
-    log_body = ["=== Drive upload ===", proc.stdout, proc.stderr]
+    log_body = ["=== Drive upload + remote tree (same session) ===", proc.stdout, proc.stderr]
     if result_path.exists():
         log_body.append(result_path.read_text(encoding="utf-8"))
-    if listing_path.exists():
-        listing = json.loads(listing_path.read_text(encoding="utf-8"))
-        proof = [e["path"] for e in listing if e["path"] in (
-            "code/app/main.py",
-            "deployment/Dockerfile",
-            "scripts/run_goal_verification.ps1",
-            "scripts/verify_docker.py",
-            "scripts/build_drive_staging.py",
-            "scripts/capture_goal_evidence.py",
-        )]
-        log_body.append(f"proof_paths_present={proof}")
+    if remote_path.exists():
+        log_body.append(remote_path.read_text(encoding="utf-8"))
     log_path.write_text("\n".join(log_body) + "\n", encoding="utf-8")
 
     if proc.returncode != 0:
         return proc.returncode
-    if not result_path.exists():
-        return 1
-    data = json.loads(result_path.read_text(encoding="utf-8"))
-    if not data.get("ok"):
-        return 1
-    if not listing_path.exists():
-        return 1
-    proof = {e["path"] for e in json.loads(listing_path.read_text(encoding="utf-8"))}
-    required = {
-        "code/app/main.py",
-        "deployment/Dockerfile",
-        "scripts/run_goal_verification.ps1",
-        "scripts/verify_docker.py",
-        "scripts/build_drive_staging.py",
-        "scripts/capture_goal_evidence.py",
-    }
-    if not required.issubset(proof):
+    if not result_path.exists() or not remote_path.exists():
         return 1
 
-    remote_path = SCRATCH / "drive_remote_listing.json"
-    if LIST_REMOTE_SCRIPT.exists():
-        remote_proc = None
-        for attempt in range(1, 4):
-            remote_proc = run_cmd(
-                [
-                    _resolve_npx(),
-                    "tsx",
-                    str(LIST_REMOTE_SCRIPT),
-                    "--output",
-                    str(remote_path),
-                    "--scratch",
-                    str(SCRATCH),
-                ],
-                cwd=DRIVE_SKILL,
+    data = json.loads(result_path.read_text(encoding="utf-8"))
+    remote = json.loads(remote_path.read_text(encoding="utf-8"))
+    if not data.get("ok") or not remote.get("ok"):
+        return 1
+
+    manifest_lines = _parse_manifest_lines()
+    remote_paths = _remote_paths_from_listing(remote)
+    missing = [
+        line
+        for line in manifest_lines
+        if not (
+            line in remote_paths
+            or line.split("/")[-1] in remote_paths
+            or any(
+                e.get("path") == line or e.get("path", "").endswith(line.split("/")[-1])
+                for e in remote.get("entries", [])
             )
-            if remote_proc.returncode == 0 and remote_path.exists():
-                break
-            time.sleep(5 * attempt)
-        assert remote_proc is not None
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write("\n=== Remote Drive listing ===\n")
-            fh.write(remote_proc.stdout)
-            fh.write(remote_proc.stderr)
-            if remote_path.exists():
-                fh.write(remote_path.read_text(encoding="utf-8"))
-        if remote_proc.returncode != 0:
-            return remote_proc.returncode
+        )
+    ]
+    if missing:
+        parity_log = SCRATCH / "drive_manifest_parity.log"
+        parity_log.write_text(
+            f"missing_count={len(missing)}\nmissing={missing}\n",
+            encoding="utf-8",
+        )
+        return 1
+
+    if not REQUIRED_PROOF_PATHS.issubset(set(remote.get("proofPathsPresent", []))):
+        return 1
+
     return 0
 
 
 def step_git() -> int:
     log = SCRATCH / "git.log"
-    logon = run_cmd(["git", "-C", str(ROOT), "log", "--oneline", "-5"])
+    logon = run_cmd(["git", "-C", str(ROOT), "log", "--oneline", "-7"])
     status = run_cmd(["git", "-C", str(ROOT), "status", "--short"])
     body = logon.stdout + "\n=== status ===\n" + (status.stdout or "(clean working tree)\n")
     log.write_text(body, encoding="utf-8")
@@ -280,7 +312,7 @@ def main() -> int:
         ("git", step_git),
         ("docker", step_docker),
         ("pytest", step_pytest),
-    ]  # scope_anchor writes goal_changes.patch + CHANGED_FILES for harness
+    ]
 
     exit_code = 0
     for name, fn in steps:
