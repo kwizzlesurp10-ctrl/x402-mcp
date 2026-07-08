@@ -37,9 +37,20 @@ EXPECTED_TOOLS = [
 ]
 
 
+def _resolve_npx() -> str:
+    if sys.platform == "win32":
+        for candidate in (
+            r"C:\Program Files\nodejs\npx.cmd",
+            r"C:\Users\Keith\AppData\Roaming\npm\npx.cmd",
+        ):
+            if Path(candidate).exists():
+                return candidate
+    return "npx"
+
+
 def run_cmd(cmd: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged = {**os.environ, **(env or {}), "GOAL_SCRATCH": str(SCRATCH)}
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=merged)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=merged, shell=False)
 
 
 def step_scope_anchor() -> None:
@@ -81,6 +92,13 @@ def step_drive_upload() -> int:
     listing_path = SCRATCH / "drive_folder_listing.json"
     log_path = SCRATCH / "drive_upload.log"
 
+    staging_listing = SCRATCH / "drive_staging_listing.json"
+    if staging_listing.exists():
+        listing_path.write_text(staging_listing.read_text(encoding="utf-8"), encoding="utf-8")
+
+    if result_path.exists():
+        result_path.unlink()
+
     if not UPLOAD_SCRIPT.exists():
         body = f"upload script missing: {UPLOAD_SCRIPT}\n"
         log_path.write_text("=== Drive upload SKIPPED ===\n" + body, encoding="utf-8")
@@ -88,7 +106,7 @@ def step_drive_upload() -> int:
 
     proc = run_cmd(
         [
-            "npx",
+            _resolve_npx(),
             "tsx",
             str(UPLOAD_SCRIPT),
             "--staging",
@@ -119,11 +137,23 @@ def step_drive_upload() -> int:
 
     if proc.returncode != 0:
         return proc.returncode
-    if result_path.exists():
-        data = json.loads(result_path.read_text(encoding="utf-8"))
-        if not data.get("ok"):
-            return 1
+    if not result_path.exists():
+        return 1
+    data = json.loads(result_path.read_text(encoding="utf-8"))
+    if not data.get("ok"):
+        return 1
     if not listing_path.exists():
+        return 1
+    proof = {e["path"] for e in json.loads(listing_path.read_text(encoding="utf-8"))}
+    required = {
+        "code/app/main.py",
+        "deployment/Dockerfile",
+        "scripts/run_goal_verification.ps1",
+        "scripts/verify_docker.py",
+        "scripts/build_drive_staging.py",
+        "scripts/capture_goal_evidence.py",
+    }
+    if not required.issubset(proof):
         return 1
     return 0
 
