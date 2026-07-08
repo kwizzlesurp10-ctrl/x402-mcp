@@ -160,9 +160,12 @@ def step_drive_upload() -> int:
         return 1
 
     drive_deps = DRIVE_SKILL / "node_modules"
+    drive_auth = DRIVE_SKILL / "drive-auth.json"
     drive_env: dict[str, str] = {}
     if drive_deps.exists():
         drive_env["NODE_PATH"] = str(drive_deps)
+    if drive_auth.exists():
+        drive_env["DRIVE_AUTH_PATH"] = str(drive_auth)
     proc = run_cmd(
         [
             _resolve_npx(),
