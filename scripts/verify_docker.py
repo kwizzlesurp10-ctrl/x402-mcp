@@ -32,6 +32,37 @@ def run(cmd: list[str], *, cwd: Path = ROOT, timeout: int = 600) -> subprocess.C
     )
 
 
+def capture_docker_info() -> tuple[bool, str]:
+    info = run(["docker", "info"])
+    info_text = (info.stdout or "") + (info.stderr or "")
+    (SCRATCH / "docker_info.log").write_text(info_text, encoding="utf-8")
+    return info.returncode == 0 and "Server Version" in info_text, info_text
+
+
+def capture_docker_images() -> str:
+    images = run(["docker", "images", IMAGE, "--format", "{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}"])
+    text = (images.stdout or "") + (images.stderr or "")
+    (SCRATCH / "docker_images.log").write_text(text, encoding="utf-8")
+    return text.strip()
+
+
+def write_daemon_unavailable(reason: str) -> int:
+    log_path = SCRATCH / "docker_launch.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "=== Docker verification ===",
+                f"timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                "status: DAEMON_UNAVAILABLE",
+                f"reason: {reason}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return 1
+
+
 def probe_boot(log_lines: list[str], boot: int) -> bool:
     import httpx
 
@@ -53,18 +84,24 @@ def probe_boot(log_lines: list[str], boot: int) -> bool:
         text=True,
     )
     ok = False
+    health_path = SCRATCH / f"health_boot{boot}.json"
+    manifest_path = SCRATCH / f"manifest_boot{boot}.json"
     try:
         time.sleep(5)
         health = httpx.get(f"http://127.0.0.1:{PORT}/health", timeout=15)
         manifest = httpx.get(f"http://127.0.0.1:{PORT}/.well-known/mcp", timeout=15)
         manifest_json = manifest.json()
         tool_count = len(manifest_json.get("tools", []))
+
+        health_path.write_text(health.text, encoding="utf-8")
+        manifest_path.write_text(manifest.text, encoding="utf-8")
+
         log_lines.append(f"=== boot {boot} ===")
         log_lines.append(f"health_status={health.status_code}")
-        log_lines.append(f"health_body={health.text}")
+        log_lines.append(f"health_json={health_path}")
         log_lines.append(f"manifest_status={manifest.status_code}")
         log_lines.append(f"manifest_tool_count={tool_count}")
-        log_lines.append(f"manifest_body={manifest.text}")
+        log_lines.append(f"manifest_json={manifest_path}")
         ok = (
             health.status_code == 200
             and SERVICE_ID in health.text
@@ -82,19 +119,29 @@ def main() -> int:
     log_path = SCRATCH / "docker_launch.log"
     lines: list[str] = ["=== Docker verification ===", f"timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}"]
 
-    info = run(["docker", "info"])
-    if info.returncode != 0:
-        lines.append("docker info FAILED")
-        lines.append(info.stderr or info.stdout)
-        log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return 1
+    info_ok, info_text = capture_docker_info()
+    if not info_ok:
+        return write_daemon_unavailable("docker info failed or missing Server Version block")
+
     lines.append("docker info OK")
+    lines.append(f"docker_info_log={SCRATCH / 'docker_info.log'}")
+
+    pre_build_images = capture_docker_images()
+    lines.append(f"docker_images_pre_build={pre_build_images or '(none)'}")
 
     build = run(["docker", "build", "-f", "deployment/Dockerfile", "-t", IMAGE, "."])
     lines.append(f"docker build exit={build.returncode}")
     if build.returncode != 0:
-        lines.append(build.stdout[-2000:] if build.stdout else "")
-        lines.append(build.stderr[-2000:] if build.stderr else "")
+        lines.append((build.stdout or "")[-2000:])
+        lines.append((build.stderr or "")[-2000:])
+        log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return 1
+
+    post_build_images = capture_docker_images()
+    lines.append(f"docker_images_post_build={post_build_images}")
+    lines.append(f"docker_images_log={SCRATCH / 'docker_images.log'}")
+    if IMAGE not in post_build_images:
+        lines.append(f"image_tag_missing={IMAGE}")
         log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return 1
 
