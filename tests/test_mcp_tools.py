@@ -7,25 +7,22 @@ import pytest
 from app import mcp_server
 from app.commerce import InMemoryQuotaStore, quota_store
 from app.config import settings
+from app.manifest import build_mcp_manifest
+from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_COUNT
 
-
-EXPECTED_TOOLS = {
-    "discover_services",
-    "get_payment_requirements",
-    "pay_and_fetch",
-    "build_seller_requirements",
-    "verify_payment_payload",
-    "get_supported_networks",
-    "get_pro_upgrade_requirements",
-    "activate_pro_tier",
-    "get_tool_credits_requirements",
-    "purchase_tool_credits",
-}
+# Back-compat alias for docker/readme evidence tests
+EXPECTED_TOOLS = EXPECTED_TOOL_NAMES
 
 
 def test_all_tools_registered() -> None:
     tool_names = {t.name for t in mcp_server.mcp._tool_manager._tools.values()}
-    assert EXPECTED_TOOLS.issubset(tool_names)
+    assert tool_names == EXPECTED_TOOL_NAMES
+    assert len(tool_names) == TOOL_COUNT
+
+
+def test_manifest_tools_match_registry() -> None:
+    manifest_names = {t["name"] for t in build_mcp_manifest()["tools"]}
+    assert manifest_names == EXPECTED_TOOL_NAMES
 
 
 @pytest.mark.asyncio

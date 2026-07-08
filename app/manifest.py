@@ -1,9 +1,19 @@
 """MCP well-known manifest for Grok/Cursor connector discovery."""
 
 from app.config import settings
+from app.tools_registry import TOOL_SPECS
 
 
 def build_mcp_manifest() -> dict:
+    tools = [
+        {
+            "name": spec["name"],
+            "description": spec["description"],
+            "tier": spec.get("tier", "free"),
+            **({"requires_env": spec["requires_env"]} if spec.get("requires_env") else {}),
+        }
+        for spec in TOOL_SPECS
+    ]
     return {
         "name": "x402-micropayments",
         "version": "0.1.0",
@@ -19,62 +29,7 @@ def build_mcp_manifest() -> dict:
             "resources": False,
             "prompts": False,
         },
-        "tools": [
-            {
-                "name": "discover_services",
-                "description": "Discover x402 Bazaar paid HTTP services",
-                "tier": "free",
-            },
-            {
-                "name": "get_payment_requirements",
-                "description": "Probe URL for HTTP 402 payment requirements",
-                "tier": "free",
-            },
-            {
-                "name": "pay_and_fetch",
-                "description": "Pay via x402 and fetch protected resource",
-                "tier": "free",
-                "requires_env": ["EVM_PRIVATE_KEY"],
-            },
-            {
-                "name": "build_seller_requirements",
-                "description": "Build seller payment requirements",
-                "tier": "free",
-                "requires_env": ["X402_PAY_TO_ADDRESS"],
-            },
-            {
-                "name": "verify_payment_payload",
-                "description": "Verify payment signature via facilitator",
-                "tier": "free",
-            },
-            {
-                "name": "get_supported_networks",
-                "description": "List networks, facilitators, and headers",
-                "tier": "free",
-            },
-            {
-                "name": "get_pro_upgrade_requirements",
-                "description": "Build x402 payment requirements for Pro tier upgrade",
-                "tier": "free",
-                "requires_env": ["X402_PAY_TO_ADDRESS"],
-            },
-            {
-                "name": "activate_pro_tier",
-                "description": "Verify x402 payment and unlock Pro tier quota",
-                "tier": "free",
-            },
-            {
-                "name": "get_tool_credits_requirements",
-                "description": "Build x402 payment requirements for per-use tool credits",
-                "tier": "free",
-                "requires_env": ["X402_PAY_TO_ADDRESS"],
-            },
-            {
-                "name": "purchase_tool_credits",
-                "description": "Verify x402 payment and add per-use tool credits",
-                "tier": "free",
-            },
-        ],
+        "tools": tools,
         "tiers": {
             "free": {
                 "monthly_quota": settings.free_tier_monthly_quota,

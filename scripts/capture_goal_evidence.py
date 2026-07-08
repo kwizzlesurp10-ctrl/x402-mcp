@@ -21,21 +21,13 @@ if not PYTHON.exists():
     PYTHON = Path(sys.executable)
 
 DRIVE_SKILL = Path(r"C:\Users\Keith\.grok\skills\google-drive-playwright")
-UPLOAD_SCRIPT = DRIVE_SKILL / "scripts" / "upload-x402-folders.ts"
+UPLOAD_SCRIPT = ROOT / "scripts" / "drive" / "upload-x402-folders.ts"
 PARENT_ROOT = Path(r"C:\Users\Keith")
 
-EXPECTED_TOOLS = [
-    "discover_services",
-    "get_payment_requirements",
-    "pay_and_fetch",
-    "build_seller_requirements",
-    "verify_payment_payload",
-    "get_supported_networks",
-    "get_pro_upgrade_requirements",
-    "activate_pro_tier",
-    "get_tool_credits_requirements",
-    "purchase_tool_credits",
-]
+sys.path.insert(0, str(ROOT))
+from app.tools_registry import EXPECTED_TOOL_NAMES  # noqa: E402
+
+EXPECTED_TOOLS = sorted(EXPECTED_TOOL_NAMES)
 
 REQUIRED_PROOF_PATHS = {
     "code/app/main.py",
@@ -44,6 +36,7 @@ REQUIRED_PROOF_PATHS = {
     "scripts/verify_docker.py",
     "scripts/build_drive_staging.py",
     "scripts/capture_goal_evidence.py",
+    "scripts/drive/upload-x402-folders.ts",
 }
 
 
@@ -97,32 +90,14 @@ def _remote_paths_from_listing(data: dict) -> set[str]:
 
 def step_scope_anchor() -> None:
     SCRATCH.mkdir(parents=True, exist_ok=True)
-    result = run_cmd(["git", "-C", str(ROOT), "ls-files"])
-    (SCRATCH / "goal_scope_files.txt").write_text(result.stdout, encoding="utf-8")
 
     base = _initial_commit_sha()
     head_sha = run_cmd(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.strip()
-    diff = run_cmd(
-        [
-            "git",
-            "-C",
-            str(ROOT),
-            "diff",
-            f"{base}..HEAD",
-            "--",
-            "README.md",
-            "docs/",
-            "scripts/",
-            "tests/test_readme.py",
-            "tests/test_setup_doc.py",
-            "tests/test_docker_evidence.py",
-            "tests/test_drive_evidence.py",
-            ".gitignore",
-        ]
-    )
+    diff = run_cmd(["git", "-C", str(ROOT), "diff", f"{base}..HEAD"])
     stat = run_cmd(["git", "-C", str(ROOT), "diff", f"{base}..HEAD", "--stat"])
+    sub_head = run_cmd(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.strip()
     patch_body = (
-        f"# base_sha={base}\n# head_sha={head_sha}\n"
+        f"# sub_repo={ROOT}\n# base_sha={base}\n# head_sha={head_sha}\n# sub_head={sub_head}\n"
         + diff.stdout
         + "\n"
         + stat.stdout
@@ -131,8 +106,12 @@ def step_scope_anchor() -> None:
     parent_patch = PARENT_ROOT / "x402-mcp-changes.patch"
     parent_patch.write_text(patch_body, encoding="utf-8")
 
-    scoped = [f"x402-mcp/{line}" for line in result.stdout.splitlines() if line.strip()]
-    (SCRATCH / "CHANGED_FILES").write_text("\n".join(scoped) + "\n", encoding="utf-8")
+    parent_changed = [".gitignore", "x402-mcp", "x402-mcp-changes.patch"]
+    (SCRATCH / "CHANGED_FILES").write_text("\n".join(parent_changed) + "\n", encoding="utf-8")
+    (SCRATCH / "goal_scope_files.txt").write_text(
+        "\n".join(parent_changed) + f"\n# sub_repo_head={sub_head}\n",
+        encoding="utf-8",
+    )
 
 
 def step_readme() -> int:
@@ -180,6 +159,7 @@ def step_drive_upload() -> int:
         log_path.write_text("=== Drive upload SKIPPED ===\n" + body, encoding="utf-8")
         return 1
 
+    drive_cwd = DRIVE_SKILL if (DRIVE_SKILL / "node_modules").exists() else ROOT / "scripts" / "drive"
     proc = run_cmd(
         [
             _resolve_npx(),
@@ -196,10 +176,18 @@ def step_drive_upload() -> int:
             "--manifest",
             str(manifest_path),
         ],
-        cwd=DRIVE_SKILL,
+        cwd=drive_cwd,
     )
 
-    log_body = ["=== Drive upload + remote tree (same session) ===", proc.stdout, proc.stderr]
+    for stale in SCRATCH.glob("drive_remote_listing_collect*.json"):
+        stale.unlink(missing_ok=True)
+
+    log_body = [
+        "=== Drive upload + remote tree (same session) ===",
+        f"upload_script={UPLOAD_SCRIPT}",
+        proc.stdout,
+        proc.stderr,
+    ]
     if result_path.exists():
         log_body.append(result_path.read_text(encoding="utf-8"))
     if remote_path.exists():
@@ -246,7 +234,7 @@ def step_drive_upload() -> int:
 
 def step_git() -> int:
     log = SCRATCH / "git.log"
-    logon = run_cmd(["git", "-C", str(ROOT), "log", "--oneline", "-7"])
+    logon = run_cmd(["git", "-C", str(ROOT), "log", "--oneline"])
     status = run_cmd(["git", "-C", str(ROOT), "status", "--short"])
     body = logon.stdout + "\n=== status ===\n" + (status.stdout or "(clean working tree)\n")
     log.write_text(body, encoding="utf-8")

@@ -24,7 +24,14 @@ PROOF_PATHS = (
     "scripts/verify_docker.py",
     "scripts/build_drive_staging.py",
     "scripts/capture_goal_evidence.py",
+    "scripts/drive/upload-x402-folders.ts",
 )
+
+
+def test_vendored_drive_upload_script_in_repo() -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts" / "drive" / "upload-x402-folders.ts"
+    assert script.exists(), "Drive upload script must live in project scripts/drive/"
 
 
 def _load_manifest_lines() -> list[str]:
@@ -61,12 +68,19 @@ def _remote_paths(entries: list[dict]) -> set[str]:
     return paths
 
 
+def test_no_stale_failed_collect_artifacts() -> None:
+    """Reject cherry-picked evidence: stale collect*.json must be removed after capture."""
+    stale = sorted(SCRATCH.glob("drive_remote_listing_collect*.json"))
+    assert not stale, f"remove stale collect artifacts: {[p.name for p in stale]}"
+
+
 def test_remote_listing_ok_flag() -> None:
     path = SCRATCH / "drive_remote_listing.json"
     if not path.exists():
         pytest.skip("missing drive_remote_listing.json")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data.get("ok") is True, f"remote listing not ok: {data.get('missingFromRemote')}"
+    assert data.get("method") == "in_folder_listing_same_session"
 
 
 def test_all_manifest_paths_present_remotely() -> None:

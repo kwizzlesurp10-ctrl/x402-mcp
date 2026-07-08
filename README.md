@@ -4,7 +4,7 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 
 ## Features
 
-- **10 MCP tools** for buyer, seller, and commerce x402 flows
+- **10 MCP tools** for buyer, seller, and commerce x402 flows (canonical list: `app/tools_registry.py`; guarded by `tests/test_readme.py` and `tests/test_manifest.py`)
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
 - **FastMCP** + **FastAPI** with `/.well-known/mcp` manifest
 - **stdio** (Cursor/Grok local) and **HTTP/SSE** (remote connector) transports

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_mcp_tools import EXPECTED_TOOLS
+from app.tools_registry import EXPECTED_TOOL_NAMES
+
+EXPECTED_TOOLS = EXPECTED_TOOL_NAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"

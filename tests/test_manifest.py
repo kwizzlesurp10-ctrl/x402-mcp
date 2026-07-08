@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_COUNT
 
 
 client = TestClient(app)
@@ -27,10 +28,9 @@ def test_well_known_mcp() -> None:
     assert manifest["tiers"]["free"]["monthly_quota"] == 500
     assert manifest["tiers"]["free"]["rate_limit_per_minute"] == 10
     assert manifest["upgrade_url"]
-    assert len(manifest["tools"]) >= 6
+    assert len(manifest["tools"]) == TOOL_COUNT
     tool_names = {t["name"] for t in manifest["tools"]}
-    assert "get_pro_upgrade_requirements" in tool_names
-    assert "activate_pro_tier" in tool_names
+    assert tool_names == EXPECTED_TOOL_NAMES
     assert manifest["tiers"]["pro"]["payment_tools"]
     assert manifest["x402"]["protocol_version"] == "v2"
     assert "PAYMENT-REQUIRED" in manifest["x402"]["headers"]["payment_required"]
