@@ -175,18 +175,24 @@ def step_drive_upload() -> int:
 
     remote_path = SCRATCH / "drive_remote_listing.json"
     if LIST_REMOTE_SCRIPT.exists():
-        remote_proc = run_cmd(
-            [
-                _resolve_npx(),
-                "tsx",
-                str(LIST_REMOTE_SCRIPT),
-                "--output",
-                str(remote_path),
-                "--scratch",
-                str(SCRATCH),
-            ],
-            cwd=DRIVE_SKILL,
-        )
+        remote_proc = None
+        for attempt in range(1, 4):
+            remote_proc = run_cmd(
+                [
+                    _resolve_npx(),
+                    "tsx",
+                    str(LIST_REMOTE_SCRIPT),
+                    "--output",
+                    str(remote_path),
+                    "--scratch",
+                    str(SCRATCH),
+                ],
+                cwd=DRIVE_SKILL,
+            )
+            if remote_proc.returncode == 0 and remote_path.exists():
+                break
+            time.sleep(5 * attempt)
+        assert remote_proc is not None
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write("\n=== Remote Drive listing ===\n")
             fh.write(remote_proc.stdout)
