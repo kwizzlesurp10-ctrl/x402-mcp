@@ -101,6 +101,7 @@ def step_scope_anchor() -> None:
     (SCRATCH / "goal_scope_files.txt").write_text(result.stdout, encoding="utf-8")
 
     base = _initial_commit_sha()
+    head_sha = run_cmd(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.strip()
     diff = run_cmd(
         [
             "git",
@@ -110,15 +111,22 @@ def step_scope_anchor() -> None:
             f"{base}..HEAD",
             "--",
             "README.md",
+            "docs/",
             "scripts/",
             "tests/test_readme.py",
+            "tests/test_setup_doc.py",
             "tests/test_docker_evidence.py",
             "tests/test_drive_evidence.py",
             ".gitignore",
         ]
     )
     stat = run_cmd(["git", "-C", str(ROOT), "diff", f"{base}..HEAD", "--stat"])
-    patch_body = f"# base_sha={base}\n" + diff.stdout + "\n" + stat.stdout
+    patch_body = (
+        f"# base_sha={base}\n# head_sha={head_sha}\n"
+        + diff.stdout
+        + "\n"
+        + stat.stdout
+    )
     (SCRATCH / "goal_changes.patch").write_text(patch_body, encoding="utf-8")
     parent_patch = PARENT_ROOT / "x402-mcp-changes.patch"
     parent_patch.write_text(patch_body, encoding="utf-8")
