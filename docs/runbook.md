@@ -1,5 +1,7 @@
 # x402 MCP Runbook
 
+> **New users:** start with [SETUP.md](SETUP.md) for step-by-step install, wallet/profit config, and testing.
+
 ## Local Development (stdio)
 
 ```powershell
