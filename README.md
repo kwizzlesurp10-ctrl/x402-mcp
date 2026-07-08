@@ -12,12 +12,15 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 
 ## Quick Start
 
+**Full walkthrough:** [docs/SETUP.md](docs/SETUP.md) — install, wallet/profit config, Cursor MCP, HTTP microservice, and testing.
+
 ```bash
 cd x402-mcp
 python -m venv .venv
 .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
 cp .env.example .env
+# Set X402_PAY_TO_ADDRESS to your wallet (profits destination)
 ```
 
 ### Local stdio (Cursor)
@@ -84,6 +87,8 @@ Every tool response includes:
 ```bash
 pytest -v
 ```
+
+See [docs/SETUP.md](docs/SETUP.md#step-7--test-without-surprises) for expected vs unexpected errors (wallet tools fail clearly until `.env` is configured).
 
 ## Docker
 
