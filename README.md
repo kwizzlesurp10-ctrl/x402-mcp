@@ -9,6 +9,8 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 - **FastMCP** + **FastAPI** with `/.well-known/mcp` manifest
 - **stdio** (Cursor/Grok local) and **HTTP/SSE** (remote connector) transports
 - **Redis-ready** quota store (in-memory default)
+- **Operator dashboard** at `/dashboard` — live health, per-agent quota burn-down meters, tool matrix, and revenue paths (single-file, zero build step)
+- **Hermetic test suite** — a local mock facilitator/discovery backend spins up automatically; no internet required. Set `X402_LIVE_TESTS=1` to run against x402.org
 
 ## Quick Start
 
@@ -37,6 +39,7 @@ Add to Cursor MCP config (`manifests/cursor-mcp.json`).
 uvicorn app.main:app --host 0.0.0.0 --port 8402
 curl http://localhost:8402/.well-known/mcp
 curl http://localhost:8402/health
+# then open http://localhost:8402/dashboard
 ```
 
 ## MCP Tools

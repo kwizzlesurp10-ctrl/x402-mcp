@@ -14,12 +14,12 @@ def test_supported_networks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_payment_requirements_public_url() -> None:
-    """Probe a public URL — may or may not return 402."""
-    params = GetPaymentRequirementsInput(url="https://httpbin.org/status/402")
+async def test_get_payment_requirements_public_url(probe_402_url: str) -> None:
+    """Probe a 402-returning URL (local fixture — no httpbin.org flakiness)."""
+    params = GetPaymentRequirementsInput(url=probe_402_url)
     result = await x402_services.get_payment_requirements(params)
     assert "status_code" in result
-    assert result["status_code"] in (402, 200, 503)
+    assert result["status_code"] == 402
 
 
 @pytest.mark.asyncio

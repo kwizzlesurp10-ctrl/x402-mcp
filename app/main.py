@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.commerce import quota_store
 from app.config import settings
+from app.dashboard import DASHBOARD_HTML
 from app.manifest import build_mcp_manifest
 from app.mcp_server import mcp
 
@@ -27,6 +28,17 @@ async def generic_handler(_: Request, exc: Exception) -> JSONResponse:
             "upgrade_url": settings.upgrade_url,
         },
     )
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard() -> HTMLResponse:
+    """Operator terminal: live health, quota meters, tool matrix, revenue paths."""
+    return HTMLResponse(DASHBOARD_HTML)
 
 
 @app.get("/health")
