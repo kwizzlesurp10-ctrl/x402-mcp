@@ -50,27 +50,35 @@ def _decode_payment_inputs(
     payment_signature: str,
     payment_required: str,
 ) -> tuple[Any, Any]:
+    """Decode base64 headers into typed SDK models.
+
+    x402ResourceServer.verify_payment requires PaymentPayload/PaymentRequirements
+    models (it reads attributes like .network); raw dicts crash it.
+    """
     import base64
+
+    from x402 import parse_payment_payload, parse_payment_required
 
     try:
         requirements_raw = json.loads(
             base64.b64decode(payment_required).decode("utf-8")
         )
+        required = parse_payment_required(requirements_raw)
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
         raise ValueError(f"Invalid payment_required payload: {exc}") from exc
 
-    requirements_list = requirements_raw.get("accepts", [requirements_raw])
-    if not requirements_list:
+    if not required.accepts:
         raise ValueError("No payment requirements found in payment_required payload")
 
     try:
-        payload = json.loads(
+        payload_raw = json.loads(
             base64.b64decode(payment_signature).decode("utf-8")
         )
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        payload = payment_signature
+        payload = parse_payment_payload(payload_raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(f"Invalid payment_signature payload: {exc}") from exc
 
-    return payload, requirements_list[0]
+    return payload, required.accepts[0]
 
 
 def _sdk_parse_payment_required(
