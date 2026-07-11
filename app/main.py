@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -11,10 +14,29 @@ from app.dashboard import DASHBOARD_HTML
 from app.manifest import build_mcp_manifest
 from app.mcp_server import mcp
 
+# Build the MCP Streamable HTTP app up front so its session manager can run
+# inside the FastAPI lifespan (Starlette does not run mounted sub-app lifespans;
+# without this every MCP session dies with "Session terminated" at initialize).
+try:
+    _mcp_http_app = mcp.streamable_http_app()
+except AttributeError:
+    _mcp_http_app = None
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if _mcp_http_app is not None:
+        async with mcp.session_manager.run():
+            yield
+    else:
+        yield
+
+
 app = FastAPI(
     title="x402 Micropayments MCP",
     description="MCP server for x402 HTTP micropayments with agent-commerce overlay",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 
@@ -91,10 +113,9 @@ async def upgrade_info() -> dict:
 
 
 # Mount MCP Streamable HTTP / SSE transport when available.
-try:
-    mcp_app = mcp.streamable_http_app()
-    app.mount("/mcp", mcp_app)
-except AttributeError:
+if _mcp_http_app is not None:
+    app.mount("/mcp", _mcp_http_app)
+else:
     try:
         app.mount("/mcp", mcp.sse_app())
     except AttributeError:
