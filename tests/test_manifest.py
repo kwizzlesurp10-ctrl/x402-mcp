@@ -15,6 +15,8 @@ def test_health() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "x402-micropayments-mcp"
+    assert isinstance(body["wallet_configured"], bool)
+    assert isinstance(body["pay_to_configured"], bool)
 
 
 def test_well_known_mcp() -> None:

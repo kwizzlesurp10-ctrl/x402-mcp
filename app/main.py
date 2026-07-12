@@ -70,6 +70,7 @@ async def health() -> dict:
         "service": "x402-micropayments-mcp",
         "x402_facilitator": settings.x402_facilitator_url,
         "wallet_configured": bool(settings.evm_private_key),
+        "pay_to_configured": bool(settings.x402_pay_to_address),
     }
 
 
