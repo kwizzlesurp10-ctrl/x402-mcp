@@ -36,9 +36,11 @@ async def test_discover_services_structure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pay_and_fetch_requires_wallet() -> None:
+async def test_pay_and_fetch_requires_wallet(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import settings
     from app.models import PayAndFetchInput
 
+    monkeypatch.setattr(settings, "evm_private_key", None)
     params = PayAndFetchInput(url="https://example.com/paid")
     with pytest.raises(ValueError, match="EVM_PRIVATE_KEY"):
         await x402_services.pay_and_fetch(params)
