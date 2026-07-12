@@ -114,7 +114,10 @@ td{padding:5px 10px 5px 0;border-bottom:1px solid var(--panel-2);vertical-align:
 tbody tr:hover td{background:rgba(255,176,0,.05)}
 td.tool{color:var(--amber)}
 td.env{color:var(--dim);font-size:11.5px}
-td .req{color:var(--red)}
+td .req{display:inline-block;border:1px solid var(--line);color:var(--dim);
+  padding:0 6px;font-size:10.5px;letter-spacing:.06em;margin:0 6px 2px 0}
+td .req.on{border-color:var(--green);color:var(--green)}
+td .req.off{border-color:var(--red);color:var(--red)}
 .chip{display:inline-block;border:1px solid var(--amber-dim);color:var(--amber);
   padding:0 7px;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase}
 .chip.pro{border-color:var(--green);color:var(--green)}
@@ -280,6 +283,18 @@ function spark(ms){
   $("bar-latency").textContent = `${Math.round(ms)} ms`;
 }
 
+/* env requirement tags: painted live from /health config flags */
+let envStatus = {};
+function paintEnvTags(){
+  document.querySelectorAll("[data-env]").forEach(el => {
+    const ok = envStatus[el.dataset.env];
+    el.classList.toggle("on", ok === true);
+    el.classList.toggle("off", ok === false);
+    el.title = ok === true ? `${el.dataset.env} configured`
+      : ok === false ? `${el.dataset.env} not set — tool will error` : "";
+  });
+}
+
 async function getJSON(path){
   const res = await fetch(path, {headers:{accept:"application/json"}});
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
@@ -303,6 +318,11 @@ async function pollHealth(){
     $("h-wallet").textContent = w ? "configured" : "not configured (probe-only)";
     $("h-wallet").className = w ? "on" : "off";
     $("bar-wallet").textContent = w ? "armed" : "probe-only";
+    envStatus = {
+      EVM_PRIVATE_KEY: !!h.wallet_configured,
+      X402_PAY_TO_ADDRESS: !!h.pay_to_configured,
+    };
+    paintEnvTags();
     $("h-lastpoll").textContent = new Date().toISOString().slice(11,19) + "Z";
     tape("ok", "health poll — service ok");
   }catch(e){
@@ -349,8 +369,9 @@ async function loadManifest(){
       <tr>
         <td class="tool">${t.name}</td>
         <td><span class="chip${t.tier === "pro" ? " pro" : ""}">${t.tier}</span></td>
-        <td class="env">${t.requires_env ? `<span class="req">env</span> ${t.requires_env.join(", ")}` : "—"}</td>
+        <td class="env">${t.requires_env ? t.requires_env.map(v => `<span class="req" data-env="${v}">env ${v}</span>`).join("") : "—"}</td>
       </tr>`).join("");
+    paintEnvTags();
     tiers = m.tiers;
     const free = m.tiers.free, pro = m.tiers.pro;
     $("r-pro-price").firstChild.textContent = pro.price_x402;
