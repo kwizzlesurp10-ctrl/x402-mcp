@@ -69,6 +69,12 @@ class PayAndFetchInput(BaseModel):
         default=None,
         description="CAIP-2 network preference, e.g. eip155:8453 for Base mainnet",
     )
+    max_price_usdc: float | None = Field(
+        default=None,
+        gt=0,
+        description="Spend cap: refuse to sign if every accepted payment option "
+        "exceeds this USDC amount",
+    )
 
 
 class BuildSellerRequirementsInput(BaseModel):

@@ -86,6 +86,7 @@ async def pay_and_fetch(
     headers: dict[str, str] | None = None,
     body: str | None = None,
     preferred_network: str | None = None,
+    max_price_usdc: float | None = None,
     agent_id: str | None = None,
 ) -> str:
     """Pay via x402HttpxClient and fetch a protected HTTP resource."""
@@ -95,6 +96,7 @@ async def pay_and_fetch(
         headers=headers or {},
         body=body,
         preferred_network=preferred_network,
+        max_price_usdc=max_price_usdc,
     )
     return await _execute_tool(agent_id, lambda _: x402_services.pay_and_fetch(params))
 

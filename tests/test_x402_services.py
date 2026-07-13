@@ -44,3 +44,24 @@ async def test_pay_and_fetch_requires_wallet(monkeypatch: pytest.MonkeyPatch) ->
     params = PayAndFetchInput(url="https://example.com/paid")
     with pytest.raises(ValueError, match="EVM_PRIVATE_KEY"):
         await x402_services.pay_and_fetch(params)
+
+
+@pytest.mark.asyncio
+async def test_pay_and_fetch_price_cap_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_price_usdc must surface as a clear refusal, not a raw SDK error."""
+    from x402 import NoMatchingRequirementsError
+    from x402.http.clients import x402HttpxClient
+
+    from app.config import settings
+    from app.models import PayAndFetchInput
+
+    monkeypatch.setattr(settings, "evm_private_key", "0x" + "11" * 32)
+
+    async def refuse(self, *args, **kwargs):
+        raise NoMatchingRequirementsError("all options exceed cap")
+
+    monkeypatch.setattr(x402HttpxClient, "request", refuse)
+
+    params = PayAndFetchInput(url="https://example.com/paid", max_price_usdc=0.0001)
+    with pytest.raises(ValueError, match="payment refused"):
+        await x402_services.pay_and_fetch(params)
