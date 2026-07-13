@@ -219,7 +219,10 @@ async def get_payment_requirements(
     }
 
 
-def _build_x402_client(preferred_network: str | None = None):
+def _build_x402_client(
+    preferred_network: str | None = None,
+    max_price_usdc: float | None = None,
+):
     if not settings.evm_private_key:
         raise ValueError(
             "EVM_PRIVATE_KEY is required for pay_and_fetch. "
@@ -227,7 +230,7 @@ def _build_x402_client(preferred_network: str | None = None):
         )
 
     from eth_account import Account
-    from x402 import prefer_network, x402Client
+    from x402 import max_amount, prefer_network, x402Client
     from x402.mechanisms.evm import EthAccountSigner
     from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
@@ -239,24 +242,41 @@ def _build_x402_client(preferred_network: str | None = None):
     if network:
         client.register_policy(prefer_network(network))
 
+    if max_price_usdc is not None:
+        client.register_policy(max_amount(int(max_price_usdc * 1_000_000)))
+
     return client
 
 
 async def pay_and_fetch(params: PayAndFetchInput) -> dict[str, Any]:
     """Execute x402 paid HTTP request via x402HttpxClient SDK."""
+    from x402 import NoMatchingRequirementsError
     from x402.http import x402HTTPClient
     from x402.http.clients import x402HttpxClient
 
-    client = _build_x402_client(params.preferred_network)
+    client = _build_x402_client(params.preferred_network, params.max_price_usdc)
     http_client = x402HTTPClient(client)
 
     async with x402HttpxClient(client) as http:
-        response = await http.request(
-            params.method.upper(),
-            str(params.url),
-            headers=params.headers,
-            content=params.body,
-        )
+        try:
+            response = await http.request(
+                params.method.upper(),
+                str(params.url),
+                headers=params.headers,
+                content=params.body,
+            )
+        except Exception as exc:
+            # x402HttpxClient wraps selection errors in its own module-local
+            # PaymentError (raised `from` the original) — unwrap via __cause__
+            # to detect a max_price_usdc refusal regardless of wrapper type.
+            if not isinstance(exc, NoMatchingRequirementsError) and not isinstance(
+                exc.__cause__, NoMatchingRequirementsError
+            ):
+                raise
+            raise ValueError(
+                "payment refused: no accepted payment option within "
+                f"max_price_usdc={params.max_price_usdc} for {params.url} ({exc})"
+            ) from exc
         await response.aread()
 
         settle = None
