@@ -35,5 +35,11 @@ class Settings(BaseSettings):
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
 
+    # MN property compliance product (paid HTTP resource, x402-gated)
+    mn_data_base_url: str = (
+        "https://services.arcgis.com/afSMGVsC7QlRK1kZ/ArcGIS/rest/services"
+    )
+    mn_property_check_price: str = "$0.01"
+
 
 settings = Settings()

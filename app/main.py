@@ -113,6 +113,64 @@ async def upgrade_info() -> dict:
     }
 
 
+@app.get("/mn/property-check")
+async def mn_property_check(request: Request, address: str) -> JSONResponse:
+    """Paid x402 resource: Minneapolis rental compliance snapshot ($0.01 USDC).
+
+    No PAYMENT-SIGNATURE header → 402 with PAYMENT-REQUIRED (x402 v2 wire).
+    With payment → verify + settle via facilitator, then serve the report
+    with the settlement receipt in PAYMENT-RESPONSE.
+    """
+    from app import mn_compliance
+
+    if not settings.x402_pay_to_address:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "seller_not_configured", "detail": "X402_PAY_TO_ADDRESS unset"},
+        )
+    if not address.strip() or len(address) > 120:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
+        )
+
+    payment_required = mn_compliance.build_payment_required_header()
+    signature = request.headers.get("PAYMENT-SIGNATURE")
+    if not signature:
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_required},
+            content={
+                "error": "payment_required",
+                "resource": mn_compliance.resource_url(),
+                "price": settings.mn_property_check_price,
+                "network": settings.x402_default_network,
+                "description": mn_compliance.RESOURCE_DESCRIPTION,
+                "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
+                "requirements are in the PAYMENT-REQUIRED response header.",
+            },
+        )
+
+    result = await mn_compliance.verify_and_settle(signature, payment_required)
+    if not result["is_valid"] or not result["payment_settled"]:
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_required},
+            content={
+                "error": "payment_invalid",
+                "invalid_reason": result.get("invalid_reason"),
+                "settlement_error": result.get("settlement_error"),
+            },
+        )
+
+    report = await mn_compliance.check_property(address)
+    import base64
+    import json as _json
+
+    receipt = base64.b64encode(_json.dumps(result["settlement"]).encode()).decode()
+    return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
+
+
 # Mount MCP Streamable HTTP / SSE transport when available.
 if _mcp_http_app is not None:
     app.mount("/mcp", _mcp_http_app)
