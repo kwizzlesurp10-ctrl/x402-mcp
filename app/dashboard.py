@@ -223,6 +223,7 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
 
 <script>
 "use strict";
+/* __INJECT_TOKEN__ */
 const $ = (id) => document.getElementById(id);
 const BLOCKS = 24;
 const SPARK_CHARS = "▁▂▃▄▅▆▇█";
@@ -295,8 +296,9 @@ function paintEnvTags(){
   });
 }
 
-async function getJSON(path){
-  const res = await fetch(path, {headers:{accept:"application/json"}});
+async function getJSON(path, extra){
+  const hdrs = Object.assign({accept:"application/json"}, extra || {});
+  const res = await fetch(path, {headers:hdrs});
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json();
 }
@@ -340,7 +342,8 @@ async function pollQuota(){
   const agent = $("agent-input").value.trim();
   if (!agent) return;
   try{
-    const {meta} = await getJSON(`/quota/${encodeURIComponent(agent)}`);
+    const authH = typeof __OP_TOKEN__ === "string" ? {authorization:"Bearer "+__OP_TOKEN__} : {};
+    const {meta} = await getJSON(`/quota/${encodeURIComponent(agent)}`, authH);
     $("q-agent").textContent = meta.agent_id;
     $("q-tier").textContent = meta.tier;
     $("q-tier").className = "tier-badge" + (meta.tier === "pro" ? " pro" : "");
