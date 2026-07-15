@@ -1,4 +1,4 @@
-"""Docker evidence contract — saved manifest JSON must list all 10 tools."""
+"""Docker evidence contract — saved manifest JSON must list all shipped tools."""
 
 from __future__ import annotations
 

@@ -35,5 +35,21 @@ class Settings(BaseSettings):
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
 
+    # Stripe fiat payment rail (primary for card/bank checkout)
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_publishable_key: str | None = None
+
+    # Mission-control dashboard: gate POST /seller/requirements (default read-only)
+    dashboard_actions: bool = False
+
+    # Swarm Agency: buy cheap upstream x402 services, compose, resell the composite.
+    swarm_enabled: bool = False
+    swarm_markup: float = 3.0  # composite price = cost basis * markup
+    swarm_min_price_usdc: float = 0.01  # price floor for a composite product
+    swarm_max_upstream_calls: int = 3  # max upstream buys per run
+    # Comma-separated fallback upstream x402 URLs used when Bazaar discovery is empty.
+    swarm_upstream_urls: str = ""
+
 
 settings = Settings()

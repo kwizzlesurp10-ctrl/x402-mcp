@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "x402": {
+      "command": "python",
+      "args": ["run_stdio.py"],
+      "env": {
+        "X402_PAY_TO_ADDRESS": "0xYOUR_RECEIVE_ADDR"
+      }
+    },
+    "x402vault": {
+      "command": "python",
+      "args": ["run_stdio.py"],
+      "env": {
+        "EVM_PRIVATE_KEY": "${X402_TESTNET_KEY}",
+        "X402_DEFAULT_NETWORK": "eip155:84532"
+      }
+    }
+  }
+}

@@ -67,6 +67,25 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "description": "Verify x402 payment and add per-use tool credits",
         "tier": "free",
     },
+    {
+        "name": "create_stripe_checkout",
+        "description": "Create Stripe Checkout Session for pro tier or tool credits",
+        "tier": "free",
+        "requires_env": ["STRIPE_SECRET_KEY"],
+    },
+    {
+        "name": "run_swarm_research",
+        "description": "Run the swarm Agency: buy cheap upstream x402 services, "
+        "compose a composite research report, and list it for resale",
+        "tier": "free",
+        "requires_env": ["EVM_PRIVATE_KEY", "X402_PAY_TO_ADDRESS"],
+    },
+    {
+        "name": "settle_composite_sale",
+        "description": "Verify + settle a buyer's x402 payment for a listed "
+        "composite product and record the revenue",
+        "tier": "free",
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)

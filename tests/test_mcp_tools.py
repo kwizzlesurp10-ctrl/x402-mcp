@@ -214,3 +214,27 @@ async def test_purchase_tool_credits_through_mcp_wrapper(
     assert payload["data"]["credits_purchased"] == 25
     assert payload["data"]["tool_credits_remaining"] == 25
     assert store.get_credits(payload["meta"]["agent_id"]) == 25
+
+
+@pytest.mark.asyncio
+async def test_create_stripe_checkout_through_mcp_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_mcp")
+
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/c/pay/cs_mcp"
+    mock_session.id = "cs_mcp"
+
+    with patch("stripe.checkout.Session.create", return_value=mock_session):
+        raw = await mcp_server.create_stripe_checkout(
+            purpose="pro_tier_upgrade",
+            agent_id=None,
+        )
+
+    payload = json.loads(raw)
+    assert payload["meta"]["agent_id"] == payload["data"]["agent_id"]
+    assert payload["data"]["checkout_url"] == "https://checkout.stripe.com/c/pay/cs_mcp"
+    assert payload["data"]["purpose"] == "pro_tier_upgrade"

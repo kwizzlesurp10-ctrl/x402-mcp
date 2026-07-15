@@ -4,24 +4,26 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 
 ## Features
 
-- **10 MCP tools** (not 6) for buyer, seller, and commerce x402 flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **13 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, and swarm-agency flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **Stripe payment rail** (primary): `create_stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
+- **x402/Coinbase rail** (alternate/future): crypto micropayments via facilitator and CDP discovery
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
 - **FastMCP** + **FastAPI** with `/.well-known/mcp` manifest
 - **stdio** (Cursor/Grok local) and **HTTP/SSE** (remote connector) transports
 - **Redis-ready** quota store (in-memory default)
 
-## Quick Start
-
-**Full walkthrough:** [docs/SETUP.md](docs/SETUP.md) — install, wallet/profit config, Cursor MCP, HTTP microservice, and testing.
+## Quick Start (Mission Control)
 
 ```bash
-cd x402-mcp
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-pip install -r requirements.txt
+git clone <repo> && cd x402-mcp
+python -m venv .venv && .venv\Scripts\pip install -r requirements.txt && cd dashboard && pnpm install && cd ..
 cp .env.example .env
-# Set X402_PAY_TO_ADDRESS to your wallet (profits destination)
+make up
 ```
+
+Open http://localhost:5173 — setup wizard runs with doctor checks. Toggle **Demo** to preview every panel with zero wallet.
+
+**Docs:** [docs/SETUP.md](docs/SETUP.md) · [docs/USER-GUIDE.md](docs/USER-GUIDE.md) · [docs/UI-HANDOFF-v2.md](docs/UI-HANDOFF-v2.md)
 
 ### Local stdio (Cursor)
 
@@ -53,13 +55,18 @@ curl http://localhost:8402/health
 | `activate_pro_tier` | Verify x402 payment and unlock Pro tier quota |
 | `get_tool_credits_requirements` | Build x402 payment requirements for per-use tool credits |
 | `purchase_tool_credits` | Verify x402 payment and add per-use tool credits |
+| `create_stripe_checkout` | Create Stripe Checkout Session for pro tier or credits |
+| `run_swarm_research` | Swarm Agency: buy cheap upstream x402 services, compose a research report, list it for resale |
+| `settle_composite_sale` | Verify + settle a buyer's payment for a listed composite and record revenue |
 
 ## Environment
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `EVM_PRIVATE_KEY` | For `pay_and_fetch` | Buyer wallet private key |
-| `X402_PAY_TO_ADDRESS` | For seller tools | Recipient wallet address |
+| `STRIPE_SECRET_KEY` | For Stripe checkout | Primary fiat payment rail |
+| `STRIPE_WEBHOOK_SECRET` | For `/stripe/webhook` | Webhook signature verification |
+| `EVM_PRIVATE_KEY` | For `pay_and_fetch` | Buyer wallet private key (x402 alternate) |
+| `X402_PAY_TO_ADDRESS` | For x402 seller tools | Recipient wallet (Coinbase/x402 future rail) |
 | `X402_FACILITATOR_URL` | No | Default: `https://x402.org/facilitator` |
 | `UPGRADE_URL` | No | Commerce tier upgrade link |
 
@@ -81,6 +88,13 @@ Every tool response includes:
   }
 }
 ```
+
+## Agent Ops / Swarm Agency
+
+Cost-effective multi-agent operating group (scout, warden, treasurer, archivist, merchant) with budget policy and ledger. See [docs/agent-ops.md](docs/agent-ops.md). Dashboard handoff: [docs/UI-HANDOFF.md](docs/UI-HANDOFF.md).
+
+The **Swarm Agency** (`app/swarm/`) implements the hybrid resale loop end-to-end:
+**scout** discovers cheap upstream x402 services → **warden** enforces `ledger/policy.json` spend caps → **treasurer** `pay_and_fetch`es and records cost basis to `ledger/spend.jsonl` → **archivist** composes a research report priced at `cost × SWARM_MARKUP` → **merchant** lists it via `build_seller_requirements`; `settle_composite_sale` records realized revenue. Every phase streams to the dashboard's Swarm Activity panel over SSE. Run via the `run_swarm_research` MCP tool (needs `EVM_PRIVATE_KEY` + `X402_PAY_TO_ADDRESS`).
 
 ## Testing
 

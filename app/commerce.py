@@ -48,6 +48,7 @@ class InMemoryQuotaStore:
         self._windows: dict[str, deque[float]] = defaultdict(deque)
         self._pro_activations: dict[str, str] = {}  # agent_id -> activated_at iso
         self._credits: dict[str, int] = defaultdict(int)
+        self._stripe_fulfilled: set[str] = set()  # Stripe event ids (idempotency)
 
     def resolve_agent_id(self, provided: str | None) -> str:
         if provided:
@@ -71,6 +72,62 @@ class InMemoryQuotaStore:
         """Credit balance after verified x402 per-use purchase."""
         self._credits[agent_id] += amount
         return self._credits[agent_id]
+
+    def fulfill_stripe_pro_tier(self, agent_id: str, fulfillment_key: str) -> dict:
+        """Unlock pro tier after verified Stripe webhook (idempotent per purchase)."""
+        if not fulfillment_key:
+            return {
+                "agent_id": agent_id,
+                "fulfilled": False,
+                "reason": "missing fulfillment key",
+                "rail": "stripe",
+            }
+        if fulfillment_key in self._stripe_fulfilled:
+            return {
+                "agent_id": agent_id,
+                "tier": self.get_tier(agent_id),
+                "already_fulfilled": True,
+                "fulfillment_key": fulfillment_key,
+                "rail": "stripe",
+            }
+        self._stripe_fulfilled.add(fulfillment_key)
+        self.activate_pro_tier(agent_id)
+        return {
+            "agent_id": agent_id,
+            "tier": "pro",
+            "activated": True,
+            "fulfillment_key": fulfillment_key,
+            "rail": "stripe",
+        }
+
+    def fulfill_stripe_credits(
+        self, agent_id: str, credits: int, fulfillment_key: str
+    ) -> dict:
+        """Add tool credits after verified Stripe webhook (idempotent per purchase)."""
+        if not fulfillment_key:
+            return {
+                "agent_id": agent_id,
+                "fulfilled": False,
+                "reason": "missing fulfillment key",
+                "rail": "stripe",
+            }
+        if fulfillment_key in self._stripe_fulfilled:
+            return {
+                "agent_id": agent_id,
+                "tool_credits_remaining": self.get_credits(agent_id),
+                "already_fulfilled": True,
+                "fulfillment_key": fulfillment_key,
+                "rail": "stripe",
+            }
+        self._stripe_fulfilled.add(fulfillment_key)
+        balance = self.add_credits(agent_id, credits)
+        return {
+            "agent_id": agent_id,
+            "credits_added": credits,
+            "tool_credits_remaining": balance,
+            "fulfillment_key": fulfillment_key,
+            "rail": "stripe",
+        }
 
     def tier_limits(self, tier: str) -> tuple[int, int]:
         if tier == "pro":
@@ -180,6 +237,50 @@ class InMemoryQuotaStore:
         else:
             next_month = datetime(now.year, now.month + 1, 1, tzinfo=UTC)
         return max(int((next_month - now).total_seconds()), 1)
+
+    def snapshot(self) -> dict:
+        """Public aggregate for GET /stats — no private field access from routes."""
+        agent_ids: set[str] = set()
+        agent_ids.update(self._tiers)
+        agent_ids.update(self._credits)
+        agent_ids.update(self._windows)
+        for key in self._monthly:
+            agent_ids.add(key.rsplit(":", 1)[0])
+        agent_ids.update(self._agent_ids.values())
+
+        agents = []
+        for agent_id in sorted(agent_ids):
+            snap = self.peek(agent_id)
+            agents.append(
+                {
+                    "agent_id": snap.agent_id,
+                    "tier": snap.tier,
+                    "calls_this_month": snap.calls_this_month,
+                    "quota_remaining": snap.quota_remaining,
+                    "quota_warning": snap.quota_warning,
+                    "rate_limit_remaining": snap.rate_limit_remaining,
+                    "tool_credits_remaining": snap.tool_credits_remaining,
+                }
+            )
+
+        return {
+            "agents": agents,
+            "config": {
+                "free_tier_monthly_quota": settings.free_tier_monthly_quota,
+                "free_tier_rate_limit_per_min": settings.free_tier_rate_limit_per_min,
+                "pro_tier_monthly_quota": settings.pro_tier_monthly_quota,
+                "pro_tier_rate_limit_per_min": settings.pro_tier_rate_limit_per_min,
+                "pro_tier_price": settings.pro_tier_price,
+                "tool_credit_pack_size": settings.tool_credit_pack_size,
+                "tool_credit_pack_price": settings.tool_credit_pack_price,
+                "x402_default_network": settings.x402_default_network,
+                "has_pay_to": bool(settings.x402_pay_to_address),
+                "has_buyer_key": bool(settings.evm_private_key),
+                "redis_mode": "redis" if settings.redis_url else "memory",
+                "network": settings.x402_default_network,
+                "stripe_configured": bool(settings.stripe_secret_key),
+            },
+        }
 
     def peek(self, agent_id: str) -> QuotaSnapshot:
         now = time.time()

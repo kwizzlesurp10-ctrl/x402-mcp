@@ -2,6 +2,8 @@
 
 Get the x402 Micropayments MCP server running, connect it to Cursor or Grok, route profits to **your wallet**, and verify everything with tests that pass cleanly (wallet-related failures only where documented).
 
+> **Also see:** [USER-GUIDE.md](USER-GUIDE.md) for the full profitability playbook (Stripe primary, Coinbase/x402 alternate, agent ops, and monitoring).
+
 ---
 
 ## What this server does

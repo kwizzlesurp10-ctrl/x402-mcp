@@ -1,0 +1,11 @@
+{
+  "max_price_per_call_usdc": 0.05,
+  "daily_cap_usdc": 0.50,
+  "monthly_cap_usdc": 3.00,
+  "allowed_networks_mainnet": ["eip155:8453"],
+  "testnet_networks": ["eip155:84532"],
+  "domain_denylist": [],
+  "domain_allowlist": [],
+  "require_testnet_first": true,
+  "receive_wallet": "0xSET_ME"
+}

@@ -2,19 +2,72 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from typing import Literal
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, HttpUrl
 
 from app.commerce import quota_store
 from app.config import settings
+from app.doctor import run_checks
+from app.ledger_io import read_ledger_rows
 from app.manifest import build_mcp_manifest
 from app.mcp_server import mcp
+from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput
+from app.ops_events import event_stream, format_sse
+from app.payment_rails import build_payment_rails
+from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
+from app.ssrf_guard import SSRFBlockedError, validate_probe_url
+from app.swarm.registry import swarm_registry
+from app.stripe_payments import (
+    StripeNotConfiguredError,
+    StripeWebhookError,
+    create_checkout_session,
+    handle_stripe_webhook,
+)
+from app import wallet_read, x402_services
 
 app = FastAPI(
     title="x402 Micropayments MCP",
     description="MCP server for x402 HTTP micropayments with agent-commerce overlay",
     version="0.1.0",
 )
+
+# TODO auth before public exposure — dashboard CORS for local Vite dev only.
+_cors_methods = ["GET", "POST"] if settings.dashboard_actions else ["GET"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_methods=_cors_methods,
+    allow_headers=["*"],
+)
+
+
+class SellerRequirementsRequest(BaseModel):
+    network: str = "eip155:84532"
+    pay_to: str | None = None
+    price: str = "$0.01"
+    scheme: str = "exact"
+    description: str = "Paid MCP-backed API access"
+
+
+class StripeCheckoutRequest(BaseModel):
+    agent_id: str | None = Field(
+        default=None, description="Agent to credit; auto-generated if omitted"
+    )
+    purpose: Literal["pro_tier_upgrade", "tool_credits"] = Field(
+        description="Purchase type: pro tier or per-use tool credits"
+    )
+    credits: int | None = Field(
+        default=None,
+        ge=1,
+        description="Credits pack size when purpose is tool_credits",
+    )
 
 
 @app.exception_handler(Exception)
@@ -36,12 +89,103 @@ async def health() -> dict:
         "service": "x402-micropayments-mcp",
         "x402_facilitator": settings.x402_facilitator_url,
         "wallet_configured": bool(settings.evm_private_key),
+        "stripe_configured": bool(settings.stripe_secret_key),
     }
 
 
 @app.get("/.well-known/mcp")
 async def well_known_mcp() -> dict:
     return build_mcp_manifest()
+
+
+@app.get("/stats")
+async def stats_snapshot() -> dict:
+    """Mission-control quota snapshot (read-only)."""
+    return quota_store.snapshot()
+
+
+@app.get("/events")
+async def tool_events() -> StreamingResponse:
+    """SSE stream of MCP tool invocations."""
+
+    async def generate():
+        async for event in event_stream():
+            yield format_sse(event)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/doctor")
+async def doctor_report() -> dict:
+    """Machine-readable health checks for setup wizard."""
+    return run_checks()
+
+
+@app.get("/wallet")
+async def wallet_status() -> dict:
+    """Public addresses and USDC balances only — no key material."""
+    return await wallet_read.build_wallet_snapshot()
+
+
+@app.get("/probe")
+async def probe_url(
+    request: Request,
+    url: HttpUrl = Query(description="HTTP(S) URL to probe for 402 requirements"),
+    method: str = Query(default="GET", description="HTTP method"),
+) -> dict:
+    """Keyless 402 probe proxy — SSRF-guarded, rate-limited, no MCP quota."""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        probe_rate_limiter.check(client_ip)
+        validate_probe_url(str(url))
+        params = GetPaymentRequirementsInput(url=url, method=method.upper())
+        return await x402_services.get_payment_requirements(params)
+    except ProbeRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "rate_limit_exceeded", "retry_after": exc.retry_after},
+        ) from exc
+    except SSRFBlockedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/seller/requirements")
+async def seller_requirements(body: SellerRequirementsRequest) -> dict:
+    """Keyless seller requirements builder — gated behind DASHBOARD_ACTIONS."""
+    if not settings.dashboard_actions:
+        raise HTTPException(
+            status_code=403,
+            detail="DASHBOARD_ACTIONS is disabled; dashboard is read-only.",
+        )
+    params = BuildSellerRequirementsInput(
+        network=body.network,
+        pay_to=body.pay_to,
+        price=body.price,
+        scheme=body.scheme,
+        description=body.description,
+    )
+    try:
+        return x402_services.build_seller_requirements(params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/ledger/{name}")
+async def ledger_rows(name: Literal["spend", "revenue"]) -> list[dict]:
+    """Agent-ops spend/revenue ledger (newest first, max 1000)."""
+    return read_ledger_rows(name)
+
+
+@app.get("/swarm/runs")
+async def swarm_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]:
+    """Recent swarm Agency runs (buy → compose → list), newest first."""
+    return swarm_registry.recent_runs(limit)
+
+
+@app.get("/swarm/products")
+async def swarm_products() -> list[dict]:
+    """Listed composite products with cost basis, price, and margin."""
+    return swarm_registry.products()
 
 
 @app.get("/quota/{agent_id}")
@@ -54,28 +198,78 @@ async def quota_status(agent_id: str) -> dict:
 
 @app.get("/upgrade")
 async def upgrade_info() -> dict:
-    """Pro tier and per-use credits upgrade instructions (x402 payment paths)."""
+    """Pro tier and per-use credits upgrade — Stripe primary, x402 alternate."""
     manifest = build_mcp_manifest()
+    rails = build_payment_rails()
     return {
         "upgrade_url": settings.upgrade_url,
         "tiers": manifest["tiers"],
+        "payment_rails": rails,
+        "stripe": {
+            "checkout_endpoint": "/stripe/checkout",
+            "webhook_endpoint": "/stripe/webhook",
+            "mcp_tool": "create_stripe_checkout",
+            "flow": [
+                "1. POST /stripe/checkout or call create_stripe_checkout (MCP)",
+                "2. Redirect buyer to checkout_url and complete payment",
+                "3. Stripe webhook POST /stripe/webhook fulfills pro tier or credits",
+            ],
+        },
+        "x402_coinbase": {
+            "status": "alternate_future_rail",
+            "facilitator_url": settings.x402_facilitator_url,
+            "discovery_url": settings.cdp_discovery_url,
+            "flow": [
+                "1. Call get_pro_upgrade_requirements or get_tool_credits_requirements (MCP)",
+                "2. Pay via x402 wallet using returned requirements",
+                "3. Call activate_pro_tier or purchase_tool_credits with PAYMENT-SIGNATURE",
+            ],
+        },
         "tool_credits": {
             "pack_size": settings.tool_credit_pack_size,
             "pack_price": settings.tool_credit_pack_price,
-            "payment_tool": "get_tool_credits_requirements",
-            "purchase_tool": "purchase_tool_credits",
+            "stripe_tool": "create_stripe_checkout",
+            "x402_payment_tool": "get_tool_credits_requirements",
+            "x402_purchase_tool": "purchase_tool_credits",
         },
-        "payment_flow": [
-            "1. Call get_pro_upgrade_requirements or get_tool_credits_requirements (MCP)",
-            "2. Pay via x402 wallet using returned requirements",
-            "3. Call activate_pro_tier or purchase_tool_credits with PAYMENT-SIGNATURE",
-        ],
         "mcp_tools": {
-            "pro_upgrade": ["get_pro_upgrade_requirements", "activate_pro_tier"],
-            "tool_credits": ["get_tool_credits_requirements", "purchase_tool_credits"],
+            "stripe": ["create_stripe_checkout"],
+            "pro_upgrade_x402": ["get_pro_upgrade_requirements", "activate_pro_tier"],
+            "tool_credits_x402": [
+                "get_tool_credits_requirements",
+                "purchase_tool_credits",
+            ],
         },
         "manifest": "/.well-known/mcp",
     }
+
+
+@app.post("/stripe/checkout", response_model=None)
+async def stripe_checkout(body: StripeCheckoutRequest) -> dict:
+    """Create Stripe Checkout Session for pro tier or tool credits."""
+    try:
+        agent_id = quota_store.resolve_agent_id(body.agent_id)
+        return create_checkout_session(
+            agent_id,
+            body.purpose,
+            credits=body.credits,
+        )
+    except StripeNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
+) -> JSONResponse:
+    """Accept Stripe webhooks; verify signature and fulfill commerce."""
+    payload = await request.body()
+    try:
+        result = handle_stripe_webhook(payload, stripe_signature)
+        return JSONResponse(status_code=200, content=result)
+    except StripeWebhookError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
 # Mount MCP Streamable HTTP / SSE transport when available.
