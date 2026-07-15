@@ -89,27 +89,40 @@ def _decode_payment_inputs(
     payment_signature: str,
     payment_required: str,
 ) -> tuple[Any, Any]:
+    """Decode buyer signature + served challenge into SDK models.
+
+    verify_payment/settle_payment require PaymentPayload + PaymentRequirements
+    models (not raw dicts), so parse via the SDK decode helpers.
+    """
     import base64
 
+    from x402.http import (
+        decode_payment_required_header,
+        decode_payment_signature_header,
+    )
+    from x402.schemas import PaymentPayload, PaymentRequirements
+
+    # Payment requirements: prefer the full PAYMENT-REQUIRED header (has accepts),
+    # else treat the payload as a single bare requirement object.
     try:
-        requirements_raw = json.loads(
-            base64.b64decode(payment_required).decode("utf-8")
-        )
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-        raise ValueError(f"Invalid payment_required payload: {exc}") from exc
+        pr = decode_payment_required_header(payment_required)
+        accepts = list(getattr(pr, "accepts", []) or [])
+        if not accepts:
+            raise ValueError("no accepts")
+        requirements = accepts[0]
+    except Exception:  # noqa: BLE001 — fall back to bare requirement dict
+        raw = json.loads(base64.b64decode(payment_required).decode("utf-8"))
+        bare = (raw.get("accepts") or [raw])[0]
+        requirements = PaymentRequirements.model_validate(bare)
 
-    requirements_list = requirements_raw.get("accepts", [requirements_raw])
-    if not requirements_list:
-        raise ValueError("No payment requirements found in payment_required payload")
-
+    # Buyer's signed payload (PAYMENT-SIGNATURE header value).
     try:
-        payload = json.loads(
-            base64.b64decode(payment_signature).decode("utf-8")
-        )
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        payload = payment_signature
+        payload = decode_payment_signature_header(payment_signature)
+    except Exception:  # noqa: BLE001 — fall back to raw base64 json
+        raw = json.loads(base64.b64decode(payment_signature).decode("utf-8"))
+        payload = PaymentPayload.model_validate(raw)
 
-    return payload, requirements_list[0]
+    return payload, requirements
 
 
 def _sdk_parse_payment_required(
@@ -324,7 +337,9 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
         )
 
     from x402 import ResourceConfig, x402ResourceServer
+    from x402.http import encode_payment_required_header
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
+    from x402.schemas import PaymentRequired
 
     facilitator = _facilitator_client(params.network)
     server = x402ResourceServer(facilitator)
@@ -340,10 +355,20 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     )
     requirements = server.build_payment_requirements(config)
 
+    # Encode the ready-to-serve 402 challenge header (PAYMENT-REQUIRED) so an
+    # HTTP endpoint can hand it to a buyer's x402 client verbatim.
+    payment_required = PaymentRequired(
+        x402_version=2,
+        accepts=list(requirements),
+        error=params.description,
+    )
+    payment_required_header = encode_payment_required_header(payment_required)
+
     return {
         "requirements": [
             r.model_dump() if hasattr(r, "model_dump") else dict(r) for r in requirements
         ],
+        "payment_required_header": payment_required_header,
         "network": params.network,
         "pay_to": pay_to,
         "price": params.price,

@@ -20,6 +20,7 @@ from app.ops_events import event_stream, format_sse
 from app.payment_rails import build_payment_rails
 from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
 from app.ssrf_guard import SSRFBlockedError, validate_probe_url
+from app.swarm import orchestrator as swarm_orchestrator
 from app.swarm.registry import swarm_registry
 from app.stripe_payments import (
     StripeNotConfiguredError,
@@ -54,6 +55,12 @@ class SellerRequirementsRequest(BaseModel):
     price: str = "$0.01"
     scheme: str = "exact"
     description: str = "Paid MCP-backed API access"
+
+
+class SwarmRunRequest(BaseModel):
+    topic: str = Field(description="Research topic for the swarm to buy/compose/list")
+    max_price_usdc: float | None = Field(default=None, ge=0)
+    agent_id: str | None = None
 
 
 class StripeCheckoutRequest(BaseModel):
@@ -186,6 +193,97 @@ async def swarm_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]
 async def swarm_products() -> list[dict]:
     """Listed composite products with cost basis, price, and margin."""
     return swarm_registry.products()
+
+
+@app.post("/swarm/run")
+async def swarm_run(body: SwarmRunRequest) -> dict:
+    """Run one swarm cycle in-process so the listing is hosted by this server.
+
+    Gated behind DASHBOARD_ACTIONS — it moves real funds when a wallet is set.
+    """
+    if not settings.dashboard_actions:
+        raise HTTPException(
+            status_code=403, detail="DASHBOARD_ACTIONS is disabled; running is off."
+        )
+    agent_id = quota_store.resolve_agent_id(body.agent_id)
+    return await swarm_orchestrator.run_swarm_research(
+        body.topic, agent_id, body.max_price_usdc
+    )
+
+
+@app.api_route("/swarm/products/{product_id}/purchase", methods=["GET", "POST"])
+async def purchase_composite(product_id: str, request: Request) -> JSONResponse:
+    """x402-payable endpoint for a listed composite.
+
+    No PAYMENT-SIGNATURE -> HTTP 402 with the PAYMENT-REQUIRED challenge.
+    With PAYMENT-SIGNATURE -> verify + settle via the swarm merchant, then
+    deliver the composite report and return the PAYMENT-RESPONSE settlement.
+    """
+    import base64
+    import json as _json
+
+    product = swarm_registry.get_product(product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"unknown product_id: {product_id}")
+
+    seller = product.seller_requirements or {}
+    payment_required = seller.get("payment_required_header")
+    if not payment_required:
+        raise HTTPException(
+            status_code=409, detail="product is not listed for sale (no requirements)"
+        )
+
+    signature = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get(
+        "X-PAYMENT"
+    )
+    if not signature:
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "payment_required",
+                "product_id": product_id,
+                "topic": product.topic,
+                "price_usdc": product.price_usdc,
+                "network": product.network,
+                "pay_to": seller.get("pay_to"),
+                "instructions": "Pay via x402 and retry with a PAYMENT-SIGNATURE header.",
+            },
+            headers={
+                "PAYMENT-REQUIRED": payment_required,
+                "Access-Control-Expose-Headers": "PAYMENT-REQUIRED,PAYMENT-RESPONSE",
+            },
+        )
+
+    buyer_agent_id = request.headers.get("X-Agent-Id") or quota_store.resolve_agent_id(
+        None
+    )
+    try:
+        result = await swarm_orchestrator.settle_composite_sale(
+            product_id, signature, payment_required, buyer_agent_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+
+    headers = {"Access-Control-Expose-Headers": "PAYMENT-RESPONSE"}
+    settlement = (result.get("verification") or {}).get("settlement")
+    if settlement:
+        headers["PAYMENT-RESPONSE"] = base64.b64encode(
+            _json.dumps(settlement).encode()
+        ).decode()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "product_id": product_id,
+            "topic": product.topic,
+            "report": result.get("report"),
+            "revenue_usdc": result.get("revenue_usdc"),
+            "cost_basis_usdc": result.get("cost_basis_usdc"),
+            "margin_usdc": result.get("margin_usdc"),
+            "payment_settled": result.get("payment_settled"),
+        },
+        headers=headers,
+    )
 
 
 @app.get("/swarm/revenue")
