@@ -75,19 +75,33 @@ async def _probe_config_url(url: str) -> Candidate:
     )
 
 
+async def _discover(query: str | None, max_price_usdc: float) -> list[Candidate]:
+    result = await x402_services.discover_services(
+        DiscoverServicesInput(query=query, limit=25, max_price_usdc=max_price_usdc)
+    )
+    out: list[Candidate] = []
+    for item in result.get("services", []):
+        parsed = _parse_bazaar_item(item)
+        if parsed:
+            out.append(parsed)
+    return out
+
+
 async def scout(run: SwarmRun, topic: str, max_price_usdc: float) -> list[Candidate]:
-    """Discover cheap upstream services; fall back to configured URLs."""
+    """Discover cheap upstream services; fall back to configured URLs.
+
+    discover_services matches the query as a strict substring, so a multi-word
+    topic often matches nothing — fall back to the broad catalog so warden and
+    the price cap still have candidates to work with.
+    """
     candidates: list[Candidate] = []
     try:
-        result = await x402_services.discover_services(
-            DiscoverServicesInput(
-                query=topic, limit=25, max_price_usdc=max_price_usdc
-            )
-        )
-        for item in result.get("services", []):
-            parsed = _parse_bazaar_item(item)
-            if parsed:
-                candidates.append(parsed)
+        candidates = await _discover(topic, max_price_usdc)
+        if not candidates:
+            first_term = topic.split()[0] if topic.split() else None
+            candidates = await _discover(first_term, max_price_usdc)
+        if not candidates:
+            candidates = await _discover(None, max_price_usdc)
     except Exception as exc:  # noqa: BLE001
         run.steps.append({"role": "scout", "warning": f"discovery failed: {exc}"})
 
