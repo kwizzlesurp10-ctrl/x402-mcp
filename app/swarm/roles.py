@@ -200,12 +200,32 @@ async def treasurer_buy(run: SwarmRun, approved: list[Candidate]) -> list[Purcha
         settlement = result.get("payment_settlement")
         settled = bool(result.get("payment_settled"))
         tx = _settlement_tx(settlement)
+
+        # Only settled buys moved money: they alone form the cost basis and the
+        # composite's sources. Unsettled attempts are logged but not counted.
+        if not settled:
+            run.steps.append(
+                {
+                    "role": "treasurer",
+                    "unsettled": cand.url,
+                    "status_code": result.get("status_code"),
+                }
+            )
+            emit_swarm_step(
+                run_id=run.run_id,
+                role="treasurer",
+                phase="buying",
+                action="pay_and_fetch",
+                detail={"url": cand.url, "amount_usdc": 0.0, "settled": False, "tx": None},
+            )
+            continue
+
         purchase = Purchase(
             url=cand.url,
             amount_usdc=amount,
             amount_usdc_atomic=int(round(amount * 1_000_000)),
             network=network,
-            settled=settled,
+            settled=True,
             tx=tx,
             preview=str(result.get("body", ""))[:500],
             title=cand.title,
@@ -218,7 +238,7 @@ async def treasurer_buy(run: SwarmRun, approved: list[Candidate]) -> list[Purcha
             url=cand.url,
             run_id=run.run_id,
             tx=tx,
-            settled=settled,
+            settled=True,
         )
         emit_swarm_step(
             run_id=run.run_id,
@@ -228,7 +248,7 @@ async def treasurer_buy(run: SwarmRun, approved: list[Candidate]) -> list[Purcha
             detail={
                 "url": cand.url,
                 "amount_usdc": amount,
-                "settled": settled,
+                "settled": True,
                 "tx": tx,
             },
         )
@@ -292,12 +312,19 @@ def archivist_compose(
     return product
 
 
-def merchant_list(run: SwarmRun, product: CompositeProduct) -> CompositeProduct:
-    """Build x402 seller requirements to list the composite for sale."""
+def merchant_list(
+    run: SwarmRun, product: CompositeProduct, sell_network: str
+) -> CompositeProduct:
+    """Build x402 seller requirements to list the composite for sale.
+
+    Lists on `sell_network` (a facilitator-supported network), which may differ
+    from the network the upstream data was bought on — the seller facilitator
+    must advertise the `exact` scheme for it.
+    """
     price_str = f"${product.price_usdc:.2f}"
     requirements = x402_services.build_seller_requirements(
         BuildSellerRequirementsInput(
-            network=product.network,
+            network=sell_network,
             price=price_str,
             description=f"Composite research report: {product.topic}",
         )
@@ -312,6 +339,7 @@ def merchant_list(run: SwarmRun, product: CompositeProduct) -> CompositeProduct:
         detail={
             "product_id": product.product_id,
             "price_usdc": product.price_usdc,
+            "sell_network": sell_network,
             "pay_to": requirements.get("pay_to"),
         },
     )

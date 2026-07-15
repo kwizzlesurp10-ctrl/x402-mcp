@@ -104,7 +104,7 @@ async def run_swarm_research(
 
         # MERCHANT
         run.status = "listing"
-        product = roles.merchant_list(run, product)
+        product = roles.merchant_list(run, product, settings.swarm_sell_network)
         swarm_registry.list_product(product)
         run.steps.append({"role": "merchant", "status": "listed"})
 

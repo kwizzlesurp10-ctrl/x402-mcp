@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     swarm_upstream_urls: str = ""
     swarm_target_ltv_cac: float = 3.0  # target revenue/cost ratio; also the min pricing multiple
     swarm_min_margin_ratio: float = 0.5  # floor on margin/price
+    # Network the merchant lists composites on. Must be one the seller facilitator
+    # supports (x402.org only settles `exact` on eip155:84532; mainnet selling
+    # needs a mainnet-capable facilitator such as Coinbase CDP).
+    swarm_sell_network: str = "eip155:84532"
 
 
 settings = Settings()
