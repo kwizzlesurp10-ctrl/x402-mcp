@@ -97,6 +97,8 @@ Cost-effective multi-agent operating group (scout, warden, treasurer, archivist,
 The **Swarm Agency** (`app/swarm/`) implements the hybrid resale loop end-to-end:
 **scout** discovers cheap upstream x402 services → **warden** enforces `ledger/policy.json` spend caps → **treasurer** `pay_and_fetch`es and records cost basis to `ledger/spend.jsonl` → **archivist** composes a research report priced at `cost × SWARM_MARKUP` → **sovereign** (profit optimizer) reprices the composite to hit a target LTV:CAC (`SWARM_TARGET_LTV_CAC`, default 3.0), enforces a margin floor, and scores which upstream sources are actually profitable → **merchant** lists it via `build_seller_requirements`; `settle_composite_sale` records realized revenue. Portfolio economics (spend, revenue, LTV:CAC, per-source profit) surface via `swarm_revenue_report` / `GET /swarm/revenue`. Every phase streams to the dashboard's Swarm Activity panel over SSE. Run via the `run_swarm_research` MCP tool (needs `EVM_PRIVATE_KEY` + `X402_PAY_TO_ADDRESS`).
 
+**Selling network / facilitators.** The merchant lists on `SWARM_SELL_NETWORK` (default `eip155:84532`). The free `x402.org` facilitator only settles `exact` on Base Sepolia; to **sell/settle on Base mainnet** set `SWARM_SELL_NETWORK=eip155:8453` and provide Coinbase CDP credentials (`CDP_API_KEY_ID` + `CDP_API_KEY_SECRET`) — the seller then routes verify/settle through the CDP facilitator with a per-request Ed25519 JWT (`app/cdp_auth.py`).
+
 ## Testing
 
 ```bash

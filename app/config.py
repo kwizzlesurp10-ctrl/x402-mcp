@@ -35,6 +35,15 @@ class Settings(BaseSettings):
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
 
+    # Coinbase CDP facilitator (required to verify/settle x402 on Base mainnet;
+    # x402.org only settles `exact` on Base Sepolia). Ed25519 API key from the
+    # CDP portal — rotate any key that has ever been shared in plaintext.
+    cdp_api_key_id: str | None = None
+    cdp_api_key_secret: str | None = None
+    cdp_facilitator_url: str = "https://api.cdp.coinbase.com/platform/v2/x402"
+    # Networks routed to the CDP facilitator when CDP creds are set (comma-sep).
+    cdp_networks: str = "eip155:8453"
+
     # Stripe fiat payment rail (primary for card/bank checkout)
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None

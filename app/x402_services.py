@@ -19,8 +19,32 @@ from app.models import (
 )
 
 
-def _facilitator_client():
-    from x402.http import FacilitatorConfig, HTTPFacilitatorClient
+def _use_cdp(network: str | None) -> bool:
+    """CDP facilitator is used when creds are set and the network needs it
+    (Base mainnet etc.; the free x402.org facilitator only settles Base Sepolia)."""
+    if not (settings.cdp_api_key_id and settings.cdp_api_key_secret):
+        return False
+    cdp_nets = {n.strip() for n in settings.cdp_networks.split(",") if n.strip()}
+    return bool(network) and network in cdp_nets
+
+
+def _facilitator_client(network: str | None = None):
+    from x402.http import HTTPFacilitatorClient
+
+    if _use_cdp(network):
+        from app.cdp_auth import build_cdp_create_headers
+
+        create_headers = build_cdp_create_headers(
+            settings.cdp_api_key_id,
+            settings.cdp_api_key_secret,
+            settings.cdp_facilitator_url,
+        )
+        # dict-form config so the SDK wraps create_headers as an AuthProvider.
+        return HTTPFacilitatorClient(
+            {"url": settings.cdp_facilitator_url, "create_headers": create_headers}
+        )
+
+    from x402.http import FacilitatorConfig
 
     return HTTPFacilitatorClient(
         FacilitatorConfig(url=settings.x402_facilitator_url)
@@ -35,15 +59,30 @@ def _probe_http_client():
     return x402HTTPClient(x402Client())
 
 
-def _resource_server():
+def _resource_server(network: str | None = None):
     from x402 import x402ResourceServer
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
 
-    facilitator = _facilitator_client()
+    facilitator = _facilitator_client(network)
     server = x402ResourceServer(facilitator)
     server.register("eip155:*", ExactEvmServerScheme())
     server.initialize()
     return server
+
+
+def _facilitator_url_for(network: str | None) -> str:
+    return (
+        settings.cdp_facilitator_url
+        if _use_cdp(network)
+        else settings.x402_facilitator_url
+    )
+
+
+def _network_of(requirements: Any) -> str | None:
+    """Extract the CAIP-2 network from a decoded requirements dict/object."""
+    if isinstance(requirements, dict):
+        return requirements.get("network")
+    return getattr(requirements, "network", None)
 
 
 def _decode_payment_inputs(
@@ -287,7 +326,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     from x402 import ResourceConfig, x402ResourceServer
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
 
-    facilitator = _facilitator_client()
+    facilitator = _facilitator_client(params.network)
     server = x402ResourceServer(facilitator)
     server.register("eip155:*", ExactEvmServerScheme())
     server.initialize()
@@ -309,7 +348,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
         "pay_to": pay_to,
         "price": params.price,
         "scheme": params.scheme,
-        "facilitator_url": settings.x402_facilitator_url,
+        "facilitator_url": _facilitator_url_for(params.network),
         "sdk": "x402ResourceServer.build_payment_requirements",
     }
 
@@ -341,13 +380,14 @@ async def verify_payment_payload(params: VerifyPaymentInput) -> dict[str, Any]:
     payload, requirements = _decode_payment_inputs(
         params.payment_signature, params.payment_required
     )
-    server = _resource_server()
+    network = _network_of(requirements)
+    server = _resource_server(network)
     result = await server.verify_payment(payload, requirements)
 
     return {
         "is_valid": result.is_valid,
         "invalid_reason": getattr(result, "invalid_reason", None),
-        "facilitator_url": settings.x402_facilitator_url,
+        "facilitator_url": _facilitator_url_for(network),
         "sdk": "x402ResourceServer.verify_payment",
     }
 
@@ -357,7 +397,8 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
     payload, requirements = _decode_payment_inputs(
         params.payment_signature, params.payment_required
     )
-    server = _resource_server()
+    network = _network_of(requirements)
+    server = _resource_server(network)
     verify_result = await server.verify_payment(payload, requirements)
 
     settlement = None
@@ -375,7 +416,7 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
         "settlement": settlement,
         "settlement_error": settlement_error,
         "payment_settled": settlement is not None and settlement.get("success") is True,
-        "facilitator_url": settings.x402_facilitator_url,
+        "facilitator_url": _facilitator_url_for(network),
         "sdk": "x402ResourceServer.verify_payment + settle_payment",
     }
 
