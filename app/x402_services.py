@@ -294,7 +294,8 @@ async def pay_and_fetch(params: PayAndFetchInput) -> dict[str, Any]:
     client = _build_x402_client(params.preferred_network)
     http_client = x402HTTPClient(client)
 
-    async with x402HttpxClient(client) as http:
+    # Client-level timeout applies to the paid retry too (mainnet settle is slow).
+    async with x402HttpxClient(client, timeout=settings.x402_http_timeout) as http:
         response = await http.request(
             params.method.upper(),
             str(params.url),

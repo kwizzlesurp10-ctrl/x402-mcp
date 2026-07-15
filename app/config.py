@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     x402_facilitator_url: str = "https://x402.org/facilitator"
     x402_default_network: str = "eip155:84532"
     x402_default_price: str = "$0.01"
+    # Buyer HTTP timeout; mainnet settlement via a facilitator can take 30-60s,
+    # so keep this comfortably above the default httpx timeout.
+    x402_http_timeout: float = 90.0
 
     cdp_discovery_url: str = (
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
