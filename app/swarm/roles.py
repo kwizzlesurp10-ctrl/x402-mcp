@@ -321,7 +321,8 @@ def merchant_list(
     from the network the upstream data was bought on — the seller facilitator
     must advertise the `exact` scheme for it.
     """
-    price_str = f"${product.price_usdc:.2f}"
+    # 6-dp so sub-cent composite prices aren't truncated (USDC has 6 decimals).
+    price_str = f"${product.price_usdc:.6f}"
     requirements = x402_services.build_seller_requirements(
         BuildSellerRequirementsInput(
             network=sell_network,

@@ -9,8 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "ledger"
 
 
-def read_ledger_rows(name: str, *, limit: int = 1000) -> list[dict]:
-    """Parse spend.jsonl or revenue.jsonl; newest first, capped."""
+def read_ledger_rows(name: str, *, limit: int | None = 1000) -> list[dict]:
+    """Parse spend.jsonl or revenue.jsonl; newest first.
+
+    `limit` caps the number of rows for display; pass `limit=None` to read the
+    entire file (used for spend/revenue aggregation, which must not truncate).
+    """
     if name not in ("spend", "revenue"):
         raise ValueError("ledger name must be spend or revenue")
 
@@ -29,4 +33,4 @@ def read_ledger_rows(name: str, *, limit: int = 1000) -> list[dict]:
             continue
 
     rows.reverse()
-    return rows[:limit]
+    return rows if limit is None else rows[:limit]

@@ -16,6 +16,17 @@ class SwarmRegistry:
         self._runs: deque[SwarmRun] = deque(maxlen=max_runs)
         self._products: dict[str, CompositeProduct] = {}
         self._sources: dict[str, dict[str, float]] = {}
+        self._settled_txs: set[str] = set()  # settlement dedupe (replay guard)
+
+    def record_settlement(self, tx: str | None) -> bool:
+        """Register a settlement tx; return False if it was already recorded
+        (a replay). tx=None is treated as non-idempotent and always accepted."""
+        if not tx:
+            return True
+        if tx in self._settled_txs:
+            return False
+        self._settled_txs.add(tx)
+        return True
 
     def add_run(self, run: SwarmRun) -> None:
         self._runs.append(run)

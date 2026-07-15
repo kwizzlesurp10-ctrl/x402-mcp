@@ -69,7 +69,11 @@ def spend_totals() -> tuple[float, float]:
     month = now.strftime("%Y-%m")
     day_total = 0.0
     month_total = 0.0
-    for row in ledger_io.read_ledger_rows("spend"):
+    # limit=None: aggregate the whole ledger (do not truncate); settled-only so
+    # unsettled attempts never inflate the caps.
+    for row in ledger_io.read_ledger_rows("spend", limit=None):
+        if not row.get("settled", True):
+            continue
         ts = str(row.get("ts", ""))
         amount = float(row.get("amount_usdc", 0) or 0)
         if ts.startswith(month):

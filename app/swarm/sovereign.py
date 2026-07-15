@@ -29,6 +29,10 @@ def optimize_pricing(
     Never lowers below the archivist's price; records per-source cost intel so
     the revenue report can score upstream sources by realized profit.
     """
+    # Clamp the margin floor into [0, 1) so a misconfigured ratio can't divide
+    # by zero or produce a negative price below.
+    min_margin_ratio = min(max(min_margin_ratio, 0.0), 0.99)
+
     cost = product.cost_basis_usdc
     price = max(
         product.price_usdc,
@@ -46,12 +50,10 @@ def optimize_pricing(
         product.markup = round(price / cost, 4)
         product.ltv_cac_projected = round(price / cost, 4)
 
-    # Record per-source cost intel (split cost basis evenly across sources).
-    sources = product.sources or []
-    if sources:
-        per_source = cost / len(sources)
-        for source in sources:
-            swarm_registry.record_source_buy(source, per_source)
+    # Record per-source cost intel using each purchase's REAL settled amount
+    # (not an even split), so source profit scores are accurate.
+    for purchase in run.purchases:
+        swarm_registry.record_source_buy(purchase.url, purchase.amount_usdc)
 
     emit_swarm_step(
         run_id=run.run_id,
@@ -73,11 +75,18 @@ def optimize_pricing(
 
 def build_revenue_report() -> dict[str, Any]:
     """Read-only portfolio economics for the swarm (spend, revenue, LTV:CAC)."""
-    spend_rows = read_ledger_rows("spend")
-    revenue_rows = read_ledger_rows("revenue")
+    # limit=None: aggregate the entire ledger; settled-only so unsettled
+    # attempts never inflate spend/revenue/margin.
+    spend_rows = read_ledger_rows("spend", limit=None)
+    revenue_rows = read_ledger_rows("revenue", limit=None)
 
-    total_spend = round(sum(r.get("amount_usdc", 0.0) for r in spend_rows), 6)
-    total_revenue = round(sum(r.get("amount_usdc", 0.0) for r in revenue_rows), 6)
+    total_spend = round(
+        sum(r.get("amount_usdc", 0.0) for r in spend_rows if r.get("settled", True)), 6
+    )
+    total_revenue = round(
+        sum(r.get("amount_usdc", 0.0) for r in revenue_rows if r.get("settled", True)),
+        6,
+    )
     realized_margin = round(total_revenue - total_spend, 6)
     ltv_cac = round(total_revenue / total_spend, 4) if total_spend else None
 

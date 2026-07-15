@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
+
+import httpx
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +32,8 @@ from app.stripe_payments import (
     handle_stripe_webhook,
 )
 from app import wallet_read, x402_services
+
+logger = logging.getLogger("x402")
 
 app = FastAPI(
     title="x402 Micropayments MCP",
@@ -78,12 +83,14 @@ class StripeCheckoutRequest(BaseModel):
 
 
 @app.exception_handler(Exception)
-async def generic_handler(_: Request, exc: Exception) -> JSONResponse:
+async def generic_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Log full detail server-side; do NOT leak exception internals to callers.
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
         content={
             "error": "internal_error",
-            "message": str(exc),
+            "message": "An internal error occurred.",
             "upgrade_url": settings.upgrade_url,
         },
     )
@@ -154,6 +161,11 @@ async def probe_url(
         ) from exc
     except SSRFBlockedError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        # Upstream unreachable/timeout — a clean 502, not an opaque 500.
+        raise HTTPException(
+            status_code=502, detail="upstream probe target unreachable"
+        ) from exc
 
 
 @app.post("/seller/requirements")

@@ -17,7 +17,7 @@ from app.config import settings
 from app.models import VerifyPaymentInput
 from app.ops_events import emit_swarm_step
 from app.swarm import ledger_writer, policy as policy_mod, roles
-from app.swarm.models import SwarmRun
+from app.swarm.models import CompositeProduct, SwarmRun
 from app.swarm.registry import swarm_registry
 
 
@@ -88,6 +88,8 @@ async def run_swarm_research(
             settings.swarm_min_price_usdc,
             network,
         )
+        product.run_id = run.run_id
+        product.seller_agent_id = run.agent_id
         run.steps.append({"role": "archivist", "product_id": product.product_id})
 
         # SOVEREIGN
@@ -125,26 +127,54 @@ async def run_swarm_research(
     return run.to_dict()
 
 
+def _paid_usdc(product: CompositeProduct) -> float:
+    """Authoritative charged amount = the listing's own requirement amount."""
+    reqs = (product.seller_requirements or {}).get("requirements") or []
+    if reqs and isinstance(reqs[0], dict) and reqs[0].get("amount") is not None:
+        try:
+            return int(reqs[0]["amount"]) / 1_000_000
+        except (TypeError, ValueError):
+            pass
+    return product.price_usdc
+
+
 async def settle_composite_sale(
     product_id: str,
     payment_signature: str,
-    payment_required: str,
+    payment_required: str,  # noqa: ARG001 — ignored; see below
     buyer_agent_id: str,
 ) -> dict[str, Any]:
-    """Verify + settle a buyer's payment for a listed composite; record revenue."""
+    """Verify + settle a buyer's payment for a listed composite; record revenue.
+
+    Security-critical: the caller-supplied ``payment_required`` is IGNORED. We
+    always verify the buyer's signature against the product's OWN stored
+    challenge, require the payment to actually SETTLE on-chain (not merely
+    verify), and dedupe by settlement tx so a replay cannot re-credit revenue.
+    """
     product = swarm_registry.get_product(product_id)
     if product is None:
         raise ValueError(f"unknown product_id: {product_id}")
 
+    seller = product.seller_requirements or {}
+    authoritative_required = seller.get("payment_required_header")
+    if not authoritative_required:
+        raise ValueError("product is not listed for sale (no payment requirements)")
+
     payment = await x402_services._verify_and_settle_payment(
         VerifyPaymentInput(
             payment_signature=payment_signature,
-            payment_required=payment_required,
+            payment_required=authoritative_required,
         )
     )
     if not payment["is_valid"]:
         raise ValueError(
             f"composite sale payment invalid: {payment.get('invalid_reason', 'unknown')}"
+        )
+    # verify != settle: only deliver/record once funds actually moved on-chain.
+    if not payment.get("payment_settled"):
+        raise ValueError(
+            "composite sale did not settle on-chain: "
+            f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
     settlement = payment.get("settlement") or {}
@@ -156,41 +186,60 @@ async def settle_composite_sale(
             or settlement.get("transactionHash")
         )
 
+    paid_usdc = _paid_usdc(product)
+
+    # Idempotency: a replayed settlement tx must not re-credit revenue.
+    if not swarm_registry.record_settlement(str(tx) if tx else None):
+        return {
+            "sold": True,
+            "already_settled": True,
+            "product_id": product.product_id,
+            "revenue_usdc": 0.0,
+            "cost_basis_usdc": product.cost_basis_usdc,
+            "margin_usdc": product.margin_usdc,
+            "payment_settled": True,
+            "report": product.report,
+            "verification": payment,
+        }
+
     product.status = "sold"
-    product.revenue_usdc = round(product.revenue_usdc + product.price_usdc, 6)
+    product.revenue_usdc = round(product.revenue_usdc + paid_usdc, 6)
     ledger_writer.record_revenue(
-        agent_id=buyer_agent_id,
-        amount_usdc=product.price_usdc,
+        agent_id=product.seller_agent_id or "seller",
+        amount_usdc=paid_usdc,
         network=product.network,
         product_id=product.product_id,
+        run_id=product.run_id,
         tx=str(tx) if tx else None,
-        settled=payment["payment_settled"],
+        settled=True,
     )
     # Attribute realized revenue back to the sources that fed the composite.
     sources = product.sources or []
     if sources:
-        per_source = product.price_usdc / len(sources)
+        per_source = paid_usdc / len(sources)
         for source in sources:
             swarm_registry.record_source_revenue(source, per_source)
     emit_swarm_step(
-        run_id=product.product_id,
+        run_id=product.run_id or product.product_id,
         role="merchant",
         phase="selling",
         action="settle_composite_sale",
         detail={
             "product_id": product.product_id,
-            "revenue_usdc": product.price_usdc,
-            "margin_usdc": product.margin_usdc,
-            "settled": payment["payment_settled"],
+            "revenue_usdc": paid_usdc,
+            "margin_usdc": round(paid_usdc - product.cost_basis_usdc, 6),
+            "buyer_agent_id": buyer_agent_id,
+            "tx": tx,
+            "settled": True,
         },
     )
     return {
         "sold": True,
         "product_id": product.product_id,
-        "revenue_usdc": product.price_usdc,
+        "revenue_usdc": paid_usdc,
         "cost_basis_usdc": product.cost_basis_usdc,
-        "margin_usdc": product.margin_usdc,
-        "payment_settled": payment["payment_settled"],
+        "margin_usdc": round(paid_usdc - product.cost_basis_usdc, 6),
+        "payment_settled": True,
         "report": product.report,
         "verification": payment,
     }

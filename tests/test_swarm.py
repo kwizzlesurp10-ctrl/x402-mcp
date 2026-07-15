@@ -71,6 +71,7 @@ def rails(monkeypatch):
     def fake_seller(params):
         return {
             "requirements": [{"scheme": "exact", "network": params.network}],
+            "payment_required_header": "ZmFrZS1jaGFsbGVuZ2U=",
             "pay_to": "0xSELLER",
             "price": params.price,
             "network": params.network,
@@ -198,3 +199,81 @@ async def test_revenue_report_after_sale(ledger, rails, monkeypatch):
     rep = sovereign.build_revenue_report()
     assert rep["sold_count"] >= 1
     assert rep["total_revenue_usdc"] == pytest.approx(0.09)
+
+
+@pytest.mark.asyncio
+async def test_settle_rejects_verified_but_unsettled(ledger, rails, monkeypatch):
+    """A signature that verifies but does NOT settle must not deliver goods."""
+    run = await orchestrator.run_swarm_research("defi", agent_id="agent-u")
+    product_id = run["product"]["product_id"]
+
+    async def fake_settle_fail(params):
+        return {
+            "is_valid": True,
+            "invalid_reason": None,
+            "payment_settled": False,
+            "settlement": None,
+            "settlement_error": "insufficient balance",
+        }
+
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle_fail)
+
+    with pytest.raises(ValueError, match="did not settle"):
+        await orchestrator.settle_composite_sale(
+            product_id, "c2ln", "cmVx", buyer_agent_id="freeloader"
+        )
+    # no revenue recorded
+    assert ledger_io.read_ledger_rows("revenue") == []
+    assert swarm_registry.get_product(product_id).status != "sold"
+
+
+@pytest.mark.asyncio
+async def test_settle_is_idempotent_on_replay(ledger, rails, monkeypatch):
+    """Re-submitting the same settlement tx must not re-credit revenue."""
+    run = await orchestrator.run_swarm_research("defi", agent_id="agent-r")
+    product_id = run["product"]["product_id"]
+
+    async def fake_settle(params):
+        return {
+            "is_valid": True,
+            "invalid_reason": None,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xSAMETX"},
+        }
+
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
+
+    first = await orchestrator.settle_composite_sale(
+        product_id, "c2ln", "cmVx", buyer_agent_id="buyer-1"
+    )
+    second = await orchestrator.settle_composite_sale(
+        product_id, "c2ln", "cmVx", buyer_agent_id="buyer-1"
+    )
+
+    assert first["revenue_usdc"] == pytest.approx(0.09)
+    assert second.get("already_settled") is True
+    assert second["revenue_usdc"] == 0.0
+    # only one revenue row despite two settle calls
+    assert len(ledger_io.read_ledger_rows("revenue")) == 1
+
+
+@pytest.mark.asyncio
+async def test_revenue_attributed_to_seller_not_buyer(ledger, rails, monkeypatch):
+    run = await orchestrator.run_swarm_research("defi", agent_id="seller-agent")
+    product_id = run["product"]["product_id"]
+
+    async def fake_settle(params):
+        return {
+            "is_valid": True,
+            "invalid_reason": None,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xrev"},
+        }
+
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
+    await orchestrator.settle_composite_sale(
+        product_id, "c2ln", "cmVx", buyer_agent_id="attacker-controlled"
+    )
+    row = ledger_io.read_ledger_rows("revenue")[0]
+    assert row["agent_id"] == "seller-agent"  # not the buyer-supplied id
+    assert row["run_id"] == run["run_id"]

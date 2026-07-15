@@ -318,10 +318,14 @@ async def pay_and_fetch(params: PayAndFetchInput) -> dict[str, Any]:
         if settle is not None:
             settlement_dump = settle.model_dump()
 
+        # A PAYMENT-RESPONSE header proves settlement was *attempted*; only
+        # SettleResponse.success proves funds actually moved on-chain.
+        settled_ok = settle is not None and getattr(settle, "success", None) is True
+
         return {
             "status_code": response.status_code,
             "body": response.text[:8000],
-            "payment_settled": settlement_dump is not None,
+            "payment_settled": settled_ok,
             "payment_settlement": settlement_dump,
             "settlement_parse_error": settle_error,
             "url": str(params.url),
@@ -334,6 +338,12 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     if not pay_to:
         raise ValueError(
             "pay_to address required. Pass pay_to or set X402_PAY_TO_ADDRESS."
+        )
+    # Only the `exact` scheme is registered (ExactEvmServerScheme); reject others
+    # up front rather than raising an opaque SchemeNotFoundError from the SDK.
+    if params.scheme != "exact":
+        raise ValueError(
+            f"unsupported scheme '{params.scheme}'; only 'exact' is supported"
         )
 
     from x402 import ResourceConfig, x402ResourceServer
@@ -483,6 +493,11 @@ async def purchase_tool_credits(
         raise ValueError(
             f"Tool credits payment invalid: {payment.get('invalid_reason', 'unknown')}"
         )
+    if not payment.get("payment_settled"):
+        raise ValueError(
+            "Tool credits payment did not settle on-chain: "
+            f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
+        )
 
     balance = quota_store.add_credits(agent_id, credits)
     snapshot = quota_store.peek(agent_id)
@@ -513,6 +528,11 @@ async def activate_pro_tier(
     if not payment["is_valid"]:
         raise ValueError(
             f"Pro tier payment invalid: {payment.get('invalid_reason', 'unknown')}"
+        )
+    if not payment.get("payment_settled"):
+        raise ValueError(
+            "Pro tier payment did not settle on-chain: "
+            f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
     quota_store.activate_pro_tier(agent_id)
