@@ -86,6 +86,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "composite product and record the revenue",
         "tier": "free",
     },
+    {
+        "name": "swarm_revenue_report",
+        "description": "Portfolio revenue intelligence: spend, revenue, LTV:CAC, "
+        "margins, per-source profit scores",
+        "tier": "free",
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)

@@ -188,6 +188,14 @@ async def swarm_products() -> list[dict]:
     return swarm_registry.products()
 
 
+@app.get("/swarm/revenue")
+async def swarm_revenue() -> dict:
+    """Swarm portfolio revenue intelligence (read-only)."""
+    from app.swarm import sovereign
+
+    return sovereign.build_revenue_report()
+
+
 @app.get("/quota/{agent_id}")
 async def quota_status(agent_id: str) -> dict:
     """Debug endpoint: inspect quota without consuming a call."""

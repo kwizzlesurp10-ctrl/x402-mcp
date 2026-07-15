@@ -133,14 +133,14 @@ def step_readme() -> int:
     text = readme.read_text(encoding="utf-8")
     lines = [
         "=== README verification ===",
-        f"features_13_tools={'13 MCP tools' in text}",
+        f"features_14_tools={'14 MCP tools' in text}",
         f"features_not_6={'6 MCP tools' not in text}",
     ]
     missing = [t for t in EXPECTED_TOOLS if f"`{t}`" not in text]
     lines.append(f"missing_tools={missing}")
     lines.append(f"all_tools_present={not missing}")
     (SCRATCH / "readme_verify.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return 0 if not missing and "13 MCP tools" in text else 1
+    return 0 if not missing and "14 MCP tools" in text else 1
 
 
 def step_drive_staging() -> int:

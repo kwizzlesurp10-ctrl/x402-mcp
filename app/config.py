@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     swarm_max_upstream_calls: int = 3  # max upstream buys per run
     # Comma-separated fallback upstream x402 URLs used when Bazaar discovery is empty.
     swarm_upstream_urls: str = ""
+    swarm_target_ltv_cac: float = 3.0  # target revenue/cost ratio; also the min pricing multiple
+    swarm_min_margin_ratio: float = 0.5  # floor on margin/price
 
 
 settings = Settings()

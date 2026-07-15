@@ -147,3 +147,54 @@ async def test_settle_sale_records_revenue(ledger, rails, monkeypatch):
     assert len(revenue) == 1
     assert revenue[0]["amount_usdc"] == pytest.approx(0.09)
     assert revenue[0]["product_id"] == product_id
+
+
+@pytest.mark.asyncio
+async def test_sovereign_optimizes_to_target_ltv_cac(ledger, rails):
+    run = await orchestrator.run_swarm_research("defi", "agent-sra")
+
+    assert run["status"] == "listed", run.get("error")
+    product = run["product"]
+    # cost basis 0.03 -> price 0.09 at target markup 3.0 -> LTV:CAC 3.0
+    assert product["ltv_cac_projected"] == pytest.approx(3.0)
+    assert product["price_usdc"] == pytest.approx(0.09)
+
+
+@pytest.mark.asyncio
+async def test_revenue_report_reflects_run(ledger, rails):
+    await orchestrator.run_swarm_research("defi", "agent-sra")
+
+    from app.swarm import sovereign
+
+    rep = sovereign.build_revenue_report()
+    assert rep["total_spend_usdc"] == pytest.approx(0.03)
+    assert rep["listed_count"] >= 1
+    assert rep["ltv_cac"] is None or rep["ltv_cac"] >= 0
+    assert rep["target_ltv_cac"] == 3.0
+    assert isinstance(rep["recommendations"], list)
+
+
+@pytest.mark.asyncio
+async def test_revenue_report_after_sale(ledger, rails, monkeypatch):
+    run = await orchestrator.run_swarm_research("defi", "agent-sra")
+    product_id = run["product"]["product_id"]
+
+    async def fake_settle(params):
+        return {
+            "is_valid": True,
+            "invalid_reason": None,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xfeed"},
+        }
+
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
+
+    await orchestrator.settle_composite_sale(
+        product_id, "c2ln", "cmVx", buyer_agent_id="buyer-x"
+    )
+
+    from app.swarm import sovereign
+
+    rep = sovereign.build_revenue_report()
+    assert rep["sold_count"] >= 1
+    assert rep["total_revenue_usdc"] == pytest.approx(0.09)

@@ -90,6 +90,18 @@ async def run_swarm_research(
         )
         run.steps.append({"role": "archivist", "product_id": product.product_id})
 
+        # SOVEREIGN
+        from app.swarm import sovereign
+
+        run.status = "optimizing"
+        product = sovereign.optimize_pricing(
+            run,
+            product,
+            settings.swarm_target_ltv_cac,
+            settings.swarm_min_margin_ratio,
+            settings.swarm_min_price_usdc,
+        )
+
         # MERCHANT
         run.status = "listing"
         product = roles.merchant_list(run, product)
@@ -154,6 +166,12 @@ async def settle_composite_sale(
         tx=str(tx) if tx else None,
         settled=payment["payment_settled"],
     )
+    # Attribute realized revenue back to the sources that fed the composite.
+    sources = product.sources or []
+    if sources:
+        per_source = product.price_usdc / len(sources)
+        for source in sources:
+            swarm_registry.record_source_revenue(source, per_source)
     emit_swarm_step(
         run_id=product.product_id,
         role="merchant",

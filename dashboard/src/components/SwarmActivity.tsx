@@ -1,4 +1,4 @@
-import type { SwarmProduct } from "../api/client";
+import type { SwarmProduct, SwarmRevenue } from "../api/client";
 import type { StreamEvent } from "../hooks/useSSE";
 import { relativeTime } from "../utils/time";
 
@@ -15,9 +15,11 @@ type SwarmMeta = {
   reason?: string;
   settled?: boolean;
   found?: number;
+  ltv_cac_projected?: number;
+  target_ltv_cac?: number;
 };
 
-const LANES = ["scout", "warden", "treasurer", "archivist", "merchant"] as const;
+const LANES = ["scout", "warden", "treasurer", "archivist", "merchant", "sovereign"] as const;
 
 const PHASE_COLOR: Record<string, string> = {
   scouting: "var(--base)",
@@ -27,6 +29,7 @@ const PHASE_COLOR: Record<string, string> = {
   composing: "var(--amber)",
   listing: "var(--base)",
   selling: "var(--green)",
+  optimizing: "var(--green)",
   failed: "var(--red)",
 };
 
@@ -51,6 +54,8 @@ function describe(e: StreamEvent): string {
       return `listed composite @ $${(m.price_usdc ?? 0).toFixed(2)}`;
     case "selling":
       return `SOLD · +$${(m.price_usdc ?? m.margin_usdc ?? 0).toFixed(2)} revenue`;
+    case "optimizing":
+      return `optimized → $${(m.price_usdc ?? 0).toFixed(2)} · LTV:CAC ${(m.ltv_cac_projected ?? 0).toFixed(1)}`;
     case "failed":
       return `run failed — ${m.reason ?? "error"}`;
     default:
@@ -61,9 +66,11 @@ function describe(e: StreamEvent): string {
 export function SwarmActivity({
   events,
   products,
+  revenue,
 }: {
   events: StreamEvent[];
   products: SwarmProduct[];
+  revenue?: SwarmRevenue;
 }) {
   const swarmEvents = events.filter(isSwarm);
   const counts = Object.fromEntries(LANES.map((l) => [l, 0])) as Record<string, number>;
@@ -82,6 +89,59 @@ export function SwarmActivity({
           {products.length} listed · ${totalMargin.toFixed(2)} realized
         </span>
       </div>
+
+      {/* Revenue intelligence strip */}
+      {revenue && (
+        <div
+          className="mono"
+          style={{
+            display: "flex",
+            gap: 16,
+            flexWrap: "wrap",
+            alignItems: "center",
+            margin: "12px 0",
+            padding: "8px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            fontSize: 12,
+          }}
+        >
+          <span style={{ textTransform: "uppercase", color: "var(--text-muted)", fontSize: 11 }}>
+            Revenue intelligence
+          </span>
+          <span>
+            LTV:CAC{" "}
+            <span
+              style={{
+                color:
+                  revenue.ltv_cac == null
+                    ? "var(--text-muted)"
+                    : revenue.ltv_cac >= revenue.target_ltv_cac
+                      ? "var(--green)"
+                      : "var(--amber)",
+                fontWeight: 600,
+              }}
+            >
+              {revenue.ltv_cac == null ? "—" : revenue.ltv_cac.toFixed(1)}
+            </span>{" "}
+            <span style={{ color: "var(--text-muted)" }}>/ {revenue.target_ltv_cac.toFixed(1)}</span>
+          </span>
+          <span>
+            margin{" "}
+            <span style={{ color: "var(--green)", fontWeight: 600 }}>
+              ${revenue.realized_margin_usdc.toFixed(2)}
+            </span>
+          </span>
+          <span style={{ color: "var(--text-muted)" }}>
+            {revenue.listed_count} listed · {revenue.sold_count} sold
+          </span>
+          {revenue.recommendations.length > 0 && (
+            <span style={{ color: "var(--amber)" }} title={revenue.recommendations.join("\n")}>
+              ▸ {revenue.recommendations[0]}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Pipeline lanes */}
       <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>

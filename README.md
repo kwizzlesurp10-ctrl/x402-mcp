@@ -4,7 +4,7 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 
 ## Features
 
-- **13 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, and swarm-agency flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **14 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, and swarm-agency flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
 - **Stripe payment rail** (primary): `create_stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
 - **x402/Coinbase rail** (alternate/future): crypto micropayments via facilitator and CDP discovery
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
@@ -58,6 +58,7 @@ curl http://localhost:8402/health
 | `create_stripe_checkout` | Create Stripe Checkout Session for pro tier or credits |
 | `run_swarm_research` | Swarm Agency: buy cheap upstream x402 services, compose a research report, list it for resale |
 | `settle_composite_sale` | Verify + settle a buyer's payment for a listed composite and record revenue |
+| `swarm_revenue_report` | Portfolio revenue intelligence: spend, revenue, LTV:CAC, margins, per-source profit scores |
 
 ## Environment
 
@@ -91,10 +92,10 @@ Every tool response includes:
 
 ## Agent Ops / Swarm Agency
 
-Cost-effective multi-agent operating group (scout, warden, treasurer, archivist, merchant) with budget policy and ledger. See [docs/agent-ops.md](docs/agent-ops.md). Dashboard handoff: [docs/UI-HANDOFF.md](docs/UI-HANDOFF.md).
+Cost-effective multi-agent operating group (scout, warden, treasurer, archivist, sovereign, merchant) with budget policy and ledger. See [docs/agent-ops.md](docs/agent-ops.md). Dashboard handoff: [docs/UI-HANDOFF.md](docs/UI-HANDOFF.md).
 
 The **Swarm Agency** (`app/swarm/`) implements the hybrid resale loop end-to-end:
-**scout** discovers cheap upstream x402 services → **warden** enforces `ledger/policy.json` spend caps → **treasurer** `pay_and_fetch`es and records cost basis to `ledger/spend.jsonl` → **archivist** composes a research report priced at `cost × SWARM_MARKUP` → **merchant** lists it via `build_seller_requirements`; `settle_composite_sale` records realized revenue. Every phase streams to the dashboard's Swarm Activity panel over SSE. Run via the `run_swarm_research` MCP tool (needs `EVM_PRIVATE_KEY` + `X402_PAY_TO_ADDRESS`).
+**scout** discovers cheap upstream x402 services → **warden** enforces `ledger/policy.json` spend caps → **treasurer** `pay_and_fetch`es and records cost basis to `ledger/spend.jsonl` → **archivist** composes a research report priced at `cost × SWARM_MARKUP` → **sovereign** (profit optimizer) reprices the composite to hit a target LTV:CAC (`SWARM_TARGET_LTV_CAC`, default 3.0), enforces a margin floor, and scores which upstream sources are actually profitable → **merchant** lists it via `build_seller_requirements`; `settle_composite_sale` records realized revenue. Portfolio economics (spend, revenue, LTV:CAC, per-source profit) surface via `swarm_revenue_report` / `GET /swarm/revenue`. Every phase streams to the dashboard's Swarm Activity panel over SSE. Run via the `run_swarm_research` MCP tool (needs `EVM_PRIVATE_KEY` + `X402_PAY_TO_ADDRESS`).
 
 ## Testing
 

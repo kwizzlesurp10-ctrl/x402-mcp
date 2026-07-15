@@ -282,5 +282,18 @@ async def settle_composite_sale(
     )
 
 
+@mcp.tool()
+async def swarm_revenue_report(agent_id: str | None = None) -> str:
+    """Portfolio revenue intelligence for the swarm: spend, revenue, LTV:CAC,
+    margins, per-source profit scores."""
+    from app.swarm import sovereign
+
+    return await _execute_tool(
+        "swarm_revenue_report",
+        agent_id,
+        lambda _: _sync_result(sovereign.build_revenue_report()),
+    )
+
+
 async def _sync_result(data: dict[str, Any]) -> dict[str, Any]:
     return data

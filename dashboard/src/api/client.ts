@@ -44,6 +44,15 @@ export type SwarmProduct = {
   revenue_usdc: number;
 };
 
+export type SwarmRevenue = {
+  total_spend_usdc: number; total_revenue_usdc: number; realized_margin_usdc: number;
+  ltv_cac: number | null; target_ltv_cac: number;
+  listed_count: number; sold_count: number;
+  products: Array<{ product_id: string; topic: string; cost_basis_usdc: number; price_usdc: number; margin_usdc: number; status: string; ltv_cac_projected: number }>;
+  source_scores: Array<{ source: string; buys: number; spend_usdc: number; revenue_usdc: number; profit_score: number }>;
+  recommendations: string[];
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
@@ -69,6 +78,7 @@ export const api = {
   ledgerRevenue: () => getJson<LedgerRow[]>("/ledger/revenue"),
   wallet: () => getJson<WalletResponse>("/wallet"),
   swarmProducts: () => getJson<SwarmProduct[]>("/swarm/products"),
+  swarmRevenue: () => getJson<SwarmRevenue>("/swarm/revenue"),
   probe: (url: string, method = "GET") =>
     getJson<Record<string, unknown>>(
       `/probe?url=${encodeURIComponent(url)}&method=${encodeURIComponent(method)}`,

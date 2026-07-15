@@ -46,6 +46,7 @@ class CompositeProduct:
     status: str = "draft"  # draft | listed | sold
     seller_requirements: dict[str, Any] | None = None
     revenue_usdc: float = 0.0
+    ltv_cac_projected: float = 0.0
 
     @property
     def margin_usdc(self) -> float:

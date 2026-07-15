@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type DoctorCheck, type LedgerRow, type StatsResponse, type SwarmProduct, type WalletResponse } from "./api/client";
+import { api, type DoctorCheck, type LedgerRow, type StatsResponse, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
 import { CommandPalette } from "./components/CommandPalette";
 import { SwarmActivity } from "./components/SwarmActivity";
 import { Inspector402 } from "./components/Inspector402";
@@ -44,6 +44,7 @@ export default function App() {
   const [revenue, setRevenue] = useState<LedgerRow[]>([]);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [products, setProducts] = useState<SwarmProduct[]>([]);
+  const [swarmRevenue, setSwarmRevenue] = useState<SwarmRevenue | null>(null);
   const [activity, setActivity] = useState<StreamEvent[]>([]);
   const [probeDone, setProbeDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +97,18 @@ export default function App() {
           revenue_usdc: 0,
         },
       ]);
+      setSwarmRevenue({
+        total_spend_usdc: 0.05,
+        total_revenue_usdc: 0.09,
+        realized_margin_usdc: 0.04,
+        ltv_cac: 1.8,
+        target_ltv_cac: 3,
+        listed_count: 2,
+        sold_count: 1,
+        products: [],
+        source_scores: [],
+        recommendations: ["portfolio LTV:CAC 1.8 below target 3.0: raise markup or cut upstream spend"],
+      });
       setWallet({
         receive_address: "0xDemoReceive000000000000000000000001",
         vault_address: "0xDemoVault0000000000000000000000001",
@@ -109,13 +122,14 @@ export default function App() {
       return;
     }
     try {
-      const [s, d, sp, rev, w, pr] = await Promise.all([
+      const [s, d, sp, rev, w, pr, srev] = await Promise.all([
         api.stats(),
         api.doctor(),
         api.ledgerSpend(),
         api.ledgerRevenue(),
         api.wallet(),
         api.swarmProducts(),
+        api.swarmRevenue(),
       ]);
       setStats(s);
       setDoctor(d.checks);
@@ -123,6 +137,7 @@ export default function App() {
       setRevenue(rev);
       setWallet(w);
       setProducts(pr);
+      setSwarmRevenue(srev);
       const rateRemaining = s.agents.length
         ? Math.min(...s.agents.map((a) => a.rate_limit_remaining))
         : 10;
@@ -437,7 +452,7 @@ export default function App() {
 
         <section className="panel hide-mobile" style={{ gridColumn: "span 4" }}>
           <h3>Agent lanes</h3>
-          {["scout", "warden", "treasurer", "archivist", "merchant"].map((lane) => {
+          {["scout", "warden", "treasurer", "archivist", "merchant", "sovereign"].map((lane) => {
             const agent = stats?.agents.find((a) => a.agent_id.startsWith(lane));
             return (
               <div key={lane} style={{ marginBottom: 8 }}>
@@ -448,7 +463,7 @@ export default function App() {
           })}
         </section>
 
-        <SwarmActivity events={activity} products={products} />
+        <SwarmActivity events={activity} products={products} revenue={swarmRevenue ?? undefined} />
 
         <section id="panel-spend" className="panel hide-mobile" style={{ gridColumn: "span 6" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
