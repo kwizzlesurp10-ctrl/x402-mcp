@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     tool_credit_pack_size: int = 100
     tool_credit_pack_price: str = "$1.00"
 
+    # Optional bearer token to protect /quota endpoint. If unset, endpoint is open.
+    operator_token: str | None = None
+
     # Redis-ready: set REDIS_URL to migrate from in-memory stores.
     redis_url: str | None = None
 

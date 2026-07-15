@@ -19,12 +19,35 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from app.config import settings
+
+# ---- TTL cache for ArcGIS responses ----------------------------------------
+# Avoids re-hitting the city endpoint for repeated queries within the window.
+# Keyed on normalised address; entries expire after _CACHE_TTL seconds.
+
+_CACHE_TTL = 900  # 15 minutes
+_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _cache_get(key: str) -> dict[str, Any] | None:
+    entry = _cache.get(key)
+    if entry is None:
+        return None
+    ts, data = entry
+    if time.monotonic() - ts > _CACHE_TTL:
+        _cache.pop(key, None)
+        return None
+    return data
+
+
+def _cache_set(key: str, data: dict[str, Any]) -> None:
+    _cache[key] = (time.monotonic(), data)
 
 LICENSE_FIELDS = (
     "address,apn,licenseNumber,category,tier,status,issueDate,expirationDate,"
@@ -79,6 +102,10 @@ async def check_property(address: str) -> dict[str, Any]:
     """Compose the compliance report for a Minneapolis street address."""
     needle = _escape(address.strip().upper())
 
+    cached = _cache_get(needle)
+    if cached is not None:
+        return cached
+
     async with httpx.AsyncClient(timeout=25.0) as client:
         licenses = await _query(
             client,
@@ -122,7 +149,7 @@ async def check_property(address: str) -> dict[str, Any]:
         violations, key=lambda v: v.get("Start_Date") or 0, reverse=True
     )[:10]
 
-    return {
+    report = {
         "address_queried": address.strip(),
         "rental_licenses": [
             {
@@ -184,6 +211,9 @@ async def check_property(address: str) -> dict[str, Any]:
         ),
         "generated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }
+
+    _cache_set(needle, report)
+    return report
 
 
 # ---- x402 seller gate -------------------------------------------------------

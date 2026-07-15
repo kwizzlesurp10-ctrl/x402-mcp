@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -11,8 +14,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.commerce import quota_store
 from app.config import settings
 from app.dashboard import DASHBOARD_HTML
+from app.logging_config import setup_logging
 from app.manifest import build_mcp_manifest
 from app.mcp_server import mcp
+
+setup_logging()
+log = logging.getLogger("x402")
 
 # Build the MCP Streamable HTTP app up front so its session manager can run
 # inside the FastAPI lifespan (Starlette does not run mounted sub-app lifespans;
@@ -42,6 +49,7 @@ app = FastAPI(
 
 @app.exception_handler(Exception)
 async def generic_handler(_: Request, exc: Exception) -> JSONResponse:
+    log.exception("unhandled error: %s", exc)
     return JSONResponse(
         status_code=500,
         content={
@@ -60,7 +68,10 @@ async def root() -> RedirectResponse:
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard() -> HTMLResponse:
     """Operator terminal: live health, quota meters, tool matrix, revenue paths."""
-    return HTMLResponse(DASHBOARD_HTML)
+    # Inject operator token so dashboard JS can auth /quota polls.
+    token_js = f"var __OP_TOKEN__={json.dumps(settings.operator_token)};"
+    html = DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", token_js, 1)
+    return HTMLResponse(html)
 
 
 @app.get("/health")
@@ -79,9 +90,16 @@ async def well_known_mcp() -> dict:
     return build_mcp_manifest()
 
 
-@app.get("/quota/{agent_id}")
-async def quota_status(agent_id: str) -> dict:
-    """Debug endpoint: inspect quota without consuming a call."""
+@app.get("/quota/{agent_id}", response_model=None)
+async def quota_status(request: Request, agent_id: str):
+    """Debug endpoint: inspect quota without consuming a call.
+
+    Protected by OPERATOR_TOKEN when set — send ``Authorization: Bearer <token>``.
+    """
+    if settings.operator_token:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {settings.operator_token}":
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
     snapshot = quota_store.peek(agent_id)
     meta = quota_store.build_meta(snapshot)
     return {"meta": meta.model_dump()}
@@ -123,6 +141,7 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
     """
     from app import mn_compliance
 
+    t0 = time.monotonic()
     if not settings.x402_pay_to_address:
         return JSONResponse(
             status_code=503,
@@ -137,6 +156,7 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
     payment_required = mn_compliance.build_payment_required_header()
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
@@ -153,6 +173,7 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
 
     result = await mn_compliance.verify_and_settle(signature, payment_required)
     if not result["is_valid"] or not result["payment_settled"]:
+        log.warning("mn/property-check payment invalid", extra={"address": address, "status_code": 402})
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
@@ -164,6 +185,9 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
         )
 
     report = await mn_compliance.check_property(address)
+    latency = round((time.monotonic() - t0) * 1000)
+    log.info("mn/property-check settled", extra={"address": address, "status_code": 200, "latency_ms": latency})
+
     import base64
     import json as _json
 
