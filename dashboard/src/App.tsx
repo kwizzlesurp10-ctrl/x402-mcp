@@ -36,7 +36,7 @@ function EmptyPanel({ title, action, command }: { title: string; action: string;
 }
 
 export default function App() {
-  const [demo, setDemo] = useState(false);
+  const [demo, setDemo] = useState(import.meta.env.VITE_DEMO_DEFAULT === "true");
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem("density") as Density) || "standard");
   const [wizardOpen, setWizardOpen] = useState(true);
   const [stats, setStats] = useState<StatsResponse | null>(null);
