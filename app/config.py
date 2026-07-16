@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     base_rpc_url: str = "https://mainnet.base.org"
     eth_price_url: str = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
     pulse_depth: int = 12  # blocks sampled per pulse
-    pulse_price: str = "$8.00"  # list price for a synthesized Pulse report
+    # List price for a synthesized Pulse report. Operator-approved 2026-07-16:
+    # repriced from $8.00 to sit near the ~$0.30 ecosystem average per call.
+    pulse_price: str = "$0.25"
 
     # Host OS monitoring (mission control): sampling cadence + health thresholds.
     os_monitor_enabled: bool = True
