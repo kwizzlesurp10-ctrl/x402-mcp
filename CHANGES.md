@@ -28,8 +28,16 @@ use this manifest for goal verification instead of repo-wide `git status`.
 ## Scripts & docs
 
 - `scripts/verify_goal.py` — verification plan evidence capture
+- `scripts/vercel_connect_token.py` — Vercel Connect token for the `huggingface.co/x402-mcp` MCP connector (OIDC env or CLI fallback), `--verify` smoke-tests tools/list
 - `run_stdio.py` — MCP stdio entry
 - `docs/runbook.md`, `docs/architecture.md`
+- `docs/swarm/PROFIT_ORCHESTRATOR.md` — operator-supplied profitability swarm spec v1.0 (2026-07-16)
+
+## Swarm pipeline fixes (2026-07-16)
+
+- `app/x402_services.py::parse_amount_atomic` — tolerant Bazaar `accepts[].amount` parsing (decimal-USDC strings like `"0.016"` no longer crash discovery); used by the discovery price filter and `roles.py::_parse_accepts`
+- `app/swarm/roles.py::treasurer_buy` — POST fallback on 404/405 (no 402 challenge issued, so nothing paid twice); unlocked the first fully settled buy→compose→list cycles
+- `app/config.py` — Pulse list price $8.00 → $0.25 (operator-approved reprice toward the ~$0.30 ecosystem average per call)
 
 ## Revenue paths (criteria 3)
 
