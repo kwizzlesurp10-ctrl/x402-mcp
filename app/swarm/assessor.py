@@ -40,6 +40,15 @@ def _sh(*args: str) -> str:
         return ""
 
 
+def _svm_ready() -> bool:
+    try:
+        import x402.mechanisms.svm.exact  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def gather_signals() -> dict[str, Any]:
     """Real, inspectable facts about the repo and running system."""
     commits = _sh("git", "-C", str(ROOT), "rev-list", "--count", "HEAD")
@@ -58,6 +67,9 @@ def gather_signals() -> dict[str, Any]:
         "seller_ready": bool(settings.x402_pay_to_address),
         "has_synthesis_product": (ROOT / "app" / "pulse.py").exists(),
         "public_storefront": (ROOT / "docs" / "SELLER-STOREFRONT.md").exists(),
+        # feedback-loop signals: detect completed technical charters from code.
+        "security_keyprovider": (ROOT / "app" / "keyprovider.py").exists(),
+        "multichain_solana": _svm_ready(),
     }
 
 
@@ -119,9 +131,9 @@ def score_routes(signals: dict[str, Any]) -> list[dict[str, Any]]:
     prereq_state = {
         "seller_ready": signals["seller_ready"],
         "settlement_mainnet": signals["settlement_mainnet"],
-        # technical prereqs that are NOT yet done (honest):
-        "security_keyprovider": False,
-        "multichain": False,
+        # detected from code (feedback loop) — done when the module/dep is present:
+        "security_keyprovider": signals["security_keyprovider"],
+        "multichain": signals["multichain_solana"],
     }
     scored = []
     for r in _ROUTES:
@@ -152,13 +164,17 @@ def build_backlog(signals: dict[str, Any]) -> list[dict[str, Any]]:
         ("orchestrator", "Orchestrator & state manager",
          "partial", False, "Swarm orchestrator + registry exist; no weekly trigger yet."),
         ("security_hardener", "Security & trust hardener (KeyProvider)",
-         "available", False,
-         "REAL GAP: EVM_PRIVATE_KEY lives in env. Add pluggable KeyProvider + env "
-         "deprecation warning + spend-velocity alerts."),
+         "done" if signals["security_keyprovider"] else "available", False,
+         "KeyProvider seam + env deprecation warning + /security posture shipped. "
+         "Next: keychain/hardware provider + runtime spend-velocity alerts."
+         if signals["security_keyprovider"]
+         else "REAL GAP: EVM_PRIVATE_KEY lives in env. Add pluggable KeyProvider."),
         ("multichain", "Multi-chain / protocol completer",
-         "available", False,
-         "REAL GAP: only ExactEvmServerScheme is registered. Wire ExactSvmScheme "
-         "(Solana) so marketing matches code."),
+         "done" if signals["multichain_solana"] else "available", False,
+         "EVM + Solana (SVM) schemes registered; seller builds on Base and Solana "
+         "mainnet. Next: extend buyer coverage + more chains."
+         if signals["multichain_solana"]
+         else "REAL GAP: only ExactEvmServerScheme registered; wire ExactSvmScheme."),
         ("code_quality_ci", "Code quality, testing & CI",
          "partial", False, "Strong tests; add CI lint/secret-scan/audit workflow."),
         ("mcp_extender", "MCP compliance & feature extender",

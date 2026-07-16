@@ -40,9 +40,14 @@ def test_signals_are_real():
     assert s["app_modules"] > 0 and s["test_files"] > 0
 
 
-def test_hosted_saas_blocked_by_unmet_prereqs():
+def test_feedback_loop_marks_completed_charters():
+    """The assessor detects completed technical work from code (feedback loop)."""
     a = assessor.assess()
+    # Security KeyProvider + Solana multi-chain are shipped -> detected as done.
+    assert a["signals"]["security_keyprovider"] is True
+    assert a["signals"]["multichain_solana"] is True
+    done = {b["charter"] for b in a["backlog"] if b["status"] == "done"}
+    assert {"security_hardener", "multichain"} <= done
+    # Their completion unblocks the Hosted SaaS route (no unmet prereqs).
     saas = next(r for r in a["profit_routes"] if r["id"] == "hosted_saas")
-    # security + multichain are not built yet -> demoted below its raw score
-    assert saas["blocked_by"]
-    assert saas["priority_score"] < saas["raw_score"]
+    assert saas["blocked_by"] == []
