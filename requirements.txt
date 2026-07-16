@@ -1,8 +1,11 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 mcp>=1.6.0
-x402[httpx,evm,fastapi]>=2.14.0
+x402[httpx,evm,svm,fastapi]>=2.14.0
 eth-account>=0.13.0
+# Pin solana below 0.40: x402's SVM signer imports the sync solana.rpc.api.Client,
+# removed in solana 0.40. 0.36.x still ships it. (multi-chain Solana selling)
+solana>=0.36.0,<0.40.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
 httpx>=0.28.0

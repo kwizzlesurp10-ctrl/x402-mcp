@@ -59,13 +59,38 @@ def _probe_http_client():
     return x402HTTPClient(x402Client())
 
 
+def _register_server_schemes(server) -> list[str]:
+    """Register every settlement scheme we support. EVM always; Solana (SVM) when
+    the `x402[svm]` extra is installed. Returns the registered network patterns."""
+    from x402.mechanisms.evm.exact import ExactEvmServerScheme
+
+    server.register("eip155:*", ExactEvmServerScheme())
+    registered = ["eip155:*"]
+    try:
+        from x402.mechanisms.svm.exact import ExactSvmServerScheme
+
+        server.register("solana:*", ExactSvmServerScheme())
+        registered.append("solana:*")
+    except ImportError:
+        pass  # svm extra not installed; EVM-only, no marketing/code contradiction
+    return registered
+
+
+def svm_available() -> bool:
+    try:
+        import x402.mechanisms.svm.exact  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _resource_server(network: str | None = None):
     from x402 import x402ResourceServer
-    from x402.mechanisms.evm.exact import ExactEvmServerScheme
 
     facilitator = _facilitator_client(network)
     server = x402ResourceServer(facilitator)
-    server.register("eip155:*", ExactEvmServerScheme())
+    _register_server_schemes(server)
     server.initialize()
     return server
 
@@ -266,21 +291,36 @@ async def get_payment_requirements(
 def _build_x402_client(preferred_network: str | None = None):
     from app.keyprovider import get_key_provider
 
-    private_key = get_key_provider().get_private_key()
-    if not private_key:
+    evm_key = get_key_provider().get_private_key()
+    svm_key = settings.svm_private_key
+    if not evm_key and not svm_key:
         raise ValueError(
-            "EVM_PRIVATE_KEY is required for pay_and_fetch. "
+            "EVM_PRIVATE_KEY (or SVM_PRIVATE_KEY) is required for pay_and_fetch. "
             "Set it in .env or use get_payment_requirements for probe-only flows."
         )
 
-    from eth_account import Account
     from x402 import prefer_network, x402Client
-    from x402.mechanisms.evm import EthAccountSigner
-    from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
     client = x402Client()
-    account = Account.from_key(private_key)
-    register_exact_evm_client(client, EthAccountSigner(account))
+
+    if evm_key:
+        from eth_account import Account
+        from x402.mechanisms.evm import EthAccountSigner
+        from x402.mechanisms.evm.exact.register import register_exact_evm_client
+
+        register_exact_evm_client(client, EthAccountSigner(Account.from_key(evm_key)))
+
+    if svm_key:
+        try:
+            from solders.keypair import Keypair
+            from x402.mechanisms.svm.exact.register import register_exact_svm_client
+            from x402.mechanisms.svm.signers import KeypairSigner
+
+            register_exact_svm_client(
+                client, KeypairSigner(Keypair.from_base58_string(svm_key))
+            )
+        except ImportError:
+            pass  # svm extra not installed; EVM-only buyer
 
     network = preferred_network or settings.x402_default_network
     if network:
@@ -352,12 +392,11 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
 
     from x402 import ResourceConfig, x402ResourceServer
     from x402.http import encode_payment_required_header
-    from x402.mechanisms.evm.exact import ExactEvmServerScheme
     from x402.schemas import PaymentRequired
 
     facilitator = _facilitator_client(params.network)
     server = x402ResourceServer(facilitator)
-    server.register("eip155:*", ExactEvmServerScheme())
+    _register_server_schemes(server)
     server.initialize()
 
     config = ResourceConfig(
