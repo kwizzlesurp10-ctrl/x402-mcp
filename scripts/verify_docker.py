@@ -18,7 +18,7 @@ SCRATCH = Path(
 )
 IMAGE = "x402-mcp"
 PORT = 8402
-EXPECTED_TOOLS = 14
+EXPECTED_TOOLS = 15
 SERVICE_ID = "x402-micropayments-mcp"
 
 

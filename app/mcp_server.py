@@ -295,5 +295,17 @@ async def swarm_revenue_report(agent_id: str | None = None) -> str:
     )
 
 
+@mcp.tool()
+async def get_base_pulse(depth: int | None = None, agent_id: str | None = None) -> str:
+    """Live Base Network Pulse: synthesized settlement-conditions intelligence
+    (base fee, EIP-1559 projection, utilization trend, USD settlement cost, and a
+    settle-now/hold verdict) computed from real Base RPC data + ETH spot price."""
+    from app import pulse
+
+    return await _execute_tool(
+        "get_base_pulse", agent_id, lambda _: pulse.get_pulse(depth)
+    )
+
+
 async def _sync_result(data: dict[str, Any]) -> dict[str, Any]:
     return data

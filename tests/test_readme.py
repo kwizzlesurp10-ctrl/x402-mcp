@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 
 
-def test_readme_features_says_fourteen_tools() -> None:
+def test_readme_features_says_fifteen_tools() -> None:
     text = README.read_text(encoding="utf-8")
-    assert "14 MCP tools" in text
-    assert "13 MCP tools" not in text
+    assert "15 MCP tools" in text
+    assert "14 MCP tools" not in text
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOLS))

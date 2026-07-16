@@ -92,6 +92,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "margins, per-source profit scores",
         "tier": "free",
     },
+    {
+        "name": "get_base_pulse",
+        "description": "Live Base Network Pulse: synthesized settlement-conditions "
+        "intelligence from real RPC data (base fee, utilization, USD cost, verdict)",
+        "tier": "free",
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)

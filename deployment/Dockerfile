@@ -1,3 +1,10 @@
+# x402-mcp server image.
+#
+# SELLER-ONLY storefront usage (Base Network Pulse):
+#   docker run --env-file seller.env -p 8402:8402 <image>
+# The seller path (publish, serve 402, settle) needs only
+# X402_PAY_TO_ADDRESS + CDP creds — NEVER EVM_PRIVATE_KEY (buyer-only).
+# See deployment/seller.env.example and docs/SELLER-STOREFRONT.md.
 FROM python:3.12-slim
 
 WORKDIR /app

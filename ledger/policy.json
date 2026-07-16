@@ -6,6 +6,6 @@
   "testnet_networks": ["eip155:84532"],
   "domain_denylist": [],
   "domain_allowlist": [],
-  "require_testnet_first": true,
+  "require_testnet_first": false,
   "receive_wallet": "0xSET_ME"
 }

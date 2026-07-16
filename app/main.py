@@ -207,6 +207,45 @@ async def swarm_products() -> list[dict]:
     return swarm_registry.products()
 
 
+@app.get("/swarm/assessment")
+async def swarm_assessment() -> dict:
+    """Strategic assessment: real signals, scored profit routes, prioritized
+    backlog, and human-gated growth items (the swarm's strategic core)."""
+    from app.swarm import assessor
+
+    return assessor.assess()
+
+
+@app.get("/pulse")
+async def base_pulse() -> dict:
+    """Live Base Network Pulse — synthesized settlement-conditions intelligence."""
+    from app import pulse
+
+    return await pulse.get_pulse()
+
+
+@app.post("/pulse/publish")
+async def pulse_publish() -> dict:
+    """Synthesize a live Pulse and list it as a payable x402 product."""
+    if not settings.dashboard_actions:
+        raise HTTPException(
+            status_code=403, detail="DASHBOARD_ACTIONS is disabled; publishing is off."
+        )
+    from app.swarm import publisher
+
+    agent_id = quota_store.resolve_agent_id(None)
+    product = await publisher.publish_pulse_product(agent_id)
+    base = settings.public_base_url.rstrip("/")
+    return {
+        "product_id": product.product_id,
+        "topic": product.topic,
+        "price_usdc": product.price_usdc,
+        "network": product.network,
+        "pay_to": (product.seller_requirements or {}).get("pay_to"),
+        "purchase_url": f"{base}/swarm/products/{product.product_id}/purchase",
+    }
+
+
 @app.post("/swarm/run")
 async def swarm_run(body: SwarmRunRequest) -> dict:
     """Run one swarm cycle in-process so the listing is hosted by this server.

@@ -53,6 +53,38 @@ export type SwarmRevenue = {
   recommendations: string[];
 };
 
+export type PulseResponse = {
+  generated_at: string;
+  chain: { name: string; network: string };
+  latest_block: number;
+  eth_price_usd: number;
+  network: { block_time_s: number; tps_est: number; gas_limit: number; gas_target: number };
+  fees: {
+    base_fee_gwei: number;
+    priority_fee_gwei: number;
+    next_base_fee_gwei: number;
+    next_base_fee_change_pct: number;
+  };
+  utilization: {
+    now_pct: number;
+    avg_pct: number;
+    trend: "rising" | "falling" | "flat";
+    headroom_x: number;
+    series_pct: number[];
+  };
+  settlement_cost: {
+    eth_transfer: { usd: number };
+    erc20_usdc_transfer: { usd: number };
+    x402_settle: { usd: number };
+  };
+  assessment: {
+    congestion: string;
+    verdict: "SETTLE_NOW" | "SETTLE_SOON" | "HOLD_IF_FLEXIBLE";
+    rationale: string;
+    window: string;
+  };
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
@@ -77,6 +109,7 @@ export const api = {
   ledgerSpend: () => getJson<LedgerRow[]>("/ledger/spend"),
   ledgerRevenue: () => getJson<LedgerRow[]>("/ledger/revenue"),
   wallet: () => getJson<WalletResponse>("/wallet"),
+  pulse: () => getJson<PulseResponse>("/pulse"),
   swarmProducts: () => getJson<SwarmProduct[]>("/swarm/products"),
   swarmRevenue: () => getJson<SwarmRevenue>("/swarm/revenue"),
   probe: (url: string, method = "GET") =>

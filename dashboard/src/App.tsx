@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type DoctorCheck, type LedgerRow, type StatsResponse, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
+import { api, type DoctorCheck, type LedgerRow, type PulseResponse, type StatsResponse, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
 import { CommandPalette } from "./components/CommandPalette";
+import { PulsePanel } from "./components/PulsePanel";
 import { SwarmActivity } from "./components/SwarmActivity";
 import { Inspector402 } from "./components/Inspector402";
 import { MissionProgress } from "./components/MissionProgress";
@@ -43,6 +44,7 @@ export default function App() {
   const [spend, setSpend] = useState<LedgerRow[]>([]);
   const [revenue, setRevenue] = useState<LedgerRow[]>([]);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
+  const [pulse, setPulse] = useState<PulseResponse | null>(null);
   const [products, setProducts] = useState<SwarmProduct[]>([]);
   const [swarmRevenue, setSwarmRevenue] = useState<SwarmRevenue | null>(null);
   const [activity, setActivity] = useState<StreamEvent[]>([]);
@@ -118,6 +120,37 @@ export default function App() {
         note: "Demo wallet — no real keys.",
       });
       setRateHistory([10, 9, 8, 7, 8, 9, 10]);
+      setPulse({
+        generated_at: new Date().toISOString(),
+        chain: { name: "Base", network: "eip155:8453" },
+        latest_block: 24_500_000,
+        eth_price_usd: 3120.44,
+        network: { block_time_s: 2.0, tps_est: 42.7, gas_limit: 240_000_000, gas_target: 120_000_000 },
+        fees: {
+          base_fee_gwei: 0.024,
+          priority_fee_gwei: 0.001,
+          next_base_fee_gwei: 0.023,
+          next_base_fee_change_pct: -4.2,
+        },
+        utilization: {
+          now_pct: 38,
+          avg_pct: 44,
+          trend: "falling",
+          headroom_x: 2.6,
+          series_pct: [52, 49, 47, 45, 43, 40, 38],
+        },
+        settlement_cost: {
+          eth_transfer: { usd: 0.0015 },
+          erc20_usdc_transfer: { usd: 0.0038 },
+          x402_settle: { usd: 0.0041 },
+        },
+        assessment: {
+          congestion: "low",
+          verdict: "SETTLE_NOW",
+          rationale: "Base fees are low and utilization is falling — settlement is cheap right now.",
+          window: "Next ~10 min favorable",
+        },
+      });
       setError(null);
       return;
     }
@@ -138,6 +171,7 @@ export default function App() {
       setWallet(w);
       setProducts(pr);
       setSwarmRevenue(srev);
+      api.pulse().then(setPulse).catch(() => {});
       const rateRemaining = s.agents.length
         ? Math.min(...s.agents.map((a) => a.rate_limit_remaining))
         : 10;
@@ -433,6 +467,8 @@ export default function App() {
           </h3>
           <WalletPanel wallet={wallet} density={density} />
         </section>
+
+        <PulsePanel pulse={pulse} />
 
         <section className="panel" style={{ gridColumn: "span 8" }}>
           <h3>Activity</h3>

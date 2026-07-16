@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     svm_private_key: str | None = None
 
     x402_pay_to_address: str | None = None
+    # Base Network Pulse synthesis inputs (real data sources).
+    base_rpc_url: str = "https://mainnet.base.org"
+    eth_price_url: str = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
+    pulse_depth: int = 12  # blocks sampled per pulse
+    pulse_price: str = "$8.00"  # list price for a synthesized Pulse report
+
     x402_facilitator_url: str = "https://x402.org/facilitator"
     x402_default_network: str = "eip155:84532"
     x402_default_price: str = "$0.01"
