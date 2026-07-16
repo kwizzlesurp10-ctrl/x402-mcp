@@ -201,6 +201,30 @@ def get_supported_networks() -> SupportedNetworksOutput:
     )
 
 
+def parse_amount_atomic(value: Any) -> int | None:
+    """Parse a Bazaar `accepts[].amount` into atomic units (1e6 = 1 USDC).
+
+    Catalog items normally advertise atomic-unit integers, but some now send
+    decimal-USDC strings (e.g. "0.016"); treat any value with a fractional
+    part as decimal USDC. Returns None for unparseable values so callers can
+    skip the entry instead of dropping the whole catalog.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        num = float(text)
+    except (TypeError, ValueError):
+        return None
+    if num < 0:
+        return None
+    if "." in text or "e" in text.lower():
+        return int(round(num * 1_000_000))
+    return int(num)
+
+
 async def discover_services(params: DiscoverServicesInput) -> dict[str, Any]:
     """Query Bazaar via public facilitator.get_supported + httpx discovery fetch."""
     facilitator = _facilitator_client()
@@ -224,7 +248,11 @@ async def discover_services(params: DiscoverServicesInput) -> dict[str, Any]:
         items = [
             i
             for i in items
-            if any(int(r.get("amount", 0)) <= max_atomic for r in i.get("accepts", []))
+            if any(
+                amount is not None and amount <= max_atomic
+                for r in i.get("accepts", [])
+                for amount in (parse_amount_atomic(r.get("amount", 0)),)
+            )
         ]
 
     return {

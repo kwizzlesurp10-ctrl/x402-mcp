@@ -10,6 +10,7 @@ phase to the shared SSE stream so activity is visible live.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -30,11 +31,14 @@ def _parse_accepts(accepts: list[dict[str, Any]]) -> tuple[float | None, str | N
     """Pick the cheapest payment option; return (price_usdc, network)."""
     if not accepts:
         return None, None
-    best = min(accepts, key=lambda a: int(a.get("amount", 10**12) or 10**12))
-    try:
-        price = int(best.get("amount", 0)) / 1_000_000
-    except (TypeError, ValueError):
-        price = None
+
+    def _atomic(a: dict[str, Any]) -> int:
+        amount = x402_services.parse_amount_atomic(a.get("amount"))
+        return amount if amount is not None else 10**12
+
+    best = min(accepts, key=_atomic)
+    amount = x402_services.parse_amount_atomic(best.get("amount"))
+    price = amount / 1_000_000 if amount is not None else None
     return price, best.get("network")
 
 
@@ -184,6 +188,19 @@ async def treasurer_buy(run: SwarmRun, approved: list[Candidate]) -> list[Purcha
             result = await x402_services.pay_and_fetch(
                 PayAndFetchInput(url=cand.url, preferred_network=network)
             )
+            if result.get("status_code") in (404, 405):
+                # Many upstream x402 services are POST-only query APIs. A
+                # 404/405 means no 402 challenge was issued (nothing paid),
+                # so retry once as a JSON POST carrying the run topic.
+                result = await x402_services.pay_and_fetch(
+                    PayAndFetchInput(
+                        url=cand.url,
+                        method="POST",
+                        headers={"Content-Type": "application/json"},
+                        body=json.dumps({"query": run.topic}),
+                        preferred_network=network,
+                    )
+                )
         except ValueError as exc:
             # Hard config error (e.g. missing EVM key) — abort the whole run.
             if "EVM_PRIVATE_KEY" in str(exc):
