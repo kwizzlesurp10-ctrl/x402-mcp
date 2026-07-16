@@ -53,7 +53,18 @@ def _resolve_npx() -> str:
 
 def run_cmd(cmd: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged = {**os.environ, **(env or {}), "GOAL_SCRATCH": str(SCRATCH)}
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=merged, shell=False)
+    # Force UTF-8 decoding: Windows defaults to cp1252, which dies on the
+    # UTF-8 punctuation now present in git diff / tool output.
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=merged,
+        shell=False,
+    )
 
 
 def _initial_commit_sha() -> str:
