@@ -98,6 +98,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "intelligence from real RPC data (base fee, utilization, USD cost, verdict)",
         "tier": "free",
     },
+    {
+        "name": "get_os_metrics",
+        "description": "Host OS telemetry: CPU, memory, swap, disk, network, and "
+        "process signals with an ok/warn/critical health verdict",
+        "tier": "free",
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)

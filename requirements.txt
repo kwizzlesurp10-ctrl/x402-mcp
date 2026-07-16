@@ -9,6 +9,7 @@ solana>=0.36.0,<0.40.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
 httpx>=0.28.0
+psutil>=6.0.0
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
 anyio>=4.0.0

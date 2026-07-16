@@ -4,7 +4,7 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 
 ## Features
 
-- **15 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, and swarm-agency flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **16 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
 - **Stripe payment rail** (primary): `create_stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
 - **x402/Coinbase rail** (alternate/future): crypto micropayments via facilitator and CDP discovery
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
@@ -60,6 +60,7 @@ curl http://localhost:8402/health
 | `settle_composite_sale` | Verify + settle a buyer's payment for a listed composite and record revenue |
 | `swarm_revenue_report` | Portfolio revenue intelligence: spend, revenue, LTV:CAC, margins, per-source profit scores |
 | `get_base_pulse` | Live Base Network Pulse: synthesized settlement-conditions intelligence (base fee, utilization, USD cost, verdict) from real RPC data |
+| `get_os_metrics` | Host OS telemetry: CPU, memory, swap, disk, network, and process signals with an ok/warn/critical health verdict |
 
 ## Environment
 

@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     pulse_depth: int = 12  # blocks sampled per pulse
     pulse_price: str = "$8.00"  # list price for a synthesized Pulse report
 
+    # Host OS monitoring (mission control): sampling cadence + health thresholds.
+    os_monitor_enabled: bool = True
+    os_monitor_interval_seconds: float = 15.0
+    os_monitor_history_size: int = 720  # ~3h of samples at 15s cadence
+    os_cpu_warn_pct: float = 75.0
+    os_cpu_crit_pct: float = 90.0
+    os_mem_warn_pct: float = 80.0
+    os_mem_crit_pct: float = 92.0
+    os_disk_warn_pct: float = 85.0
+    os_disk_crit_pct: float = 95.0
+
     x402_facilitator_url: str = "https://x402.org/facilitator"
     x402_default_network: str = "eip155:84532"
     x402_default_price: str = "$0.01"

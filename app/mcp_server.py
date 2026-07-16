@@ -307,5 +307,24 @@ async def get_base_pulse(depth: int | None = None, agent_id: str | None = None) 
     )
 
 
+@mcp.tool()
+async def get_os_metrics(
+    include_processes: bool = False, agent_id: str | None = None
+) -> str:
+    """Host OS telemetry: CPU, memory, swap, disk, network, and process
+    signals with an ok/warn/critical health verdict, sampled live from the
+    machine running the server. Optionally includes the top processes by
+    memory."""
+    from app import os_monitor
+
+    return await _execute_tool(
+        "get_os_metrics",
+        agent_id,
+        lambda _: _sync_result(
+            os_monitor.get_os_metrics(include_processes=include_processes)
+        ),
+    )
+
+
 async def _sync_result(data: dict[str, Any]) -> dict[str, Any]:
     return data

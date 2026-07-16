@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager, suppress
 from typing import Literal
 
 import httpx
@@ -31,14 +33,35 @@ from app.stripe_payments import (
     create_checkout_session,
     handle_stripe_webhook,
 )
-from app import wallet_read, x402_services
+from app import os_monitor, wallet_read, x402_services
 
 logger = logging.getLogger("x402")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Run the OS-monitor background sampler for continuous history + alerts.
+
+    Endpoints also sample on demand, so nothing breaks when the lifespan
+    doesn't run (e.g. bare TestClient without a context manager).
+    """
+    sampler = (
+        asyncio.create_task(os_monitor.sampler_loop())
+        if settings.os_monitor_enabled
+        else None
+    )
+    yield
+    if sampler:
+        sampler.cancel()
+        with suppress(asyncio.CancelledError):
+            await sampler
+
 
 app = FastAPI(
     title="x402 Micropayments MCP",
     description="MCP server for x402 HTTP micropayments with agent-commerce overlay",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 # TODO auth before public exposure — dashboard CORS for local Vite dev only.
@@ -133,6 +156,18 @@ async def tool_events() -> StreamingResponse:
 async def doctor_report() -> dict:
     """Machine-readable health checks for setup wizard."""
     return run_checks()
+
+
+@app.get("/os")
+async def os_snapshot(processes: bool = Query(default=False)) -> dict:
+    """Host OS telemetry snapshot with ok/warn/critical verdict."""
+    return os_monitor.get_os_metrics(include_processes=processes)
+
+
+@app.get("/os/history")
+async def os_history(limit: int = Query(default=120, ge=1, le=720)) -> dict:
+    """Rolling OS telemetry history (oldest first)."""
+    return {"samples": os_monitor.get_history(limit)}
 
 
 @app.get("/wallet")

@@ -59,6 +59,24 @@ def emit_swarm_step(
     emit_tool_event(action, agent_id, meta)
 
 
+def emit_os_alert(*, status: str, previous: str, concerns: list[str]) -> None:
+    """Emit a host-OS health-level transition onto the shared event stream.
+
+    Rides the tool-event pipe (same as swarm steps) so existing dashboard
+    subscribers see it without a new stream; meta.os_alert marks the kind.
+    """
+    emit_tool_event(
+        "os_monitor",
+        "os-monitor",
+        {
+            "os_alert": True,
+            "status": status,
+            "previous": previous,
+            "concerns": concerns,
+        },
+    )
+
+
 def recent_events(limit: int = 200) -> list[dict[str, Any]]:
     items = list(_recent)
     return items[-limit:]
