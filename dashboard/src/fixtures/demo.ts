@@ -1,4 +1,4 @@
-import type { DoctorCheck, LedgerRow, StatsResponse } from "../api/client";
+import type { DoctorCheck, LedgerRow, OsSnapshot, StatsResponse } from "../api/client";
 
 export const demoStats: StatsResponse = {
   agents: [
@@ -47,6 +47,24 @@ export const demoActivity = [
   { type: "tool", ts: "2026-07-09T13:04:00Z", tool: "get_payment_requirements", agent_id: "scout-01", meta: { quota_remaining: 459 } },
   { type: "tool", ts: "2026-07-09T13:03:00Z", tool: "pay_and_fetch", agent_id: "treasurer-01", meta: { quota_remaining: 492 } },
 ];
+
+export const demoOs: OsSnapshot = {
+  ts: "2026-07-09T13:05:00Z",
+  status: "warn",
+  concerns: ["memory at 86.4% (warn)"],
+  cpu: { percent: 22.5, cores_logical: 12, cores_physical: 6, load_avg: null },
+  memory: { total_mb: 7488.0, available_mb: 1019.6, percent: 86.4 },
+  swap: { total_mb: 12160.0, used_mb: 3480.2, percent: 28.6 },
+  disk: { path: "C:\\", total_gb: 930.57, free_gb: 320.4, percent: 65.6 },
+  network: { bytes_sent: 1_204_000, bytes_recv: 9_811_000, sent_kbps: 4.2, recv_kbps: 38.7 },
+  process: { pid: 4242, rss_mb: 96.3, cpu_percent: 1.2, threads: 14 },
+  system: {
+    platform: "Windows-11 (demo)",
+    python: "3.12.0",
+    process_count: 284,
+    uptime_seconds: 2 * 86400 + 5 * 3600,
+  },
+};
 
 export const demoDoctor: DoctorCheck[] = [
   { id: "pay_to", name: "Receive wallet", status: "pass", message: "Configured (demo)" },

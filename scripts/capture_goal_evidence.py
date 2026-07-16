@@ -25,7 +25,7 @@ UPLOAD_SCRIPT = ROOT / "scripts" / "drive" / "upload-x402-folders.ts"
 PARENT_ROOT = Path(r"C:\Users\Keith")
 
 sys.path.insert(0, str(ROOT))
-from app.tools_registry import EXPECTED_TOOL_NAMES  # noqa: E402
+from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_COUNT  # noqa: E402
 
 EXPECTED_TOOLS = sorted(EXPECTED_TOOL_NAMES)
 
@@ -131,16 +131,17 @@ def step_scope_anchor() -> None:
 def step_readme() -> int:
     readme = ROOT / "README.md"
     text = readme.read_text(encoding="utf-8")
+    count_claim = f"{TOOL_COUNT} MCP tools"
     lines = [
         "=== README verification ===",
-        f"features_15_tools={'15 MCP tools' in text}",
+        f"features_tool_count_claim={count_claim!r} present={count_claim in text}",
         f"features_not_6={'6 MCP tools' not in text}",
     ]
     missing = [t for t in EXPECTED_TOOLS if f"`{t}`" not in text]
     lines.append(f"missing_tools={missing}")
     lines.append(f"all_tools_present={not missing}")
     (SCRATCH / "readme_verify.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return 0 if not missing and "15 MCP tools" in text else 1
+    return 0 if not missing and count_claim in text else 1
 
 
 def step_drive_staging() -> int:

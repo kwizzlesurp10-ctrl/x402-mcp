@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type DoctorCheck, type LedgerRow, type PulseResponse, type StatsResponse, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
+import { api, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
 import { CommandPalette } from "./components/CommandPalette";
+import { OsHealthPanel } from "./components/OsHealthPanel";
 import { PulsePanel } from "./components/PulsePanel";
 import { SwarmActivity } from "./components/SwarmActivity";
 import { Inspector402 } from "./components/Inspector402";
@@ -11,7 +12,7 @@ import { RateSparkline } from "./components/RateSparkline";
 import { SellerWizard } from "./components/SellerWizard";
 import { VirtualizedLedger } from "./components/VirtualizedLedger";
 import { WalletPanel } from "./components/WalletPanel";
-import { demoActivity, demoDoctor, demoRevenue, demoSpend, demoStats } from "./fixtures/demo";
+import { demoActivity, demoDoctor, demoOs, demoRevenue, demoSpend, demoStats } from "./fixtures/demo";
 import { explain } from "./glossary";
 import { useSSE, type StreamEvent } from "./hooks/useSSE";
 import { downloadText, ledgerToCsv, sumLedgerAtomic } from "./utils/ledger";
@@ -45,6 +46,7 @@ export default function App() {
   const [revenue, setRevenue] = useState<LedgerRow[]>([]);
   const [wallet, setWallet] = useState<WalletResponse | null>(null);
   const [pulse, setPulse] = useState<PulseResponse | null>(null);
+  const [os, setOs] = useState<OsSnapshot | null>(null);
   const [products, setProducts] = useState<SwarmProduct[]>([]);
   const [swarmRevenue, setSwarmRevenue] = useState<SwarmRevenue | null>(null);
   const [activity, setActivity] = useState<StreamEvent[]>([]);
@@ -120,6 +122,7 @@ export default function App() {
         note: "Demo wallet — no real keys.",
       });
       setRateHistory([10, 9, 8, 7, 8, 9, 10]);
+      setOs(demoOs);
       setPulse({
         generated_at: new Date().toISOString(),
         chain: { name: "Base", network: "eip155:8453" },
@@ -172,6 +175,7 @@ export default function App() {
       setProducts(pr);
       setSwarmRevenue(srev);
       api.pulse().then(setPulse).catch(() => {});
+      api.os().then(setOs).catch(() => {});
       const rateRemaining = s.agents.length
         ? Math.min(...s.agents.map((a) => a.rate_limit_remaining))
         : 10;
@@ -251,6 +255,7 @@ export default function App() {
       { id: "hero", label: "Go to net position", run: () => scrollTo("panel-hero") },
       { id: "wallet", label: "Go to wallet", run: () => scrollTo("panel-wallet") },
       { id: "swarm", label: "Go to swarm activity", run: () => scrollTo("panel-swarm") },
+      { id: "os", label: "Go to host OS health", run: () => scrollTo("panel-os") },
       { id: "inspector", label: "Go to 402 Inspector", run: () => scrollTo("panel-inspector") },
       { id: "spend", label: "Go to spend ledger", run: () => scrollTo("panel-spend") },
       { id: "revenue", label: "Go to revenue ledger", run: () => scrollTo("panel-revenue") },
@@ -469,6 +474,8 @@ export default function App() {
         </section>
 
         <PulsePanel pulse={pulse} />
+
+        <OsHealthPanel os={os} />
 
         <section className="panel" style={{ gridColumn: "span 8" }}>
           <h3>Activity</h3>

@@ -85,6 +85,29 @@ export type PulseResponse = {
   };
 };
 
+export type OsSnapshot = {
+  ts: string;
+  status: "ok" | "warn" | "critical";
+  concerns: string[];
+  cpu: {
+    percent: number;
+    cores_logical: number | null;
+    cores_physical: number | null;
+    load_avg: number[] | null;
+  };
+  memory: { total_mb: number; available_mb: number; percent: number };
+  swap: { total_mb: number; used_mb: number; percent: number };
+  disk: { path: string; total_gb: number; free_gb: number; percent: number };
+  network: {
+    bytes_sent: number;
+    bytes_recv: number;
+    sent_kbps: number | null;
+    recv_kbps: number | null;
+  } | null;
+  process: { pid: number; rss_mb: number; cpu_percent: number; threads: number } | null;
+  system: { platform: string; python: string; process_count: number; uptime_seconds: number };
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
@@ -110,6 +133,7 @@ export const api = {
   ledgerRevenue: () => getJson<LedgerRow[]>("/ledger/revenue"),
   wallet: () => getJson<WalletResponse>("/wallet"),
   pulse: () => getJson<PulseResponse>("/pulse"),
+  os: () => getJson<OsSnapshot>("/os"),
   swarmProducts: () => getJson<SwarmProduct[]>("/swarm/products"),
   swarmRevenue: () => getJson<SwarmRevenue>("/swarm/revenue"),
   probe: (url: string, method = "GET") =>
