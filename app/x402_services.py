@@ -264,7 +264,10 @@ async def get_payment_requirements(
 
 
 def _build_x402_client(preferred_network: str | None = None):
-    if not settings.evm_private_key:
+    from app.keyprovider import get_key_provider
+
+    private_key = get_key_provider().get_private_key()
+    if not private_key:
         raise ValueError(
             "EVM_PRIVATE_KEY is required for pay_and_fetch. "
             "Set it in .env or use get_payment_requirements for probe-only flows."
@@ -276,7 +279,7 @@ def _build_x402_client(preferred_network: str | None = None):
     from x402.mechanisms.evm.exact.register import register_exact_evm_client
 
     client = x402Client()
-    account = Account.from_key(settings.evm_private_key)
+    account = Account.from_key(private_key)
     register_exact_evm_client(client, EthAccountSigner(account))
 
     network = preferred_network or settings.x402_default_network

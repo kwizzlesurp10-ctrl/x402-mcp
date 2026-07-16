@@ -25,6 +25,8 @@ class Settings(BaseSettings):
 
     evm_private_key: str | None = None
     svm_private_key: str | None = None
+    # Signing-key source: "env" (default, deprecated) | keychain/hardware (pluggable).
+    key_provider: str = "env"
 
     x402_pay_to_address: str | None = None
     # Base Network Pulse synthesis inputs (real data sources).

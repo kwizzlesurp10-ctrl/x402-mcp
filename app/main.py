@@ -207,6 +207,14 @@ async def swarm_products() -> list[dict]:
     return swarm_registry.products()
 
 
+@app.get("/security")
+async def security() -> dict:
+    """Security posture: signing-key provider, seller-only capability, guidance."""
+    from app.keyprovider import security_posture
+
+    return security_posture()
+
+
 @app.get("/swarm/assessment")
 async def swarm_assessment() -> dict:
     """Strategic assessment: real signals, scored profit routes, prioritized
