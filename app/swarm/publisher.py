@@ -8,6 +8,7 @@ the margin is entirely in the synthesis.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -79,12 +80,15 @@ async def publish_pulse_product(
         ltv_cac_projected=0.0,
     )
 
-    requirements = x402_services.build_seller_requirements(
+    # build_seller_requirements does sync facilitator I/O (server.initialize());
+    # run it off the event loop so a hung facilitator can't freeze the API.
+    requirements = await asyncio.to_thread(
+        x402_services.build_seller_requirements,
         BuildSellerRequirementsInput(
             network=settings.swarm_sell_network,
             price=f"${price:.6f}",
             description=f"Base Network Pulse - settlement intelligence @ block {data['latest_block']}",
-        )
+        ),
     )
     product.seller_requirements = requirements
     product.status = "listed"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,18 +30,24 @@ def main() -> int:
         shell=True,
     )
 
+    # One pump thread per child: a single alternating readline loop stalls on
+    # whichever child is quiet, stops draining the other pipe, and freezes that
+    # child once its 64KB stdout buffer fills (uvicorn blocks mid-log write).
+    def _pump(proc: subprocess.Popen, prefix: str) -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            print(f"[{prefix}] {line}", end="", flush=True)
+
+    threads = [
+        threading.Thread(target=_pump, args=(api, "api"), daemon=True),
+        threading.Thread(target=_pump, args=(dash, "dash"), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+
     try:
-        while True:
-            if api.poll() is not None and dash.poll() is not None:
-                break
-            if api.stdout:
-                line = api.stdout.readline()
-                if line:
-                    print(f"[api] {line}", end="")
-            if dash.stdout:
-                line = dash.stdout.readline()
-                if line:
-                    print(f"[dash] {line}", end="")
+        api.wait()
+        dash.wait()
     except KeyboardInterrupt:
         api.terminate()
         dash.terminate()
