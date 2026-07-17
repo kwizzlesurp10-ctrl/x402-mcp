@@ -247,6 +247,35 @@ def run_checks() -> dict[str, Any]:
         )
     )
 
+    # Revenue-network coherence: a public deploy that collects payments must
+    # not serve testnet revenue challenges — free Sepolia USDC would buy real
+    # pro quota / tool credits.
+    from app.x402_services import resolve_revenue_network
+
+    revenue_net = resolve_revenue_network()
+    testnets = {"eip155:84532"}
+    base = settings.public_base_url.lower()
+    is_local = base.startswith(("http://localhost", "http://127.", "http://[::1]"))
+    if settings.x402_pay_to_address and not is_local and revenue_net in testnets:
+        checks.append(
+            _check(
+                "revenue_network",
+                "Revenue network",
+                "fail",
+                f"Public deploy would sell pro tier/credits on testnet {revenue_net}",
+                "Set REVENUE_NETWORK=eip155:8453 (or configure CDP creds)",
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "revenue_network",
+                "Revenue network",
+                "pass",
+                revenue_net,
+            )
+        )
+
     failed = sum(1 for c in checks if c["status"] == "fail")
     warned = sum(1 for c in checks if c["status"] == "warn")
 

@@ -42,6 +42,8 @@ use this manifest for goal verification instead of repo-wide `git status`.
 ## Bazaar discoverability + durable quota (2026-07-16)
 
 - Bazaar discovery extension on served 402 challenges: `build_seller_requirements` embeds `resource` info + `extensions.bazaar` (SDK `declare_discovery_extension` with the required `method` injected — the SDK helper alone emits an invalid extension outside its server wrapper) so a settled payment through the CDP facilitator catalogs the endpoint; threaded through composite (`merchant_list`) and Pulse (`publish_pulse_product`) listings via `app/swarm/models.py::purchase_discovery_metadata`; config knobs `BAZAAR_DISCOVERABLE` / `BAZAAR_SERVICE_NAME` / `BAZAAR_SERVICE_TAGS`; tests in `tests/test_discovery_extension.py`
+- Revenue-network coherence guard: `resolve_revenue_network()` (explicit `REVENUE_NETWORK` > first CDP network when creds set > default) used by pro-tier and tool-credit builders; `/doctor` FAILS when a public deploy with a receive wallet would serve testnet revenue challenges; tests in `tests/test_revenue_network.py`
+- `docs/DEPLOY-PLAN.md` + root `fly.toml` — seller-only public storefront deploy plan (Fly.io + Upstash Redis) ending in the one discoverable settle that triggers Bazaar cataloging
 - `RedisQuotaStore` (`app/commerce.py::build_quota_store`): REDIS_URL set + reachable → Redis-backed tier/credits/monthly-quota/Stripe-idempotency persistence; unreachable → loud fallback with reason; `/doctor` and `/stats` now report the ACTUAL live store mode, never the env var; deps `redis>=5` (+ `fakeredis` for tests); tests in `tests/test_redis_quota.py` and dual-backend `tests/test_commerce.py`
 
 ## Revenue paths (criteria 3)

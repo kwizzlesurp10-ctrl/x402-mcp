@@ -50,6 +50,11 @@ class Settings(BaseSettings):
 
     x402_facilitator_url: str = "https://x402.org/facilitator"
     x402_default_network: str = "eip155:84532"
+    # Network for revenue challenges (pro tier / tool credits). None resolves
+    # via x402_services.resolve_revenue_network(): first CDP network when CDP
+    # creds are set, else x402_default_network. Guards against a public deploy
+    # selling real quota for free testnet USDC on the Sepolia default.
+    revenue_network: str | None = None
     x402_default_price: str = "$0.01"
     # Buyer HTTP timeout; mainnet settlement via a facilitator can take 30-60s,
     # so keep this comfortably above the default httpx timeout.

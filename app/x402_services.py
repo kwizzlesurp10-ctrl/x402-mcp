@@ -528,6 +528,22 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     }
 
 
+def resolve_revenue_network() -> str:
+    """Network used for pro-tier / tool-credit revenue challenges.
+
+    Explicit REVENUE_NETWORK wins; else the first CDP-routed network when CDP
+    creds are set (a deploy with mainnet settlement creds must not hand out
+    real quota for free Sepolia USDC); else the default network (local dev).
+    """
+    if settings.revenue_network:
+        return settings.revenue_network
+    if settings.cdp_api_key_id and settings.cdp_api_key_secret:
+        nets = [n.strip() for n in settings.cdp_networks.split(",") if n.strip()]
+        if nets:
+            return nets[0]
+    return settings.x402_default_network
+
+
 def build_pro_upgrade_requirements(agent_id: str) -> dict[str, Any]:
     """Build x402 payment requirements to purchase Pro tier (revenue path)."""
     pay_to = settings.x402_pay_to_address
@@ -536,7 +552,7 @@ def build_pro_upgrade_requirements(agent_id: str) -> dict[str, Any]:
 
     result = build_seller_requirements(
         BuildSellerRequirementsInput(
-            network=settings.x402_default_network,
+            network=resolve_revenue_network(),
             pay_to=pay_to,
             price=settings.pro_tier_price,
             description=f"x402 MCP Pro tier for agent {agent_id}",
@@ -604,7 +620,7 @@ def build_tool_credits_requirements(agent_id: str, credits: int) -> dict[str, An
 
     result = build_seller_requirements(
         BuildSellerRequirementsInput(
-            network=settings.x402_default_network,
+            network=resolve_revenue_network(),
             pay_to=pay_to,
             price=settings.tool_credit_pack_price,
             description=f"x402 MCP tool credits ({credits}) for agent {agent_id}",
