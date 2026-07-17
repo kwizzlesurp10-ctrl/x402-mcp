@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
+from app import commerce
 from app.config import settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,10 +134,42 @@ def run_checks() -> dict[str, Any]:
             )
         )
 
-    redis_mode = "redis" if settings.redis_url else "memory"
+    # Probe the LIVE quota store object, not the env var: REDIS_URL being set
+    # proves nothing if startup fell back to memory.
+    store = commerce.quota_store
+    redis_mode = getattr(store, "mode", "memory")
     if redis_mode == "redis":
+        try:
+            store.ping()
+            checks.append(
+                _check(
+                    "redis",
+                    "Persistence",
+                    "pass",
+                    "Redis quota store active (live PING ok)",
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _check(
+                    "redis",
+                    "Persistence",
+                    "fail",
+                    f"Redis quota store lost its connection: {exc}",
+                    "Restore Redis availability, then restart the server",
+                )
+            )
+    elif settings.redis_url:
+        reason = getattr(store, "fallback_reason", None) or "unreachable at startup"
         checks.append(
-            _check("redis", "Persistence", "pass", "REDIS_URL configured")
+            _check(
+                "redis",
+                "Persistence",
+                "fail",
+                f"REDIS_URL set but running IN-MEMORY ({reason}) — "
+                "paid entitlements will not survive a restart",
+                "Verify REDIS_URL and Redis availability, then restart",
+            )
         )
     else:
         checks.append(

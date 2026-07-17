@@ -1,15 +1,22 @@
-"""Commerce overlay tests: quota, rate limits, meta envelope, pro tier."""
+"""Commerce overlay tests: quota, rate limits, meta envelope, pro tier.
+
+Parametrized over both quota stores — RedisQuotaStore (fakeredis-backed) must
+behave identically to InMemoryQuotaStore for every commerce rule.
+"""
 
 import json
 
+import fakeredis
 import pytest
 
-from app.commerce import InMemoryQuotaStore, QuotaExceededError
+from app.commerce import InMemoryQuotaStore, QuotaExceededError, RedisQuotaStore
 from app.config import settings
 
 
-@pytest.fixture
-def store() -> InMemoryQuotaStore:
+@pytest.fixture(params=["memory", "redis"])
+def store(request: pytest.FixtureRequest) -> InMemoryQuotaStore:
+    if request.param == "redis":
+        return RedisQuotaStore(fakeredis.FakeRedis(decode_responses=True))
     return InMemoryQuotaStore()
 
 
