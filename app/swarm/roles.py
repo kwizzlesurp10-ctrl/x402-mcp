@@ -24,7 +24,13 @@ from app.models import (
 )
 from app.ops_events import emit_swarm_step
 from app.swarm import ledger_writer, policy as policy_mod
-from app.swarm.models import Candidate, CompositeProduct, Purchase, SwarmRun
+from app.swarm.models import (
+    Candidate,
+    CompositeProduct,
+    Purchase,
+    SwarmRun,
+    purchase_discovery_metadata,
+)
 
 
 def _parse_accepts(accepts: list[dict[str, Any]]) -> tuple[float | None, str | None]:
@@ -340,11 +346,13 @@ def merchant_list(
     """
     # 6-dp so sub-cent composite prices aren't truncated (USDC has 6 decimals).
     price_str = f"${product.price_usdc:.6f}"
+    # Discovery metadata makes the served 402 Bazaar-catalogable on settle.
     requirements = x402_services.build_seller_requirements(
         BuildSellerRequirementsInput(
             network=sell_network,
             price=price_str,
             description=f"Composite research report: {product.topic}",
+            **purchase_discovery_metadata(product, settings.public_base_url),
         )
     )
     product.seller_requirements = requirements

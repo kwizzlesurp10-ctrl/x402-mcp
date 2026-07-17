@@ -59,6 +59,15 @@ class Settings(BaseSettings):
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
 
+    # Bazaar discoverability: when a 402 challenge is built with a resource_url,
+    # embed the bazaar discovery extension + service metadata so a settled
+    # payment through the CDP facilitator catalogs the endpoint in the Bazaar.
+    bazaar_discoverable: bool = True
+    # Facilitator-side limits (specs/extensions/bazaar.md): name <= 32 printable
+    # ASCII chars; <= 5 tags, each <= 32 chars. Violations are silently dropped.
+    bazaar_service_name: str = "x402 MCP Storefront"
+    bazaar_service_tags: str = "base,intelligence,x402,data"
+
     # Coinbase CDP facilitator (required to verify/settle x402 on Base mainnet;
     # x402.org only settles `exact` on Base Sepolia). Ed25519 API key from the
     # CDP portal — rotate any key that has ever been shared in plaintext.

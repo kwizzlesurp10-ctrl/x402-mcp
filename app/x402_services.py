@@ -405,6 +405,52 @@ async def pay_and_fetch(params: PayAndFetchInput) -> dict[str, Any]:
         }
 
 
+def _build_discovery_extension(
+    method: str,
+    input_example: dict[str, Any] | None,
+    output_example: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the Bazaar discovery extension dict ({"bazaar": {info, schema}}).
+
+    Buyer x402 clients copy PaymentRequired.extensions verbatim into the signed
+    PaymentPayload; at settle time the CDP facilitator's extract_discovery_info
+    reads it to catalog the endpoint. The SDK's declare_discovery_extension
+    omits the HTTP method (normally injected per-request by
+    bazaar_resource_server_extension), but we serve a pre-encoded header, so
+    inject it here — without it, `info` fails validation against its own
+    `schema` and the facilitator catalogs nothing.
+    """
+    from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
+    from x402.extensions.bazaar.types import BAZAAR, is_body_method
+
+    method = method.upper()
+    extension = declare_discovery_extension(
+        input=input_example,
+        body_type="json" if is_body_method(method) else None,
+        output=OutputConfig(example=output_example)
+        if output_example is not None
+        else None,
+    )
+    extension[BAZAAR.key]["info"]["input"]["method"] = method
+    return extension
+
+
+def _build_resource_info(params: BuildSellerRequirementsInput) -> Any:
+    """ResourceInfo (url/description/mime + Bazaar service metadata) for a 402."""
+    from x402.schemas import ResourceInfo
+
+    tags = [
+        t.strip()[:32] for t in settings.bazaar_service_tags.split(",") if t.strip()
+    ][:5]
+    return ResourceInfo(
+        url=str(params.resource_url),
+        description=params.description,
+        mime_type=params.mime_type,
+        service_name=settings.bazaar_service_name.strip()[:32] or None,
+        tags=tags or None,
+    )
+
+
 def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str, Any]:
     pay_to = params.pay_to or settings.x402_pay_to_address
     if not pay_to:
@@ -436,12 +482,33 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     )
     requirements = server.build_payment_requirements(config)
 
+    # Bazaar discoverability: with a resource_url the challenge carries
+    # ResourceInfo, and (unless opted out) the bazaar discovery extension —
+    # without it a settled payment through the CDP facilitator catalogs nothing.
+    resource_info = None
+    extensions = None
+    if params.resource_url:
+        resource_info = _build_resource_info(params)
+        discoverable = (
+            params.discoverable
+            if params.discoverable is not None
+            else settings.bazaar_discoverable
+        )
+        if discoverable:
+            extensions = _build_discovery_extension(
+                params.discovery_method,
+                params.discovery_input_example,
+                params.discovery_output_example,
+            )
+
     # Encode the ready-to-serve 402 challenge header (PAYMENT-REQUIRED) so an
     # HTTP endpoint can hand it to a buyer's x402 client verbatim.
     payment_required = PaymentRequired(
         x402_version=2,
         accepts=list(requirements),
         error=params.description,
+        resource=resource_info,
+        extensions=extensions,
     )
     payment_required_header = encode_payment_required_header(payment_required)
 
@@ -454,6 +521,8 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
         "pay_to": pay_to,
         "price": params.price,
         "scheme": params.scheme,
+        "resource": resource_info.model_dump() if resource_info else None,
+        "discoverable": extensions is not None,
         "facilitator_url": _facilitator_url_for(params.network),
         "sdk": "x402ResourceServer.build_payment_requirements",
     }

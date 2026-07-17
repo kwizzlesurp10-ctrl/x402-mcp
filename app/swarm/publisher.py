@@ -16,7 +16,7 @@ from app import pulse, x402_services
 from app.config import settings
 from app.models import BuildSellerRequirementsInput
 from app.ops_events import emit_swarm_step
-from app.swarm.models import CompositeProduct
+from app.swarm.models import CompositeProduct, purchase_discovery_metadata
 from app.swarm.registry import swarm_registry
 
 
@@ -82,12 +82,14 @@ async def publish_pulse_product(
 
     # build_seller_requirements does sync facilitator I/O (server.initialize());
     # run it off the event loop so a hung facilitator can't freeze the API.
+    # Discovery metadata makes the served 402 Bazaar-catalogable on settle.
     requirements = await asyncio.to_thread(
         x402_services.build_seller_requirements,
         BuildSellerRequirementsInput(
             network=settings.swarm_sell_network,
             price=f"${price:.6f}",
             description=f"Base Network Pulse - settlement intelligence @ block {data['latest_block']}",
+            **purchase_discovery_metadata(product, settings.public_base_url),
         ),
     )
     product.seller_requirements = requirements

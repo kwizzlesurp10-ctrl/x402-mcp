@@ -115,15 +115,31 @@ async def build_seller_requirements(
     price: str = "$0.01",
     scheme: str = "exact",
     description: str = "Paid MCP-backed API access",
+    resource_url: str | None = None,
+    mime_type: str | None = "application/json",
+    discoverable: bool | None = None,
+    discovery_method: str = "GET",
+    discovery_input_example: dict | None = None,
+    discovery_output_example: dict | None = None,
     agent_id: str | None = None,
 ) -> str:
-    """Build seller-side x402 payment requirements via x402ResourceServer."""
+    """Build seller-side x402 payment requirements via x402ResourceServer.
+
+    Pass resource_url (plus optional discovery_* fields) to embed the Bazaar
+    discovery extension so a settled payment catalogs the endpoint.
+    """
     params = BuildSellerRequirementsInput(
         network=network,
         pay_to=pay_to,
         price=price,
         scheme=scheme,
         description=description,
+        resource_url=resource_url,
+        mime_type=mime_type,
+        discoverable=discoverable,
+        discovery_method=discovery_method,
+        discovery_input_example=discovery_input_example,
+        discovery_output_example=discovery_output_example,
     )
     return await _execute_tool(
         "build_seller_requirements",
