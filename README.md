@@ -1,16 +1,29 @@
 # x402 Micropayments MCP
 
-Production MCP server for the [x402](https://x402.org) HTTP micropayment protocol. Enables AI agents to discover paid services, probe `402 Payment Required` responses, pay with stablecoins, and build/verify seller payment configs.
+Production MCP server for the [x402](https://x402.org) HTTP micropayment protocol — **live on Base mainnet, selling real data products to AI agents for USDC today**. Agents discover paid services, probe `402 Payment Required` responses, pay with stablecoins, and build/verify seller payment configs; the server runs both sides of that market.
+
+## Live on Base mainnet
+
+**Storefront:** https://x402-mcp.onrender.com — x402 v2 challenges served, USDC verified + settled through the Coinbase CDP facilitator (`eip155:8453`).
+
+| Product | Price | What you get |
+|---------|-------|--------------|
+| `GET /mn/property-check?address=…` | $0.01 USDC | Minneapolis rental-compliance snapshot composed from 3 live City of Minneapolis open datasets — the first machine-payable housing-compliance data for agents |
+| `GET /swarm/products/{id}/purchase` | $0.25 USDC | Base Network Pulse: live settlement-conditions intelligence (EIP-1559 math + real RPC + ETH spot), listed with the x402 Bazaar discovery extension |
+
+The public seller host holds **no spend key** — it only verifies and settles inbound payments ([docs/SELLER-STOREFRONT.md](docs/SELLER-STOREFRONT.md)). Roadmap: [ROADMAP.md](ROADMAP.md).
 
 ## Features
 
 - **16 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
-- **Stripe payment rail** (primary): `create_stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
-- **x402/Coinbase rail** (alternate/future): crypto micropayments via facilitator and CDP discovery
+- **x402/Coinbase rail** (primary): x402 v2 wire format end to end — challenge generation, verify + settle via the CDP facilitator on Base mainnet, Bazaar discoverability on listings
+- **Stripe payment rail** (fiat alternative): `create_stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
 - **FastMCP** + **FastAPI** with `/.well-known/mcp` manifest
 - **stdio** (Cursor/Grok local) and **HTTP/SSE** (remote connector) transports
 - **Redis-ready** quota store (in-memory default)
+- **Operator dashboard** at `/dashboard` — live health, per-agent quota burn-down meters, tool matrix, and revenue paths (single-file, zero build step)
+- **Hermetic test suite** — a local mock facilitator/discovery backend spins up automatically; no internet required. Set `X402_LIVE_TESTS=1` to run against x402.org
 
 ## Quick Start (Mission Control)
 
@@ -39,7 +52,26 @@ Add to Cursor MCP config (`manifests/cursor-mcp.json`).
 uvicorn app.main:app --host 0.0.0.0 --port 8402
 curl http://localhost:8402/.well-known/mcp
 curl http://localhost:8402/health
+# then open http://localhost:8402/dashboard
 ```
+
+## Paid HTTP Resource: MN Property Check
+
+First-party sellable endpoint (the seller side of this repo's own tooling):
+
+```
+GET /mn/property-check?address=1700%20Penn%20Ave%20N
+```
+
+x402-gated at **$0.01 USDC** (`MN_PROPERTY_CHECK_PRICE`). Unpaid requests get a
+`402` with x402 v2 `PAYMENT-REQUIRED` terms; paid requests are verified and
+settled via the facilitator, then served with a `PAYMENT-RESPONSE` receipt.
+
+One call returns a composite Minneapolis rental-compliance snapshot from live
+City of Minneapolis Open Data: active rental license (status, tier, licensed
+units, expiration, ward/neighborhood), regulatory violation case history
+(APN-joined), and condemned/boarded status. Owner phone/email in the source
+data are intentionally never served. Public records, as-is; not legal advice.
 
 ## MCP Tools
 
@@ -66,11 +98,13 @@ curl http://localhost:8402/health
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `STRIPE_SECRET_KEY` | For Stripe checkout | Primary fiat payment rail |
+| `X402_PAY_TO_ADDRESS` | For selling | Recipient wallet — all x402 sales settle here |
+| `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` | For Base mainnet | Coinbase CDP facilitator creds (verify + settle on `eip155:8453`) |
+| `SWARM_SELL_NETWORK` | For mainnet listings | Set `eip155:8453` to list products on Base mainnet (default: Base Sepolia) |
+| `EVM_PRIVATE_KEY` | For `pay_and_fetch` | Buyer wallet private key — **never set this on a public seller host** |
+| `STRIPE_SECRET_KEY` | For Stripe checkout | Fiat payment rail |
 | `STRIPE_WEBHOOK_SECRET` | For `/stripe/webhook` | Webhook signature verification |
-| `EVM_PRIVATE_KEY` | For `pay_and_fetch` | Buyer wallet private key (x402 alternate) |
-| `X402_PAY_TO_ADDRESS` | For x402 seller tools | Recipient wallet (Coinbase/x402 future rail) |
-| `X402_FACILITATOR_URL` | No | Default: `https://x402.org/facilitator` |
+| `X402_FACILITATOR_URL` | No | Default: `https://x402.org/facilitator` (testnet; CDP handles mainnet) |
 | `UPGRADE_URL` | No | Commerce tier upgrade link |
 
 ## Commerce Meta Envelope

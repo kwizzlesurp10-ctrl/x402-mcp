@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: x402-mcp
+    runtime: docker
+    plan: starter  # $7/mo — always-on (free tier spins down after 15min)
+    region: oregon
+    envVars:
+      - key: EVM_PRIVATE_KEY
+        sync: false  # set manually in Render dashboard
+      - key: X402_PAY_TO_ADDRESS
+        sync: false
+      - key: X402_DEFAULT_NETWORK
+        value: "eip155:8453"  # Base mainnet for revenue
+      - key: OPERATOR_TOKEN
+        sync: false  # set manually — protects /quota endpoint
+      - key: PUBLIC_BASE_URL
+        fromService:
+          type: web
+          name: x402-mcp
+          property: host

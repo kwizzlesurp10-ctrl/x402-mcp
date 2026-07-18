@@ -3,21 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from contextlib import asynccontextmanager, suppress
-from typing import Literal
+from typing import AsyncIterator, Literal
 
 import httpx
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field, HttpUrl
 
 from app.commerce import quota_store
 from app.config import settings
+from app.dashboard import DASHBOARD_HTML
 from app.doctor import run_checks
 from app.ledger_io import read_ledger_rows
+from app.logging_config import setup_logging
 from app.manifest import build_mcp_manifest
 from app.mcp_server import mcp
 from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput
@@ -35,12 +44,22 @@ from app.stripe_payments import (
 )
 from app import os_monitor, wallet_read, x402_services
 
+setup_logging()
 logger = logging.getLogger("x402")
+log = logger
+
+# Build the MCP Streamable HTTP app up front so its session manager can run
+# inside the FastAPI lifespan (Starlette does not run mounted sub-app lifespans;
+# without this every MCP session dies with "Session terminated" at initialize).
+try:
+    _mcp_http_app = mcp.streamable_http_app()
+except AttributeError:
+    _mcp_http_app = None
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI):
-    """Run the OS-monitor background sampler for continuous history + alerts.
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Run the MCP session manager AND the OS-monitor background sampler.
 
     Endpoints also sample on demand, so nothing breaks when the lifespan
     doesn't run (e.g. bare TestClient without a context manager).
@@ -50,11 +69,17 @@ async def _lifespan(app: FastAPI):
         if settings.os_monitor_enabled
         else None
     )
-    yield
-    if sampler:
-        sampler.cancel()
-        with suppress(asyncio.CancelledError):
-            await sampler
+    try:
+        if _mcp_http_app is not None:
+            async with mcp.session_manager.run():
+                yield
+        else:
+            yield
+    finally:
+        if sampler:
+            sampler.cancel()
+            with suppress(asyncio.CancelledError):
+                await sampler
 
 
 app = FastAPI(
@@ -119,6 +144,20 @@ async def generic_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard() -> HTMLResponse:
+    """Operator terminal: live health, quota meters, tool matrix, revenue paths."""
+    # Inject operator token so dashboard JS can auth /quota polls.
+    token_js = f"var __OP_TOKEN__={json.dumps(settings.operator_token)};"
+    html = DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", token_js, 1)
+    return HTMLResponse(html)
+
+
 @app.get("/health")
 async def health() -> dict:
     return {
@@ -127,6 +166,7 @@ async def health() -> dict:
         "x402_facilitator": settings.x402_facilitator_url,
         "wallet_configured": bool(settings.evm_private_key),
         "stripe_configured": bool(settings.stripe_secret_key),
+        "pay_to_configured": bool(settings.x402_pay_to_address),
     }
 
 
@@ -388,9 +428,16 @@ async def swarm_revenue() -> dict:
     return sovereign.build_revenue_report()
 
 
-@app.get("/quota/{agent_id}")
-async def quota_status(agent_id: str) -> dict:
-    """Debug endpoint: inspect quota without consuming a call."""
+@app.get("/quota/{agent_id}", response_model=None)
+async def quota_status(request: Request, agent_id: str):
+    """Debug endpoint: inspect quota without consuming a call.
+
+    Protected by OPERATOR_TOKEN when set — send ``Authorization: Bearer <token>``.
+    """
+    if settings.operator_token:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {settings.operator_token}":
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
     snapshot = quota_store.peek(agent_id)
     meta = quota_store.build_meta(snapshot)
     return {"meta": meta.model_dump()}
@@ -472,11 +519,74 @@ async def stripe_webhook(
         return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
+@app.get("/mn/property-check")
+async def mn_property_check(request: Request, address: str) -> JSONResponse:
+    """Paid x402 resource: Minneapolis rental compliance snapshot ($0.01 USDC).
+
+    No PAYMENT-SIGNATURE header → 402 with PAYMENT-REQUIRED (x402 v2 wire).
+    With payment → verify + settle via facilitator, then serve the report
+    with the settlement receipt in PAYMENT-RESPONSE.
+    """
+    from app import mn_compliance
+
+    t0 = time.monotonic()
+    if not settings.x402_pay_to_address:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "seller_not_configured", "detail": "X402_PAY_TO_ADDRESS unset"},
+        )
+    if not address.strip() or len(address) > 120:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
+        )
+
+    payment_required = mn_compliance.build_payment_required_header()
+    signature = request.headers.get("PAYMENT-SIGNATURE")
+    if not signature:
+        log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_required},
+            content={
+                "error": "payment_required",
+                "resource": mn_compliance.resource_url(),
+                "price": settings.mn_property_check_price,
+                "network": settings.x402_default_network,
+                "description": mn_compliance.RESOURCE_DESCRIPTION,
+                "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
+                "requirements are in the PAYMENT-REQUIRED response header.",
+            },
+        )
+
+    result = await mn_compliance.verify_and_settle(signature, payment_required)
+    if not result["is_valid"] or not result["payment_settled"]:
+        log.warning("mn/property-check payment invalid", extra={"address": address, "status_code": 402})
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_required},
+            content={
+                "error": "payment_invalid",
+                "invalid_reason": result.get("invalid_reason"),
+                "settlement_error": result.get("settlement_error"),
+            },
+        )
+
+    report = await mn_compliance.check_property(address)
+    latency = round((time.monotonic() - t0) * 1000)
+    log.info("mn/property-check settled", extra={"address": address, "status_code": 200, "latency_ms": latency})
+
+    import base64
+    import json as _json
+
+    receipt = base64.b64encode(_json.dumps(result["settlement"]).encode()).decode()
+    return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
+
+
 # Mount MCP Streamable HTTP / SSE transport when available.
-try:
-    mcp_app = mcp.streamable_http_app()
-    app.mount("/mcp", mcp_app)
-except AttributeError:
+if _mcp_http_app is not None:
+    app.mount("/mcp", _mcp_http_app)
+else:
     try:
         app.mount("/mcp", mcp.sse_app())
     except AttributeError:
