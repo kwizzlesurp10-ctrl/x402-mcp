@@ -204,6 +204,7 @@ async def settle_composite_sale(
 
     product.status = "sold"
     product.revenue_usdc = round(product.revenue_usdc + paid_usdc, 6)
+    swarm_registry.save()
     ledger_writer.record_revenue(
         agent_id=product.seller_agent_id or "seller",
         amount_usdc=paid_usdc,

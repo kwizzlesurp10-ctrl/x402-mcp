@@ -149,3 +149,20 @@ def probe_402_url() -> str:
     thread.start()
     yield f"http://127.0.0.1:{port}/paid"
     server.shutdown()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_swarm_registry(tmp_path_factory):
+    """Point the swarm registry singleton at a tmp products file so tests
+    never read or write the operator's real ledger/products.json."""
+    from app.swarm.registry import swarm_registry
+
+    old_path = swarm_registry.persist_path
+    old_products = dict(swarm_registry._products)
+    swarm_registry.persist_path = (
+        tmp_path_factory.mktemp("swarm-registry") / "products.json"
+    )
+    swarm_registry._products.clear()
+    yield
+    swarm_registry.persist_path = old_path
+    swarm_registry._products = old_products
