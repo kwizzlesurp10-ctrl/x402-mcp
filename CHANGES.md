@@ -61,3 +61,23 @@ use this manifest for goal verification instead of repo-wide `git status`.
 - **Operator dashboard** (`app/dashboard.py`, route `GET /dashboard`, `/` redirects there): fintech-terminal UI polling `/health`, `/quota/{agent}`, `/.well-known/mcp`, `/upgrade` every 5s. Block-character quota meters, 10-tool matrix, revenue paths, live event tape. Inline CSS/JS, no build step.
 - New `tests/test_dashboard.py` (4 tests) keeps the UI under test discipline.
 - Result: **54 passed, 0 failed** (20 evidence tests skip by design until `capture_goal_evidence` artifacts exist).
+
+## 2026-07-18 — QMA(2) dual-witness verification ("Arthur & the Merlins")
+
+- `app/swarm/qma.py` — QMA(2)-inspired verification layer for the swarm. A lead
+  verifier ("Arthur") cross-checks two ISOLATED specialist witnesses ("Merlin-1"
+  Optimistic Explorer, "Merlin-2" Skeptical Auditor) that never share context.
+  Deterministic, inspectable core (data-honesty convention): clusters critical
+  claims, computes an **agreement ratio** over the union of critical elements,
+  an **entanglement score** (0–100; high = suspiciously copied wording, dampens
+  confidence + warns), detects contradictions (contested groups), runs pluggable
+  soundness validators, and synthesises a merged solution with a confidence
+  score, run-derived KPIs (risk-reduction figure is MODELLED with its assumption
+  stated), validation steps ("edges"), and a rollback plan. Accepts only on
+  ≥80% completeness AND soundness; else iterates (fresh isolated witnesses) up to
+  `max_rounds`. Witness production is a pluggable `WitnessProducer`; a thin
+  `llm_witness_producer` (temp 0.1, isolated prompts) keeps the LLM/network
+  dependency out of the deterministic core.
+- `tests/test_qma.py` (10 tests) — agreement/accept, contradiction→reject,
+  low-completeness→iterate, high-entanglement penalty, validator soundness,
+  computed KPIs, async producer, isolation + exactly-two-Merlin enforcement.
