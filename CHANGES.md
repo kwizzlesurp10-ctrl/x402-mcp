@@ -29,6 +29,7 @@ use this manifest for goal verification instead of repo-wide `git status`.
 
 - `scripts/verify_goal.py` — verification plan evidence capture
 - `scripts/vercel_connect_token.py` — Vercel Connect token for the `huggingface.co/x402-mcp` MCP connector (OIDC env or CLI fallback), `--verify` smoke-tests tools/list
+- `scripts/seed_purchase.py` — one-shot $0.01 seed buy mirroring `roles.py::treasurer_buy` (sole spender `x402_services.pay_and_fetch` with a hard `max_price_usdc` cap → `ledger_writer.record_spend`); default target is the proven Tavily x402 search endpoint on Base mainnet
 - `run_stdio.py` — MCP stdio entry
 - `docs/runbook.md`, `docs/architecture.md`
 - `docs/swarm/PROFIT_ORCHESTRATOR.md` — operator-supplied profitability swarm spec v1.0 (2026-07-16)
