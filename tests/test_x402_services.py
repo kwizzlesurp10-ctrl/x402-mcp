@@ -14,12 +14,12 @@ def test_supported_networks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_payment_requirements_public_url() -> None:
-    """Probe a public URL — may or may not return 402."""
-    params = GetPaymentRequirementsInput(url="https://httpbin.org/status/402")
+async def test_get_payment_requirements_public_url(probe_402_url: str) -> None:
+    """Probe a 402-returning URL (local fixture — no httpbin.org flakiness)."""
+    params = GetPaymentRequirementsInput(url=probe_402_url)
     result = await x402_services.get_payment_requirements(params)
     assert "status_code" in result
-    assert result["status_code"] in (402, 200, 503)
+    assert result["status_code"] == 402
 
 
 @pytest.mark.asyncio
@@ -36,9 +36,32 @@ async def test_discover_services_structure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pay_and_fetch_requires_wallet() -> None:
+async def test_pay_and_fetch_requires_wallet(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import settings
     from app.models import PayAndFetchInput
 
+    monkeypatch.setattr(settings, "evm_private_key", None)
     params = PayAndFetchInput(url="https://example.com/paid")
     with pytest.raises(ValueError, match="EVM_PRIVATE_KEY"):
+        await x402_services.pay_and_fetch(params)
+
+
+@pytest.mark.asyncio
+async def test_pay_and_fetch_price_cap_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_price_usdc must surface as a clear refusal, not a raw SDK error."""
+    from x402 import NoMatchingRequirementsError
+    from x402.http.clients import x402HttpxClient
+
+    from app.config import settings
+    from app.models import PayAndFetchInput
+
+    monkeypatch.setattr(settings, "evm_private_key", "0x" + "11" * 32)
+
+    async def refuse(self, *args, **kwargs):
+        raise NoMatchingRequirementsError("all options exceed cap")
+
+    monkeypatch.setattr(x402HttpxClient, "request", refuse)
+
+    params = PayAndFetchInput(url="https://example.com/paid", max_price_usdc=0.0001)
+    with pytest.raises(ValueError, match="payment refused"):
         await x402_services.pay_and_fetch(params)

@@ -87,13 +87,15 @@ async def test_quota_consumed_before_work_on_rate_limit(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_build_seller_requirements_missing_config() -> None:
+async def test_build_seller_requirements_missing_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "x402_pay_to_address", None)
     with pytest.raises(ValueError, match="pay_to address required"):
         await mcp_server.build_seller_requirements(agent_id="seller-skip-agent")
 
 
 @pytest.mark.asyncio
-async def test_pay_and_fetch_missing_wallet() -> None:
+async def test_pay_and_fetch_missing_wallet(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "evm_private_key", None)
     with pytest.raises(ValueError, match="EVM_PRIVATE_KEY"):
         await mcp_server.pay_and_fetch(
             url="https://example.com/paid",

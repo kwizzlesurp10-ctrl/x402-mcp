@@ -11,6 +11,8 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 - **FastMCP** + **FastAPI** with `/.well-known/mcp` manifest
 - **stdio** (Cursor/Grok local) and **HTTP/SSE** (remote connector) transports
 - **Redis-ready** quota store (in-memory default)
+- **Operator dashboard** at `/dashboard` — live health, per-agent quota burn-down meters, tool matrix, and revenue paths (single-file, zero build step)
+- **Hermetic test suite** — a local mock facilitator/discovery backend spins up automatically; no internet required. Set `X402_LIVE_TESTS=1` to run against x402.org
 
 ## Quick Start (Mission Control)
 
@@ -39,7 +41,26 @@ Add to Cursor MCP config (`manifests/cursor-mcp.json`).
 uvicorn app.main:app --host 0.0.0.0 --port 8402
 curl http://localhost:8402/.well-known/mcp
 curl http://localhost:8402/health
+# then open http://localhost:8402/dashboard
 ```
+
+## Paid HTTP Resource: MN Property Check
+
+First-party sellable endpoint (the seller side of this repo's own tooling):
+
+```
+GET /mn/property-check?address=1700%20Penn%20Ave%20N
+```
+
+x402-gated at **$0.01 USDC** (`MN_PROPERTY_CHECK_PRICE`). Unpaid requests get a
+`402` with x402 v2 `PAYMENT-REQUIRED` terms; paid requests are verified and
+settled via the facilitator, then served with a `PAYMENT-RESPONSE` receipt.
+
+One call returns a composite Minneapolis rental-compliance snapshot from live
+City of Minneapolis Open Data: active rental license (status, tier, licensed
+units, expiration, ward/neighborhood), regulatory violation case history
+(APN-joined), and condemned/boarded status. Owner phone/email in the source
+data are intentionally never served. Public records, as-is; not legal advice.
 
 ## MCP Tools
 
