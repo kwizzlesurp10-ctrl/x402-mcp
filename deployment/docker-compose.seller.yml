@@ -1,0 +1,30 @@
+# Base Network Pulse — SELLER-ONLY storefront.
+#
+# Sells the Pulse product: publishes a listing, serves the HTTP 402
+# challenge, and settles sales to X402_PAY_TO_ADDRESS via the CDP
+# facilitator. It NEVER needs EVM_PRIVATE_KEY (buyer-only spend key).
+#
+# 1. cp seller.env.example seller.env   (fill in your values)
+# 2. docker compose -f deployment/docker-compose.seller.yml up -d
+#
+# See docs/SELLER-STOREFRONT.md.
+
+services:
+  pulse-storefront:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    image: x402-pulse
+    # Seller-only secrets: X402_PAY_TO_ADDRESS + CDP creds. No spend key.
+    env_file:
+      - ../seller.env
+    ports:
+      - "8402:8402"
+    restart: unless-stopped
+    healthcheck:
+      # wallet_configured must be false for a seller-only deployment.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8402/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

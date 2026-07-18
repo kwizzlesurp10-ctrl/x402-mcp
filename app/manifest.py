@@ -1,6 +1,7 @@
 """MCP well-known manifest for Grok/Cursor connector discovery."""
 
 from app.config import settings
+from app.payment_rails import build_payment_rails
 from app.tools_registry import TOOL_SPECS
 
 
@@ -47,6 +48,7 @@ def build_mcp_manifest() -> dict:
             },
         },
         "upgrade_url": settings.upgrade_url,
+        "payment_rails": build_payment_rails(),
         "x402": {
             "protocol_version": "v2",
             "default_network": settings.x402_default_network,
@@ -61,6 +63,16 @@ def build_mcp_manifest() -> dict:
             "manifest": "/.well-known/mcp",
             "health": "/health",
             "upgrade": "/upgrade",
+            "stats": "/stats",
+            "doctor": "/doctor",
+            "probe": "/probe",
+            "wallet": "/wallet",
+            "events": "/events",
+            "ledger_spend": "/ledger/spend",
+            "ledger_revenue": "/ledger/revenue",
+            "seller_requirements": "/seller/requirements",
+            "stripe_checkout": "/stripe/checkout",
+            "stripe_webhook": "/stripe/webhook",
             "mcp_sse": "/mcp/sse",
         },
         "connector_url": f"{settings.public_base_url}/mcp/sse",

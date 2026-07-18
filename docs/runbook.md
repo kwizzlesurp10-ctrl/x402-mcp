@@ -27,6 +27,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8402
 |----------|---------|
 | `GET /health` | Liveness |
 | `GET /.well-known/mcp` | Connector manifest + tier info |
+| `GET /upgrade` | Stripe + x402/Coinbase payment rails |
+| `POST /stripe/checkout` | Create Stripe Checkout Session |
+| `POST /stripe/webhook` | Stripe webhook (signature verified) |
 | `GET /mcp/sse` | MCP SSE transport (when mounted) |
 
 Set `PUBLIC_BASE_URL` for production connector URL in manifest.
@@ -35,8 +38,10 @@ Set `PUBLIC_BASE_URL` for production connector URL in manifest.
 
 See `.env.example`. Critical:
 
-- `EVM_PRIVATE_KEY` — buyer wallet for `pay_and_fetch`
-- `X402_PAY_TO_ADDRESS` — seller recipient for `build_seller_requirements`
+- `STRIPE_SECRET_KEY` — primary fiat rail (Stripe Checkout)
+- `STRIPE_WEBHOOK_SECRET` — verify `POST /stripe/webhook` signatures
+- `EVM_PRIVATE_KEY` — buyer wallet for `pay_and_fetch` (x402 alternate rail)
+- `X402_PAY_TO_ADDRESS` — seller recipient for x402 revenue tools (future/alternate)
 - `X402_FACILITATOR_URL` — testnet: `https://x402.org/facilitator`
 - `REDIS_URL` — optional; swap in Redis quota store when scaling
 

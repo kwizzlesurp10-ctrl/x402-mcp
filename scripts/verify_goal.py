@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRATCH = Path(
     os.environ.get(
         "GOAL_SCRATCH",
-        r"C:\Users\Keith\AppData\Local\Temp\grok-goal-ba9a3e4905ee\implementer",
+        r"C:\Users\Keith\AppData\Local\Temp\grok-goal-3ae38ed9b2d9\implementer",
     )
 )
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -84,6 +84,8 @@ def run_launch_check() -> int:
         "status" in joined
         and "x402-micropayments" in joined
         and "upgrade_status=200" in joined
+        and '"stripe"' in joined
+        and "x402_coinbase" in joined
     )
     return 0 if ok else 1
 
@@ -201,6 +203,147 @@ def _stdio_pro_agent_id_ok() -> bool:
     )
 
 
+def run_stripe_init_smoke() -> int:
+    """Stripe checkout initiation via shipped HTTP route (mocked Stripe API)."""
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    from unittest.mock import MagicMock, patch
+
+    sys.path.insert(0, str(ROOT))
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    out = SCRATCH / "stripe_init_smoke.json"
+    mock_session = MagicMock()
+    mock_session.url = "https://checkout.stripe.com/c/pay/cs_smoke"
+    mock_session.id = "cs_smoke"
+
+    old_key = settings.stripe_secret_key
+    settings.stripe_secret_key = "sk_test_smoke"
+    try:
+        with patch("stripe.checkout.Session.create", return_value=mock_session):
+            client = TestClient(app)
+            response = client.post(
+                "/stripe/checkout",
+                json={
+                    "agent_id": "stripe-smoke-agent",
+                    "purpose": "pro_tier_upgrade",
+                },
+            )
+        out.write_text(response.text, encoding="utf-8")
+        payload = response.json()
+        ok = (
+            response.status_code == 200
+            and payload.get("checkout_url")
+            and payload.get("agent_id") == "stripe-smoke-agent"
+            and payload.get("purpose") == "pro_tier_upgrade"
+        )
+        return 0 if ok else 1
+    finally:
+        settings.stripe_secret_key = old_key
+
+
+def run_stripe_webhook_smoke() -> int:
+    """Signed webhook fixture → 2xx + fulfillment; bad sig → 4xx."""
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    sys.path.insert(0, str(ROOT))
+    from fastapi.testclient import TestClient
+
+    from app.commerce import InMemoryQuotaStore
+    from app.config import settings
+    from app.main import app
+    from app import stripe_payments
+
+    log = SCRATCH / "stripe_webhook_smoke.log"
+    lines: list[str] = []
+    webhook_secret = "whsec_smoke_test_secret_12345"
+
+    store = InMemoryQuotaStore()
+    old_secret = settings.stripe_webhook_secret
+    settings.stripe_webhook_secret = webhook_secret
+    import app.main as main_mod
+    import app.stripe_payments as sp_mod
+
+    old_store = main_mod.quota_store
+    main_mod.quota_store = store
+    sp_mod.quota_store = store
+    try:
+        payload = json.dumps(
+            {
+                "id": "evt_smoke_pro",
+                "object": "event",
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "id": "cs_smoke_session",
+                        "payment_intent": "pi_smoke_pro",
+                        "metadata": {
+                            "agent_id": "stripe-webhook-smoke",
+                            "purpose": "pro_tier_upgrade",
+                        }
+                    }
+                },
+            }
+        ).encode()
+        sig = stripe_payments.build_test_webhook_signature(payload, webhook_secret)
+        client = TestClient(app)
+        good = client.post(
+            "/stripe/webhook",
+            content=payload,
+            headers={"Stripe-Signature": sig},
+        )
+        bad = client.post(
+            "/stripe/webhook",
+            content=payload,
+            headers={"Stripe-Signature": "invalid"},
+        )
+        tier = client.get("/quota/stripe-webhook-smoke")
+        lines.append(f"good_status={good.status_code}")
+        lines.append(f"good_body={good.text}")
+        lines.append(f"bad_status={bad.status_code}")
+        lines.append(f"tier_body={tier.text}")
+        ok = (
+            good.status_code == 200
+            and bad.status_code == 400
+            and tier.json().get("meta", {}).get("tier") == "pro"
+        )
+        return 0 if ok else 1
+    finally:
+        settings.stripe_webhook_secret = old_secret
+        main_mod.quota_store = old_store
+        sp_mod.quota_store = old_store
+        log.write_text("\n".join(lines), encoding="utf-8")
+
+
+def run_x402_preserved_evidence() -> None:
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    sys.path.insert(0, str(ROOT))
+    from app.models import BuildSellerRequirementsInput
+    from app import x402_services
+
+    log = SCRATCH / "x402_preserved.log"
+    env_pay_to = os.environ.get("X402_PAY_TO_ADDRESS")
+    if env_pay_to:
+        try:
+            result = x402_services.build_pro_upgrade_requirements("preserve-agent")
+            log.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        except Exception as exc:
+            log.write_text(f"error: {exc}\n", encoding="utf-8")
+    else:
+        try:
+            x402_services.build_pro_upgrade_requirements("preserve-agent")
+        except ValueError as exc:
+            log.write_text(f"x402_preserved_skip: {exc}\n", encoding="utf-8")
+
+    skip_log = SCRATCH / "stripe_skip.log"
+    if not os.environ.get("STRIPE_SECRET_KEY"):
+        skip_log.write_text(
+            "STRIPE_SECRET_KEY not set; live Stripe CLI trigger skipped\n",
+            encoding="utf-8",
+        )
+
+
 def run_seller_evidence() -> None:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(ROOT))
@@ -234,8 +377,11 @@ def main() -> int:
     codes.append(asyncio.run(run_stdio_smoke()))
     asyncio.run(run_pro_stdio_evidence())
     pro_id_ok = _stdio_pro_agent_id_ok()
+    codes.append(run_stripe_init_smoke())
+    codes.append(run_stripe_webhook_smoke())
     run_pay_fetch_evidence()
     run_seller_evidence()
+    run_x402_preserved_evidence()
     summary = SCRATCH / "verify_summary.txt"
     summary.write_text(
         "\n".join(
@@ -245,6 +391,8 @@ def main() -> int:
                 f"tool_smoke={codes[2]}",
                 f"stdio_smoke={codes[3]}",
                 f"stdio_pro_agent_id_match={0 if pro_id_ok else 1}",
+                f"stripe_init={codes[4]}",
+                f"stripe_webhook={codes[5]}",
             ]
         )
         + "\n",

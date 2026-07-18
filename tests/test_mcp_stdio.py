@@ -90,7 +90,11 @@ async def test_stdio_get_pro_upgrade_requirements() -> None:
     payload = await _call_stdio_tool(
         "get_pro_upgrade_requirements",
         {},
-        env={"X402_PAY_TO_ADDRESS": "0xTestPayTo00000000000000000000000001"},
+        env={
+            "X402_PAY_TO_ADDRESS": "0xTestPayTo00000000000000000000000001",
+            # Pin testnet: local CDP creds would resolve revenue to mainnet.
+            "REVENUE_NETWORK": "eip155:84532",
+        },
     )
 
     assert payload["meta"]["agent_id"] == payload["data"]["agent_id"]
@@ -102,7 +106,10 @@ async def test_stdio_get_tool_credits_requirements() -> None:
     payload = await _call_stdio_tool(
         "get_tool_credits_requirements",
         {"credits": 25},
-        env={"X402_PAY_TO_ADDRESS": "0xTestPayTo00000000000000000000000001"},
+        env={
+            "X402_PAY_TO_ADDRESS": "0xTestPayTo00000000000000000000000001",
+            "REVENUE_NETWORK": "eip155:84532",
+        },
     )
 
     assert payload["meta"]["agent_id"] == payload["data"]["agent_id"]

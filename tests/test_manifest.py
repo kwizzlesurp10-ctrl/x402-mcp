@@ -49,6 +49,16 @@ def test_upgrade_endpoint() -> None:
     body = response.json()
     assert body["upgrade_url"]
     assert "pro" in body["tiers"]
-    assert "get_tool_credits_requirements" in body["mcp_tools"]["tool_credits"]
+    assert body["stripe"]["checkout_endpoint"] == "/stripe/checkout"
+    assert body["x402_coinbase"]["status"] == "alternate_future_rail"
+    assert "create_stripe_checkout" in body["mcp_tools"]["stripe"]
+    assert "get_tool_credits_requirements" in body["mcp_tools"]["tool_credits_x402"]
     assert body["tool_credits"]["pack_size"] == 100
     assert body["manifest"] == "/.well-known/mcp"
+
+
+def test_manifest_payment_rails() -> None:
+    manifest = client.get("/.well-known/mcp").json()
+    assert manifest["payment_rails"]["stripe"]["primary"] is True
+    assert manifest["payment_rails"]["x402_coinbase"]["primary"] is False
+    assert manifest["endpoints"]["stripe_webhook"] == "/stripe/webhook"

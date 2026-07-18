@@ -3,3 +3,13 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+.env.local
+.vercel/
+.mcp.json
+dashboard/node_modules/
+dashboard/dist/
+ledger/*
+!ledger/policy.json
+!ledger/.gitignore
+.vercel
+.env*

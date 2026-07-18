@@ -18,7 +18,9 @@ from app.models import (
     ToolResponse,
     VerifyPaymentInput,
 )
-from app import x402_services
+from app import stripe_payments, x402_services
+from app.ops_events import emit_tool_event
+from app.swarm import orchestrator as swarm_orchestrator
 
 mcp = FastMCP(
     "x402-micropayments",
@@ -32,6 +34,7 @@ mcp = FastMCP(
 
 
 async def _execute_tool(
+    tool_name: str,
     agent_id: str | None,
     work: Callable[[str], Awaitable[dict[str, Any]]],
 ) -> str:
@@ -43,7 +46,9 @@ async def _execute_tool(
         return json.dumps({"error": exc.detail, "data": None, "meta": None}, indent=2)
 
     data = await work(resolved)
-    payload = ToolResponse(data=data, meta=quota_store.build_meta(snapshot))
+    meta = quota_store.build_meta(snapshot)
+    emit_tool_event(tool_name, resolved, meta.model_dump())
+    payload = ToolResponse(data=data, meta=meta)
     return json.dumps(payload.model_dump(), indent=2)
 
 
@@ -59,7 +64,7 @@ async def discover_services(
         query=query, limit=limit, max_price_usdc=max_price_usdc
     )
     return await _execute_tool(
-        agent_id, lambda _: x402_services.discover_services(params)
+        "discover_services", agent_id, lambda _: x402_services.discover_services(params)
     )
 
 
@@ -75,7 +80,9 @@ async def get_payment_requirements(
         url=url, method=method, headers=headers or {}
     )
     return await _execute_tool(
-        agent_id, lambda _: x402_services.get_payment_requirements(params)
+        "get_payment_requirements",
+        agent_id,
+        lambda _: x402_services.get_payment_requirements(params),
     )
 
 
@@ -96,7 +103,9 @@ async def pay_and_fetch(
         body=body,
         preferred_network=preferred_network,
     )
-    return await _execute_tool(agent_id, lambda _: x402_services.pay_and_fetch(params))
+    return await _execute_tool(
+        "pay_and_fetch", agent_id, lambda _: x402_services.pay_and_fetch(params)
+    )
 
 
 @mcp.tool()
@@ -106,17 +115,34 @@ async def build_seller_requirements(
     price: str = "$0.01",
     scheme: str = "exact",
     description: str = "Paid MCP-backed API access",
+    resource_url: str | None = None,
+    mime_type: str | None = "application/json",
+    discoverable: bool | None = None,
+    discovery_method: str = "GET",
+    discovery_input_example: dict | None = None,
+    discovery_output_example: dict | None = None,
     agent_id: str | None = None,
 ) -> str:
-    """Build seller-side x402 payment requirements via x402ResourceServer."""
+    """Build seller-side x402 payment requirements via x402ResourceServer.
+
+    Pass resource_url (plus optional discovery_* fields) to embed the Bazaar
+    discovery extension so a settled payment catalogs the endpoint.
+    """
     params = BuildSellerRequirementsInput(
         network=network,
         pay_to=pay_to,
         price=price,
         scheme=scheme,
         description=description,
+        resource_url=resource_url,
+        mime_type=mime_type,
+        discoverable=discoverable,
+        discovery_method=discovery_method,
+        discovery_input_example=discovery_input_example,
+        discovery_output_example=discovery_output_example,
     )
     return await _execute_tool(
+        "build_seller_requirements",
         agent_id,
         lambda _: _sync_result(x402_services.build_seller_requirements(params)),
     )
@@ -134,7 +160,9 @@ async def verify_payment_payload(
         payment_required=payment_required,
     )
     return await _execute_tool(
-        agent_id, lambda _: x402_services.verify_payment_payload(params)
+        "verify_payment_payload",
+        agent_id,
+        lambda _: x402_services.verify_payment_payload(params),
     )
 
 
@@ -142,6 +170,7 @@ async def verify_payment_payload(
 async def get_supported_networks(agent_id: str | None = None) -> str:
     """List networks, facilitators, and v2 headers via x402 SDK."""
     return await _execute_tool(
+        "get_supported_networks",
         agent_id,
         lambda _: _sync_result(x402_services.get_supported_networks().model_dump()),
     )
@@ -151,6 +180,7 @@ async def get_supported_networks(agent_id: str | None = None) -> str:
 async def get_pro_upgrade_requirements(agent_id: str | None = None) -> str:
     """Build x402 payment requirements to purchase Pro tier (revenue collection)."""
     return await _execute_tool(
+        "get_pro_upgrade_requirements",
         agent_id,
         lambda resolved: _sync_result(
             x402_services.build_pro_upgrade_requirements(resolved)
@@ -166,6 +196,7 @@ async def activate_pro_tier(
 ) -> str:
     """Verify pro-tier x402 payment and unlock Pro quota limits."""
     return await _execute_tool(
+        "activate_pro_tier",
         agent_id,
         lambda resolved: x402_services.activate_pro_tier(
             payment_signature, payment_required, resolved
@@ -182,6 +213,7 @@ async def get_tool_credits_requirements(
     pack = credits or settings.tool_credit_pack_size
 
     return await _execute_tool(
+        "get_tool_credits_requirements",
         agent_id,
         lambda resolved: _sync_result(
             x402_services.build_tool_credits_requirements(resolved, pack)
@@ -200,9 +232,112 @@ async def purchase_tool_credits(
     pack = credits or settings.tool_credit_pack_size
 
     return await _execute_tool(
+        "purchase_tool_credits",
         agent_id,
         lambda resolved: x402_services.purchase_tool_credits(
             payment_signature, payment_required, resolved, pack
+        ),
+    )
+
+
+@mcp.tool()
+async def create_stripe_checkout(
+    purpose: str = "pro_tier_upgrade",
+    credits: int | None = None,
+    agent_id: str | None = None,
+) -> str:
+    """Create Stripe Checkout Session for pro tier or tool credits (fiat rail)."""
+    if purpose not in ("pro_tier_upgrade", "tool_credits"):
+        raise ValueError("purpose must be pro_tier_upgrade or tool_credits")
+
+    return await _execute_tool(
+        "create_stripe_checkout",
+        agent_id,
+        lambda resolved: _sync_result(
+            stripe_payments.create_checkout_session(
+                resolved,
+                purpose,  # type: ignore[arg-type]
+                credits=credits,
+            )
+        ),
+    )
+
+
+@mcp.tool()
+async def run_swarm_research(
+    topic: str,
+    max_price_usdc: float | None = None,
+    agent_id: str | None = None,
+) -> str:
+    """Run the swarm Agency: buy cheap upstream x402 services, compose a
+    composite research report, and list it for resale (buy → compose → list)."""
+    return await _execute_tool(
+        "run_swarm_research",
+        agent_id,
+        lambda resolved: swarm_orchestrator.run_swarm_research(
+            topic, resolved, max_price_usdc
+        ),
+    )
+
+
+@mcp.tool()
+async def settle_composite_sale(
+    product_id: str,
+    payment_signature: str,
+    payment_required: str,
+    agent_id: str | None = None,
+) -> str:
+    """Verify + settle a buyer's x402 payment for a listed composite product and
+    record the realized revenue (sell side)."""
+    return await _execute_tool(
+        "settle_composite_sale",
+        agent_id,
+        lambda resolved: swarm_orchestrator.settle_composite_sale(
+            product_id, payment_signature, payment_required, resolved
+        ),
+    )
+
+
+@mcp.tool()
+async def swarm_revenue_report(agent_id: str | None = None) -> str:
+    """Portfolio revenue intelligence for the swarm: spend, revenue, LTV:CAC,
+    margins, per-source profit scores."""
+    from app.swarm import sovereign
+
+    return await _execute_tool(
+        "swarm_revenue_report",
+        agent_id,
+        lambda _: _sync_result(sovereign.build_revenue_report()),
+    )
+
+
+@mcp.tool()
+async def get_base_pulse(depth: int | None = None, agent_id: str | None = None) -> str:
+    """Live Base Network Pulse: synthesized settlement-conditions intelligence
+    (base fee, EIP-1559 projection, utilization trend, USD settlement cost, and a
+    settle-now/hold verdict) computed from real Base RPC data + ETH spot price."""
+    from app import pulse
+
+    return await _execute_tool(
+        "get_base_pulse", agent_id, lambda _: pulse.get_pulse(depth)
+    )
+
+
+@mcp.tool()
+async def get_os_metrics(
+    include_processes: bool = False, agent_id: str | None = None
+) -> str:
+    """Host OS telemetry: CPU, memory, swap, disk, network, and process
+    signals with an ok/warn/critical health verdict, sampled live from the
+    machine running the server. Optionally includes the top processes by
+    memory."""
+    from app import os_monitor
+
+    return await _execute_tool(
+        "get_os_metrics",
+        agent_id,
+        lambda _: _sync_result(
+            os_monitor.get_os_metrics(include_processes=include_processes)
         ),
     )
 
