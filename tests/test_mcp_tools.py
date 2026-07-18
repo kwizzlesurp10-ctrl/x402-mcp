@@ -117,6 +117,9 @@ async def test_get_payment_requirements_tool_invocable(probe_402_url: str) -> No
 async def test_pro_upgrade_agent_id_matches_meta(monkeypatch: pytest.MonkeyPatch) -> None:
     """agent_id=None must resolve once — meta and data must share the same id."""
     monkeypatch.setattr(settings, "x402_pay_to_address", "0xTestPayTo00000000000000000000000001")
+    # Pin the testnet/x402.org path: a local .env with CDP creds would resolve
+    # the revenue network to mainnet and route this through the CDP facilitator.
+    monkeypatch.setattr(settings, "revenue_network", "eip155:84532")
 
     raw = await mcp_server.get_pro_upgrade_requirements(agent_id=None)
     payload = json.loads(raw)
@@ -129,6 +132,7 @@ async def test_tool_credits_requirements_agent_id_matches_meta(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "x402_pay_to_address", "0xTestPayTo00000000000000000000000001")
+    monkeypatch.setattr(settings, "revenue_network", "eip155:84532")
 
     raw = await mcp_server.get_tool_credits_requirements(agent_id=None, credits=50)
     payload = json.loads(raw)

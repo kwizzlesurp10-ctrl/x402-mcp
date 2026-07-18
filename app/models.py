@@ -1,6 +1,6 @@
 """Pydantic models for x402 MCP tools and commerce envelopes."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -87,6 +87,43 @@ class BuildSellerRequirementsInput(BaseModel):
     description: str = Field(
         default="Paid MCP-backed API access",
         description="Human-readable resource description",
+    )
+    # Bazaar discoverability (all optional, backward compatible): when
+    # resource_url is set the 402 challenge carries ResourceInfo, and — unless
+    # opted out — the bazaar discovery extension the CDP facilitator needs to
+    # catalog the endpoint when a payment settles.
+    resource_url: str | None = Field(
+        default=None,
+        description=(
+            "Public URL of the payable resource. Required for Bazaar discovery; "
+            "without it the 402 challenge carries no resource info or extension."
+        ),
+    )
+    mime_type: str | None = Field(
+        default="application/json",
+        description="MIME type of the paid resource (resource info metadata)",
+    )
+    discoverable: bool | None = Field(
+        default=None,
+        description=(
+            "Embed the bazaar discovery extension in the 402 challenge "
+            "(None = BAZAAR_DISCOVERABLE setting)"
+        ),
+    )
+    discovery_method: Literal["GET", "HEAD", "DELETE", "POST", "PUT", "PATCH"] = Field(
+        default="GET",
+        description="HTTP method buyers use to call the resource",
+    )
+    discovery_input_example: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Example input: query params for GET/HEAD/DELETE, "
+            "JSON body for POST/PUT/PATCH"
+        ),
+    )
+    discovery_output_example: dict[str, Any] | None = Field(
+        default=None,
+        description="Small example of the JSON response a paying buyer receives",
     )
 
 

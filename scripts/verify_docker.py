@@ -18,16 +18,24 @@ SCRATCH = Path(
 )
 IMAGE = "x402-mcp"
 PORT = 8402
-EXPECTED_TOOLS = 15
 SERVICE_ID = "x402-micropayments-mcp"
+
+# The registry is the single source of truth for the tool count — a hardcoded
+# number here silently fails every boot probe when a tool is added.
+sys.path.insert(0, str(ROOT))
+from app.tools_registry import TOOL_COUNT as EXPECTED_TOOLS  # noqa: E402
 
 
 def run(cmd: list[str], *, cwd: Path = ROOT, timeout: int = 600) -> subprocess.CompletedProcess[str]:
+    # Force UTF-8: Windows defaults to cp1252, which dies on UTF-8 bytes in
+    # docker build/BuildKit output (same fix as capture_goal_evidence.run_cmd).
     return subprocess.run(
         cmd,
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
     )
 
@@ -87,6 +95,8 @@ def probe_boot(log_lines: list[str], boot: int) -> bool:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     ok = False
     health_path = SCRATCH / f"health_boot{boot}.json"

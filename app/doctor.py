@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
+from app import commerce
 from app.config import settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,10 +134,42 @@ def run_checks() -> dict[str, Any]:
             )
         )
 
-    redis_mode = "redis" if settings.redis_url else "memory"
+    # Probe the LIVE quota store object, not the env var: REDIS_URL being set
+    # proves nothing if startup fell back to memory.
+    store = commerce.quota_store
+    redis_mode = getattr(store, "mode", "memory")
     if redis_mode == "redis":
+        try:
+            store.ping()
+            checks.append(
+                _check(
+                    "redis",
+                    "Persistence",
+                    "pass",
+                    "Redis quota store active (live PING ok)",
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _check(
+                    "redis",
+                    "Persistence",
+                    "fail",
+                    f"Redis quota store lost its connection: {exc}",
+                    "Restore Redis availability, then restart the server",
+                )
+            )
+    elif settings.redis_url:
+        reason = getattr(store, "fallback_reason", None) or "unreachable at startup"
         checks.append(
-            _check("redis", "Persistence", "pass", "REDIS_URL configured")
+            _check(
+                "redis",
+                "Persistence",
+                "fail",
+                f"REDIS_URL set but running IN-MEMORY ({reason}) — "
+                "paid entitlements will not survive a restart",
+                "Verify REDIS_URL and Redis availability, then restart",
+            )
         )
     else:
         checks.append(
@@ -213,6 +246,35 @@ def run_checks() -> dict[str, Any]:
             settings.x402_default_network,
         )
     )
+
+    # Revenue-network coherence: a public deploy that collects payments must
+    # not serve testnet revenue challenges — free Sepolia USDC would buy real
+    # pro quota / tool credits.
+    from app.x402_services import resolve_revenue_network
+
+    revenue_net = resolve_revenue_network()
+    testnets = {"eip155:84532"}
+    base = settings.public_base_url.lower()
+    is_local = base.startswith(("http://localhost", "http://127.", "http://[::1]"))
+    if settings.x402_pay_to_address and not is_local and revenue_net in testnets:
+        checks.append(
+            _check(
+                "revenue_network",
+                "Revenue network",
+                "fail",
+                f"Public deploy would sell pro tier/credits on testnet {revenue_net}",
+                "Set REVENUE_NETWORK=eip155:8453 (or configure CDP creds)",
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "revenue_network",
+                "Revenue network",
+                "pass",
+                revenue_net,
+            )
+        )
 
     failed = sum(1 for c in checks if c["status"] == "fail")
     warned = sum(1 for c in checks if c["status"] == "warn")

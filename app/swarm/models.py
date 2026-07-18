@@ -55,6 +55,30 @@ class CompositeProduct:
         return round(self.price_usdc - self.cost_basis_usdc, 6)
 
 
+def purchase_discovery_metadata(
+    product: CompositeProduct, public_base_url: str
+) -> dict[str, Any]:
+    """Bazaar discovery fields for a product's payable purchase endpoint.
+
+    Passed into BuildSellerRequirementsInput so the served 402 challenge carries
+    the resource URL + bazaar extension the CDP facilitator catalogs on settle.
+    GET is the canonical purchase method (the endpoint accepts GET and POST);
+    the output example mirrors the 200 body of /swarm/products/{id}/purchase.
+    """
+    base = public_base_url.rstrip("/")
+    report_preview = product.report.splitlines()[0] if product.report else ""
+    return {
+        "resource_url": f"{base}/swarm/products/{product.product_id}/purchase",
+        "discovery_method": "GET",
+        "discovery_output_example": {
+            "product_id": product.product_id,
+            "topic": product.topic,
+            "report": report_preview,
+            "payment_settled": True,
+        },
+    }
+
+
 @dataclass
 class SwarmRun:
     """Full audit trail of one buy → compose → list cycle."""

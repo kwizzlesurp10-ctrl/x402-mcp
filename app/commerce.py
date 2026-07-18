@@ -1,12 +1,19 @@
 """MCP commerce overlay: agent tracking, tiers, quota, rate limits, x402 pro unlock.
 
-Redis migration path:
-    Replace InMemoryQuotaStore with RedisQuotaStore using settings.redis_url.
-    Keys: agent:{id}:month:{YYYY-MM}, agent:{id}:rl:{minute_bucket}, agent:{id}:tier
+Store selection (see build_quota_store):
+    REDIS_URL unset              -> InMemoryQuotaStore (dev default)
+    REDIS_URL set + PING ok      -> RedisQuotaStore (entitlements survive restart)
+    REDIS_URL set + unreachable  -> InMemoryQuotaStore fallback (loud error log;
+                                    /doctor reports FAIL via quota_store.mode)
+Redis keys: agent:{id}:tier, agent:{id}:credits, agent:{id}:month:{YYYY-MM}
+(40-day TTL), stripe:fulfilled:{key} (SETNX idempotency). Per-minute rate-limit
+windows stay in process memory: they are transient by definition and losing
+them on restart costs nothing.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections import defaultdict, deque
@@ -17,6 +24,8 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.models import ResponseMeta
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -41,6 +50,8 @@ class QuotaExceededError(Exception):
 class InMemoryQuotaStore:
     """In-memory quota + rate limit store. Swap for Redis in production."""
 
+    mode: str = "memory"  # actual live mode — /doctor and /stats probe this
+
     def __init__(self) -> None:
         self._agent_ids: dict[str, str] = {}
         self._tiers: dict[str, str] = {}
@@ -49,6 +60,8 @@ class InMemoryQuotaStore:
         self._pro_activations: dict[str, str] = {}  # agent_id -> activated_at iso
         self._credits: dict[str, int] = defaultdict(int)
         self._stripe_fulfilled: set[str] = set()  # Stripe event ids (idempotency)
+        # Set when REDIS_URL was configured but unreachable at startup.
+        self.fallback_reason: str | None = None
 
     def resolve_agent_id(self, provided: str | None) -> str:
         if provided:
@@ -73,6 +86,26 @@ class InMemoryQuotaStore:
         self._credits[agent_id] += amount
         return self._credits[agent_id]
 
+    # -- storage hooks (overridden by RedisQuotaStore) -----------------------
+
+    def _month_calls(self, month_key: str) -> int:
+        return self._monthly[month_key]
+
+    def _set_month_calls(self, month_key: str, value: int) -> None:
+        self._monthly[month_key] = value
+
+    def _spend_credit(self, agent_id: str) -> int:
+        """Consume one tool credit; return the new balance."""
+        self._credits[agent_id] -= 1
+        return self._credits[agent_id]
+
+    def _check_and_mark_fulfilled(self, fulfillment_key: str) -> bool:
+        """Atomically mark a Stripe fulfillment key; False if already seen."""
+        if fulfillment_key in self._stripe_fulfilled:
+            return False
+        self._stripe_fulfilled.add(fulfillment_key)
+        return True
+
     def fulfill_stripe_pro_tier(self, agent_id: str, fulfillment_key: str) -> dict:
         """Unlock pro tier after verified Stripe webhook (idempotent per purchase)."""
         if not fulfillment_key:
@@ -82,7 +115,7 @@ class InMemoryQuotaStore:
                 "reason": "missing fulfillment key",
                 "rail": "stripe",
             }
-        if fulfillment_key in self._stripe_fulfilled:
+        if not self._check_and_mark_fulfilled(fulfillment_key):
             return {
                 "agent_id": agent_id,
                 "tier": self.get_tier(agent_id),
@@ -90,7 +123,6 @@ class InMemoryQuotaStore:
                 "fulfillment_key": fulfillment_key,
                 "rail": "stripe",
             }
-        self._stripe_fulfilled.add(fulfillment_key)
         self.activate_pro_tier(agent_id)
         return {
             "agent_id": agent_id,
@@ -111,7 +143,7 @@ class InMemoryQuotaStore:
                 "reason": "missing fulfillment key",
                 "rail": "stripe",
             }
-        if fulfillment_key in self._stripe_fulfilled:
+        if not self._check_and_mark_fulfilled(fulfillment_key):
             return {
                 "agent_id": agent_id,
                 "tool_credits_remaining": self.get_credits(agent_id),
@@ -119,7 +151,6 @@ class InMemoryQuotaStore:
                 "fulfillment_key": fulfillment_key,
                 "rail": "stripe",
             }
-        self._stripe_fulfilled.add(fulfillment_key)
         balance = self.add_credits(agent_id, credits)
         return {
             "agent_id": agent_id,
@@ -159,15 +190,15 @@ class InMemoryQuotaStore:
         quota, rate_limit = self.tier_limits(tier)
 
         month_key = self._month_key(agent_id)
-        calls = self._monthly[month_key]
+        calls = self._month_calls(month_key)
         window = self._windows[agent_id]
 
         if calls >= quota:
-            credits = self._credits[agent_id]
+            credits = self.get_credits(agent_id)
             if credits > 0:
-                self._credits[agent_id] = credits - 1
+                credits_left = self._spend_credit(agent_id)
                 new_calls = calls + 1
-                self._monthly[month_key] = new_calls
+                self._set_month_calls(month_key, new_calls)
                 window.append(now)
                 new_rate_remaining = max(rate_limit - len(window), 0)
                 return QuotaSnapshot(
@@ -177,7 +208,7 @@ class InMemoryQuotaStore:
                     quota_warning=True,
                     rate_limit_remaining=new_rate_remaining,
                     tier=tier,
-                    tool_credits_remaining=self._credits[agent_id],
+                    tool_credits_remaining=credits_left,
                 )
 
             raise QuotaExceededError(
@@ -212,10 +243,10 @@ class InMemoryQuotaStore:
                 }
             )
 
-        self._monthly[month_key] = calls + 1
+        new_calls = calls + 1
+        self._set_month_calls(month_key, new_calls)
         window.append(now)
 
-        new_calls = self._monthly[month_key]
         new_remaining = max(quota - new_calls, 0)
         warning = new_calls / quota >= 0.8 if quota else False
         new_rate_remaining = max(rate_limit - len(window), 0)
@@ -227,7 +258,7 @@ class InMemoryQuotaStore:
             quota_warning=warning,
             rate_limit_remaining=new_rate_remaining,
             tier=tier,
-            tool_credits_remaining=self._credits[agent_id],
+            tool_credits_remaining=self.get_credits(agent_id),
         )
 
     def _seconds_until_next_month(self) -> int:
@@ -238,8 +269,7 @@ class InMemoryQuotaStore:
             next_month = datetime(now.year, now.month + 1, 1, tzinfo=UTC)
         return max(int((next_month - now).total_seconds()), 1)
 
-    def snapshot(self) -> dict:
-        """Public aggregate for GET /stats — no private field access from routes."""
+    def _snapshot_agent_ids(self) -> set[str]:
         agent_ids: set[str] = set()
         agent_ids.update(self._tiers)
         agent_ids.update(self._credits)
@@ -247,6 +277,11 @@ class InMemoryQuotaStore:
         for key in self._monthly:
             agent_ids.add(key.rsplit(":", 1)[0])
         agent_ids.update(self._agent_ids.values())
+        return agent_ids
+
+    def snapshot(self) -> dict:
+        """Public aggregate for GET /stats — no private field access from routes."""
+        agent_ids = self._snapshot_agent_ids()
 
         agents = []
         for agent_id in sorted(agent_ids):
@@ -276,7 +311,7 @@ class InMemoryQuotaStore:
                 "x402_default_network": settings.x402_default_network,
                 "has_pay_to": bool(settings.x402_pay_to_address),
                 "has_buyer_key": bool(settings.evm_private_key),
-                "redis_mode": "redis" if settings.redis_url else "memory",
+                "redis_mode": self.mode,  # actual live store, not the env var
                 "network": settings.x402_default_network,
                 "stripe_configured": bool(settings.stripe_secret_key),
             },
@@ -288,7 +323,7 @@ class InMemoryQuotaStore:
         tier = self.get_tier(agent_id)
         quota, rate_limit = self.tier_limits(tier)
         month_key = self._month_key(agent_id)
-        calls = self._monthly[month_key]
+        calls = self._month_calls(month_key)
         window = self._windows[agent_id]
         remaining = max(quota - calls, 0)
         rate_remaining = max(rate_limit - len(window), 0)
@@ -300,7 +335,7 @@ class InMemoryQuotaStore:
             quota_warning=warning,
             rate_limit_remaining=rate_remaining,
             tier=tier,
-            tool_credits_remaining=self._credits[agent_id],
+            tool_credits_remaining=self.get_credits(agent_id),
         )
 
     def build_meta(self, snapshot: QuotaSnapshot) -> ResponseMeta:
@@ -316,4 +351,130 @@ class InMemoryQuotaStore:
         )
 
 
-quota_store = InMemoryQuotaStore()
+class RedisQuotaStore(InMemoryQuotaStore):
+    """Redis-backed quota store: tier, credits, monthly counters, and Stripe
+    fulfillment idempotency survive restarts. Per-minute rate-limit windows
+    and anonymous agent-id grants stay in process memory (transient state).
+
+    Same synchronous interface as InMemoryQuotaStore — every call site
+    (_execute_tool, /stats, Stripe webhook, x402 settlement) is sync.
+    """
+
+    mode = "redis"
+
+    MONTH_TTL_SECONDS = 40 * 86400  # counter outlives its month, then expires
+
+    def __init__(self, client) -> None:  # client: redis.Redis (or fakeredis)
+        super().__init__()
+        self._client = client
+
+    def ping(self) -> bool:
+        """Liveness probe for /doctor — raises if Redis is unreachable."""
+        return bool(self._client.ping())
+
+    # -- key scheme ----------------------------------------------------------
+
+    @staticmethod
+    def _tier_key(agent_id: str) -> str:
+        return f"agent:{agent_id}:tier"
+
+    @staticmethod
+    def _credits_key(agent_id: str) -> str:
+        return f"agent:{agent_id}:credits"
+
+    @staticmethod
+    def _month_redis_key(month_key: str) -> str:
+        # base class month_key is "{agent_id}:{YYYY-MM}"
+        agent_id, month = month_key.rsplit(":", 1)
+        return f"agent:{agent_id}:month:{month}"
+
+    # -- persisted entitlements ------------------------------------------------
+
+    def get_tier(self, agent_id: str) -> str:
+        return self._client.get(self._tier_key(agent_id)) or "free"
+
+    def activate_pro_tier(self, agent_id: str) -> None:
+        pipe = self._client.pipeline()
+        pipe.set(self._tier_key(agent_id), "pro")
+        pipe.set(
+            f"agent:{agent_id}:pro_activated_at",
+            datetime.now(UTC).isoformat(),
+        )
+        pipe.execute()
+
+    def get_credits(self, agent_id: str) -> int:
+        return int(self._client.get(self._credits_key(agent_id)) or 0)
+
+    def add_credits(self, agent_id: str, amount: int) -> int:
+        return int(self._client.incrby(self._credits_key(agent_id), amount))
+
+    # -- storage hooks ---------------------------------------------------------
+
+    def _month_calls(self, month_key: str) -> int:
+        return int(self._client.get(self._month_redis_key(month_key)) or 0)
+
+    def _set_month_calls(self, month_key: str, value: int) -> None:
+        self._client.set(
+            self._month_redis_key(month_key), value, ex=self.MONTH_TTL_SECONDS
+        )
+
+    def _spend_credit(self, agent_id: str) -> int:
+        balance = int(self._client.decrby(self._credits_key(agent_id), 1))
+        if balance < 0:  # never below zero, even if a raced spend slipped in
+            self._client.set(self._credits_key(agent_id), 0)
+            return 0
+        return balance
+
+    def _check_and_mark_fulfilled(self, fulfillment_key: str) -> bool:
+        return bool(self._client.set(f"stripe:fulfilled:{fulfillment_key}", "1", nx=True))
+
+    def _snapshot_agent_ids(self) -> set[str]:
+        agent_ids: set[str] = set(self._windows)
+        agent_ids.update(self._agent_ids.values())
+        for pattern, suffix in (("agent:*:tier", ":tier"), ("agent:*:credits", ":credits")):
+            for key in self._client.scan_iter(match=pattern):
+                agent_ids.add(key[len("agent:"): -len(suffix)])
+        for key in self._client.scan_iter(match="agent:*:month:*"):
+            agent_ids.add(key[len("agent:"):].rsplit(":month:", 1)[0])
+        return agent_ids
+
+
+def build_quota_store() -> InMemoryQuotaStore:
+    """Select the quota store at startup.
+
+    Truth table:
+        REDIS_URL unset             -> InMemoryQuotaStore
+        REDIS_URL set, PING ok      -> RedisQuotaStore
+        REDIS_URL set, unreachable  -> InMemoryQuotaStore + loud error log;
+                                       fallback_reason is set so /doctor FAILs
+    Never raises — a dead Redis must not stop the server from booting.
+    """
+    if not settings.redis_url:
+        return InMemoryQuotaStore()
+    try:
+        import redis
+
+        client = redis.Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0,
+        )
+        client.ping()
+    except Exception as exc:  # noqa: BLE001 — any failure means fallback
+        logger.error(
+            "REDIS_URL is set but Redis is unreachable (%s: %s) — falling back "
+            "to the IN-MEMORY quota store. Paid entitlements (pro tier, tool "
+            "credits, monthly counters) will NOT survive a restart. Do not "
+            "sell to real buyers in this state.",
+            type(exc).__name__,
+            exc,
+        )
+        store = InMemoryQuotaStore()
+        store.fallback_reason = f"{type(exc).__name__}: {exc}"
+        return store
+    logger.info("Quota store: Redis (persistent entitlements enabled)")
+    return RedisQuotaStore(client)
+
+
+quota_store = build_quota_store()

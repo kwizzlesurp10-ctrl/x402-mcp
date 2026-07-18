@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     base_rpc_url: str = "https://mainnet.base.org"
     eth_price_url: str = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
     pulse_depth: int = 12  # blocks sampled per pulse
-    pulse_price: str = "$8.00"  # list price for a synthesized Pulse report
+    # List price for a synthesized Pulse report. Operator-approved 2026-07-16:
+    # repriced from $8.00 to sit near the ~$0.30 ecosystem average per call.
+    pulse_price: str = "$0.25"
 
     # Host OS monitoring (mission control): sampling cadence + health thresholds.
     os_monitor_enabled: bool = True
@@ -48,6 +50,11 @@ class Settings(BaseSettings):
 
     x402_facilitator_url: str = "https://x402.org/facilitator"
     x402_default_network: str = "eip155:84532"
+    # Network for revenue challenges (pro tier / tool credits). None resolves
+    # via x402_services.resolve_revenue_network(): first CDP network when CDP
+    # creds are set, else x402_default_network. Guards against a public deploy
+    # selling real quota for free testnet USDC on the Sepolia default.
+    revenue_network: str | None = None
     x402_default_price: str = "$0.01"
     # Buyer HTTP timeout; mainnet settlement via a facilitator can take 30-60s,
     # so keep this comfortably above the default httpx timeout.
@@ -56,6 +63,15 @@ class Settings(BaseSettings):
     cdp_discovery_url: str = (
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
+
+    # Bazaar discoverability: when a 402 challenge is built with a resource_url,
+    # embed the bazaar discovery extension + service metadata so a settled
+    # payment through the CDP facilitator catalogs the endpoint in the Bazaar.
+    bazaar_discoverable: bool = True
+    # Facilitator-side limits (specs/extensions/bazaar.md): name <= 32 printable
+    # ASCII chars; <= 5 tags, each <= 32 chars. Violations are silently dropped.
+    bazaar_service_name: str = "x402 MCP Storefront"
+    bazaar_service_tags: str = "base,intelligence,x402,data"
 
     # Coinbase CDP facilitator (required to verify/settle x402 on Base mainnet;
     # x402.org only settles `exact` on Base Sepolia). Ed25519 API key from the
