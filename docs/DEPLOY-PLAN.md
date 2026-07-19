@@ -13,7 +13,7 @@ Status of prerequisites (2026-07-16):
 | Bazaar discovery extension on 402s | done (`ec06920`) |
 | RedisQuotaStore (real persistence) | done (`065b5f8`) |
 | Revenue-network coherence guard | done (this commit) |
-| Durable product listings | NOT done — listings die on restart (spec in docs/swarm/ cycle notes); see step 6 mitigation |
+| Durable product listings | DONE — origin's `SwarmRegistry` persists listings to `ledger/products.json` (atomic snapshot, loaded at construction) + settled-tx replay guard; listings now survive restart, so the step-6 404 caveat is largely resolved (mount a persistent volume for `ledger/` on Fly so the file survives machine recreation) |
 
 ## Non-negotiables (from the swarm's enforcer)
 
