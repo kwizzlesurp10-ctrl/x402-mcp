@@ -58,10 +58,11 @@ VIOLATION_FIELDS = (
 CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 
 RESOURCE_DESCRIPTION = (
-    "Minneapolis rental property compliance check: active rental license "
-    "(status, tier, licensed units, expiration), regulatory violation case "
-    "history, and condemned/boarded status for a street address. "
-    "Live City of Minneapolis open data."
+    "Minneapolis rental-license compliance check: query by street address and "
+    "get the active rental license (status, tier, licensed units, expiration), "
+    "regulatory violation case history, and condemned/boarded status for that "
+    "property. Input: address string. Output: JSON. Live City of Minneapolis "
+    "open data (public records)."
 )
 
 

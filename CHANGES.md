@@ -92,3 +92,15 @@ verification instead of a repo-wide `git status` of the parent tree.
   chars, which would silently break discovery AND revenue. The composite
   listing's description embeds a user-supplied `topic`, the one unbounded path.
   Tests in `tests/test_discovery_extension.py` (clamp + short-passthrough).
+
+## 2026-07-18 — semantically dense served descriptions (retrieval optimization)
+
+- Enriched the resource descriptions CDP Bazaar semantic search indexes, leading
+  with what each endpoint does + inputs + output shape using concrete nouns an
+  agent would query (truthful, computed-from-real-sources; now safe under the
+  500-char clamp): Pulse (`app/swarm/publisher.py`) = Base mainnet settlement
+  intelligence for pricing x402/USDC micropayments (block, gas/base+priority
+  fee, ETH price, ETH & ERC-20/USDC transfer settlement cost, JSON/GET);
+  composite (`app/swarm/roles.py`) = x402-sourced cited Markdown research report
+  synthesized from N paid upstream sources; `mn_compliance` = Minneapolis
+  rental-license compliance by street address, JSON output.

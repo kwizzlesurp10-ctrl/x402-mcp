@@ -88,7 +88,14 @@ async def publish_pulse_product(
         BuildSellerRequirementsInput(
             network=settings.swarm_sell_network,
             price=f"${price:.6f}",
-            description=f"Base Network Pulse - settlement intelligence @ block {data['latest_block']}",
+            description=(
+                "Base mainnet settlement intelligence (Base Network Pulse) for "
+                "pricing x402 / USDC agent micropayments: live network economics "
+                f"at block {data['latest_block']} — block time, base fee and "
+                "priority fee (gas), ETH price, and the USD cost to settle an ETH "
+                "transfer and an ERC-20/USDC transfer. GET, no inputs; returns "
+                "JSON computed from Base RPC + spot price, no API key required."
+            ),
             **purchase_discovery_metadata(product, settings.public_base_url),
         ),
     )

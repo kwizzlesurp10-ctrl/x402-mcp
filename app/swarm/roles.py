@@ -351,7 +351,13 @@ def merchant_list(
         BuildSellerRequirementsInput(
             network=sell_network,
             price=price_str,
-            description=f"Composite research report: {product.topic}",
+            description=(
+                f"x402-sourced research report on {product.topic}: a composite "
+                f"synthesized from {len(product.sources)} paid upstream x402 data "
+                "source(s), delivered as a cited Markdown intelligence report. "
+                "GET the purchase URL and pay in USDC to settle; returns JSON "
+                "containing the full report text."
+            ),
             **purchase_discovery_metadata(product, settings.public_base_url),
         )
     )
