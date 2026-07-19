@@ -55,6 +55,55 @@ def test_unpaid_request_returns_402_with_valid_x402_header(
     assert option.network == settings.x402_default_network
 
 
+def test_402_header_carries_bazaar_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The challenge must be catalogable: resource info + bazaar extension."""
+    from x402 import parse_payment_required
+    from x402.extensions.bazaar import validate_discovery_extension
+
+    monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
+    response = client.get("/mn/property-check", params={"address": "1700 Penn Ave N"})
+    assert response.status_code == 402
+
+    wire = json.loads(base64.b64decode(response.headers["PAYMENT-REQUIRED"]))
+    parsed = parse_payment_required(wire)
+
+    assert parsed.resource is not None
+    assert parsed.resource.url == f"{settings.public_base_url}/mn/property-check"
+    assert parsed.resource.mime_type == "application/json"
+    assert parsed.resource.description == mn_compliance.RESOURCE_DESCRIPTION
+
+    assert parsed.extensions and "bazaar" in parsed.extensions
+    bazaar = parsed.extensions["bazaar"]
+    assert bazaar["info"]["input"]["method"] == "GET"
+    assert bazaar["info"]["input"]["queryParams"] == {"address": "1700 Penn Ave N"}
+    example = bazaar["info"]["output"]["example"]
+    assert example["licensed"] is True
+    assert example["rental_licenses"][0]["license_number"] == "LIC394217"
+
+    # The facilitator validates info against the extension's own schema
+    # before cataloging; a failure here means the product stays invisible.
+    validation = validate_discovery_extension(bazaar)
+    assert validation.valid, validation.errors
+
+
+def test_bazaar_discoverable_false_omits_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from x402 import parse_payment_required
+
+    monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
+    monkeypatch.setattr(settings, "bazaar_discoverable", False)
+    response = client.get("/mn/property-check", params={"address": "1700 Penn Ave N"})
+    assert response.status_code == 402
+
+    wire = json.loads(base64.b64decode(response.headers["PAYMENT-REQUIRED"]))
+    parsed = parse_payment_required(wire)
+    assert parsed.extensions is None
+    assert parsed.resource is not None  # resource info still describes the endpoint
+
+
 def test_paid_request_serves_report_with_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

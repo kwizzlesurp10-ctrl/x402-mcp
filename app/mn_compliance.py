@@ -17,8 +17,6 @@ Owner phone/email exist in the source data but are intentionally not served.
 
 from __future__ import annotations
 
-import base64
-import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -223,10 +221,53 @@ def resource_url() -> str:
     return f"{settings.public_base_url}/mn/property-check"
 
 
-def build_payment_required_header() -> str:
-    """Base64 x402 v2 PAYMENT-REQUIRED header for this resource."""
-    from x402 import PaymentRequired, ResourceInfo
+# Bazaar discovery examples: buyers call GET {resource_url}?address=... and
+# receive a report shaped like check_property()'s output. Small but faithful
+# excerpts — the CDP facilitator catalogs these verbatim at settle time.
+DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {"address": "1700 Penn Ave N"}
 
+DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
+    "address_queried": "1700 Penn Ave N",
+    "licensed": True,
+    "rental_licenses": [
+        {
+            "address": "1700 PENN AVE N",
+            "apn": "1602924310042",
+            "license_number": "LIC394217",
+            "status": "Active",
+            "tier": "Tier 1",
+            "category": "CONV",
+            "licensed_units": 1,
+            "expiration_date": "2027-03-01",
+            "ward": "5",
+            "neighborhood": "Willard - Hay",
+        }
+    ],
+    "violation_cases": {
+        "total": 1,
+        "recent": [
+            {
+                "case_number": "RS-2025-01",
+                "case_type": "Rental License",
+                "inspection_result": "Violations Found",
+                "start_date": "2025-01-01",
+            }
+        ],
+    },
+    "condemned_or_boarded": {"flagged": False, "records": []},
+    "disclaimer": "Public records from City of Minneapolis Open Data.",
+    "generated_at": "2026-07-16T00:00:00+00:00",
+}
+
+
+def build_payment_required_header() -> str:
+    """Base64 x402 v2 PAYMENT-REQUIRED header for this resource.
+
+    Delegates to build_seller_requirements so the challenge carries
+    ResourceInfo plus (per BAZAAR_DISCOVERABLE) the Bazaar discovery
+    extension — without it a settled payment through the CDP facilitator
+    catalogs nothing and this product stays invisible to buyers.
+    """
     from app.models import BuildSellerRequirementsInput
     from app.x402_services import build_seller_requirements
 
@@ -235,20 +276,14 @@ def build_payment_required_header() -> str:
             network=settings.x402_default_network,
             price=settings.mn_property_check_price,
             description=RESOURCE_DESCRIPTION,
+            resource_url=resource_url(),
+            mime_type="application/json",
+            discovery_method="GET",
+            discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+            discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
         )
     )
-    payment_required = PaymentRequired(
-        x402_version=2,
-        error="Payment required",
-        resource=ResourceInfo(
-            url=resource_url(),
-            description=RESOURCE_DESCRIPTION,
-            mime_type="application/json",
-        ),
-        accepts=built["requirements"],
-    )
-    wire = payment_required.model_dump(by_alias=True, exclude_none=True)
-    return base64.b64encode(json.dumps(wire).encode()).decode()
+    return built["payment_required_header"]
 
 
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:
