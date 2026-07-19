@@ -4,11 +4,10 @@
  */
 import { chromium } from "playwright";
 import { writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 
-const SCRATCH =
-  process.env.GOAL_SCRATCH ||
-  "C:\\Users\\Keith\\AppData\\Local\\Temp\\grok-goal-3e705d8b50a4\\implementer";
+const SCRATCH = process.env.GOAL_SCRATCH || join(tmpdir(), "x402-mcp-evidence");
 const DASHBOARD_URL = process.env.DASHBOARD_URL || "http://127.0.0.1:5173";
 const lines = [];
 

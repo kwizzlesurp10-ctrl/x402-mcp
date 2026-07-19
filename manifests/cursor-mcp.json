@@ -2,7 +2,7 @@
   "mcpServers": {
     "x402-micropayments": {
       "command": "python",
-      "args": ["C:\\Users\\Keith\\x402-mcp\\run_stdio.py"],
+      "args": ["${workspaceFolder}/run_stdio.py"],
       "env": {
         "EVM_PRIVATE_KEY": "${EVM_PRIVATE_KEY}",
         "X402_PAY_TO_ADDRESS": "${X402_PAY_TO_ADDRESS}",

@@ -4,25 +4,29 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRATCH = Path(
-    os.environ.get(
-        "GOAL_SCRATCH",
-        r"C:\Users\Keith\AppData\Local\Temp\grok-goal-96e31bb2e41a\implementer",
-    )
+    os.environ.get("GOAL_SCRATCH", str(Path(tempfile.gettempdir()) / "x402-mcp-evidence"))
 )
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 if not PYTHON.exists():
     PYTHON = Path(sys.executable)
 
-DRIVE_SKILL = Path(r"C:\Users\Keith\.grok\skills\google-drive-playwright")
+DRIVE_SKILL = Path(
+    os.environ.get(
+        "DRIVE_SKILL",
+        str(Path.home() / ".grok" / "skills" / "google-drive-playwright"),
+    )
+)
 UPLOAD_SCRIPT = ROOT / "scripts" / "drive" / "upload-x402-folders.ts"
-PARENT_ROOT = Path(r"C:\Users\Keith")
+PARENT_ROOT = Path(os.environ.get("X402_PARENT_ROOT", str(Path.home())))
 
 sys.path.insert(0, str(ROOT))
 from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_COUNT  # noqa: E402
@@ -41,13 +45,13 @@ REQUIRED_PROOF_PATHS = {
 
 
 def _resolve_npx() -> str:
+    found = shutil.which("npx") or shutil.which("npx.cmd")
+    if found:
+        return found
     if sys.platform == "win32":
-        for candidate in (
-            r"C:\Program Files\nodejs\npx.cmd",
-            r"C:\Users\Keith\AppData\Roaming\npm\npx.cmd",
-        ):
-            if Path(candidate).exists():
-                return candidate
+        candidate = Path(r"C:\Program Files\nodejs\npx.cmd")
+        if candidate.exists():
+            return str(candidate)
     return "npx"
 
 

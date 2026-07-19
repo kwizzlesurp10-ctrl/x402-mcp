@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,10 +12,7 @@ import pytest
 from tests.test_mcp_tools import EXPECTED_TOOLS
 
 SCRATCH = Path(
-    os.environ.get(
-        "GOAL_SCRATCH",
-        r"C:\Users\Keith\AppData\Local\Temp\grok-goal-96e31bb2e41a\implementer",
-    )
+    os.environ.get("GOAL_SCRATCH", str(Path(tempfile.gettempdir()) / "x402-mcp-evidence"))
 )
 
 

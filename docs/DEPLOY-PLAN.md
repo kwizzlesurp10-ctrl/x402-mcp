@@ -51,7 +51,7 @@ Alternatives considered:
 From `deployment/seller.env.example`, plus the new knobs:
 
 ```
-X402_PAY_TO_ADDRESS=0x828942Ea72c767AB944C1cE80264F465b6cB6Fd9
+X402_PAY_TO_ADDRESS=0xYourReceiveAddress
 CDP_API_KEY_ID=<CDP key id>
 CDP_API_KEY_SECRET=<CDP secret — set via provider secret store, never in image>
 CDP_NETWORKS=eip155:8453

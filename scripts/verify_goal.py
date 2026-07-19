@@ -7,14 +7,12 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRATCH = Path(
-    os.environ.get(
-        "GOAL_SCRATCH",
-        r"C:\Users\Keith\AppData\Local\Temp\grok-goal-3ae38ed9b2d9\implementer",
-    )
+    os.environ.get("GOAL_SCRATCH", str(Path(tempfile.gettempdir()) / "x402-mcp-evidence"))
 )
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 if not PYTHON.exists():

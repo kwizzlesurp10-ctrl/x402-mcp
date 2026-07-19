@@ -36,7 +36,7 @@ You configure **one recipient wallet** (`X402_PAY_TO_ADDRESS`) to collect seller
 ### Windows (PowerShell)
 
 ```powershell
-cd C:\Users\Keith\x402-mcp
+cd path\to\x402-mcp
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -103,7 +103,7 @@ Use a **separate** hot wallet with limited testnet USDC — not your main profit
   "mcpServers": {
     "x402-micropayments": {
       "command": "python",
-      "args": ["C:\\Users\\Keith\\x402-mcp\\run_stdio.py"],
+      "args": ["${workspaceFolder}/run_stdio.py"],
       "env": {
         "X402_PAY_TO_ADDRESS": "0xYourWalletAddressHere",
         "X402_FACILITATOR_URL": "https://x402.org/facilitator"

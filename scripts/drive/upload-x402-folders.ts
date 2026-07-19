@@ -4,6 +4,7 @@
  * Target: /Forge/MCP_Projects/x402-micropayments/
  */
 import fs from 'fs/promises';
+import os from 'node:os';
 import path from 'path';
 import { parseArgs } from 'util';
 import { withDriveContext, requireAuthenticatedDrive } from './create-drive-context.js';
@@ -54,7 +55,9 @@ function normalizeItemName(name: string): string {
 
 function isLikelyDriveItem(name: string): boolean {
   const base = normalizeItemName(name);
-  if (!base || base === 'Keith Severson' || UI_NOISE.test(base)) return false;
+  // Optional: set DRIVE_OWNER_DISPLAY_NAME to filter your signed-in account label from listings.
+  const ownerLabel = (process.env.DRIVE_OWNER_DISPLAY_NAME ?? '').trim();
+  if (!base || (ownerLabel && base === ownerLabel) || UI_NOISE.test(base)) return false;
   if (
     REQUIRED_TOP.includes(base) ||
     base === 'app' ||
@@ -297,7 +300,8 @@ async function listVisibleItemNames(page: import('playwright').Page): Promise<st
   for (let i = 0; i < Math.min(rowCount, 120); i++) {
     const text = await rows.nth(i).innerText().catch(() => '');
     const first = (text.split('\n')[0] ?? '').trim();
-    if (first && first !== 'Keith Severson' && !/^name$/i.test(first)) {
+    const ownerLabel = (process.env.DRIVE_OWNER_DISPLAY_NAME ?? '').trim();
+    if (first && (!ownerLabel || first !== ownerLabel) && !/^name$/i.test(first)) {
       names.push(normalizeItemName(first));
     }
   }
@@ -701,7 +705,9 @@ async function repairMissingFiles(
 
 async function main(): Promise<void> {
   const staging = path.resolve(
-    values.staging ?? 'C:/Users/Keith/AppData/Local/Temp/grok-goal-96e31bb2e41a/implementer/x402-drive-staging',
+    values.staging ??
+      process.env.X402_DRIVE_STAGING ??
+      path.join(os.tmpdir(), 'x402-mcp-evidence', 'x402-drive-staging'),
   );
   const scratch = path.dirname(staging);
   const listingPath = values.listing

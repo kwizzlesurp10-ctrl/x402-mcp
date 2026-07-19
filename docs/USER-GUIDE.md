@@ -96,7 +96,7 @@ Testnet spend (`eip155:84532`) counts as **$0.00** for budgeting.
 ### Install
 
 ```powershell
-cd C:\Users\Keith\x402-mcp
+cd path\to\x402-mcp
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -437,7 +437,7 @@ Full detail: [agent-ops.md](agent-ops.md).
   "mcpServers": {
     "x402": {
       "command": "python",
-      "args": ["C:\\Users\\Keith\\x402-mcp\\run_stdio.py"],
+      "args": ["${workspaceFolder}/run_stdio.py"],
       "env": {
         "X402_PAY_TO_ADDRESS": "0xYourWallet",
         "STRIPE_SECRET_KEY": "sk_test_..."
@@ -445,7 +445,7 @@ Full detail: [agent-ops.md](agent-ops.md).
     },
     "x402vault": {
       "command": "python",
-      "args": ["C:\\Users\\Keith\\x402-mcp\\run_stdio.py"],
+      "args": ["${workspaceFolder}/run_stdio.py"],
       "env": {
         "EVM_PRIVATE_KEY": "${X402_TESTNET_KEY}",
         "X402_DEFAULT_NETWORK": "eip155:84532"

@@ -5,7 +5,7 @@
 ## Local Development (stdio)
 
 ```powershell
-cd C:\Users\Keith\x402-mcp
+cd path\to\x402-mcp
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
@@ -67,7 +67,7 @@ Target folder: `/Forge/MCP_Projects/x402-micropayments/`
 Local mirror:
 
 ```
-C:\Users\Keith\x402-mcp\
+x402-mcp/
 ├── code/        (app/, run_stdio.py)
 ├── tests/
 ├── docs/

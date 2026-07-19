@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
 SCRATCH = Path(
-    os.environ.get(
-        "GOAL_SCRATCH",
-        r"C:\Users\Keith\AppData\Local\Temp\grok-goal-96e31bb2e41a\implementer",
-    )
+    os.environ.get("GOAL_SCRATCH", str(Path(tempfile.gettempdir()) / "x402-mcp-evidence"))
 )
 
 REQUIRED_TOP = ("code", "tests", "docs", "manifests", "deployment", "screenshots", "scripts")

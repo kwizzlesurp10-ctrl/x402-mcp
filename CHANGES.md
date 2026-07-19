@@ -1,8 +1,8 @@
 # x402-mcp project changes (isolated scope)
 
-This file documents deltas **only** within `C:\Users\Keith\x402-mcp\`.
-The parent workspace git root (`C:\Users\Keith`) contains unrelated untracked files;
-use this manifest for goal verification instead of repo-wide `git status`.
+This file documents deltas **only** within this repository (`x402-mcp/`).
+If this clone sits inside a larger parent workspace, use this manifest for goal
+verification instead of a repo-wide `git status` of the parent tree.
 
 ## Application (`app/`)
 
