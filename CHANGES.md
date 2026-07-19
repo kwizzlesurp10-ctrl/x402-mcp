@@ -81,3 +81,14 @@ verification instead of a repo-wide `git status` of the parent tree.
 - `tests/test_qma.py` (10 tests) — agreement/accept, contradiction→reject,
   low-completeness→iterate, high-entanglement penalty, validator soundness,
   computed KPIs, async producer, isolation + exactly-two-Merlin enforcement.
+
+## 2026-07-18 — CDP description-limit safeguard
+
+- `app/x402_services.py::_clamp_description` (+ `CDP_MAX_DESCRIPTION_CHARS=500`)
+  clamps the resource description centrally in `build_seller_requirements`, on
+  every CDP-facing path (`ResourceConfig.description`, `PaymentRequired.error`,
+  and `ResourceInfo.description`). Prompted by paid discoverability intel: the
+  CDP Facilitator rejects BOTH verify and settle when a description exceeds 500
+  chars, which would silently break discovery AND revenue. The composite
+  listing's description embeds a user-supplied `topic`, the one unbounded path.
+  Tests in `tests/test_discovery_extension.py` (clamp + short-passthrough).

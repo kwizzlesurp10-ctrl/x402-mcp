@@ -158,6 +158,33 @@ def test_settings_toggle_disables_discovery(offline_facilitator, monkeypatch):
     assert _decode(result["payment_required_header"]).extensions is None
 
 
+def test_long_description_clamped_to_cdp_limit(offline_facilitator):
+    """CDP rejects verify+settle when a description exceeds the limit, so an
+    over-long (e.g. user-topic-derived) description must be clamped on EVERY
+    CDP-facing path: the accepts[].description, PaymentRequired.error, and the
+    ResourceInfo.description."""
+    long_topic = "zk rollups " * 80  # ~880 chars, well over the 500 limit
+    result = _build(
+        description=f"Composite research report: {long_topic}",
+        resource_url=PURCHASE_URL,
+        discovery_output_example={"payment_settled": True},
+    )
+    pr = _decode(result["payment_required_header"])
+    limit = x402_services.CDP_MAX_DESCRIPTION_CHARS
+
+    assert len(pr.error) <= limit
+    assert pr.error.endswith("...")
+    assert pr.resource is not None
+    assert len(pr.resource.description) <= limit
+
+
+def test_short_description_unchanged(offline_facilitator):
+    result = _build(description="short and fine", resource_url=PURCHASE_URL)
+    pr = _decode(result["payment_required_header"])
+    assert pr.error == "short and fine"
+    assert pr.resource.description == "short and fine"
+
+
 def test_no_resource_url_is_backward_compatible(offline_facilitator):
     result = _build()
     assert result["discoverable"] is False

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -17,6 +18,27 @@ from app.models import (
     SupportedNetworksOutput,
     VerifyPaymentInput,
 )
+
+logger = logging.getLogger("x402")
+
+# The CDP Facilitator rejects BOTH verify and settle when a resource description
+# exceeds this many characters, which would silently break discovery AND revenue.
+# We clamp centrally so no caller (e.g. a composite listing whose description
+# embeds a user-supplied topic) can ever emit an uncatalogable / unsettleable 402.
+CDP_MAX_DESCRIPTION_CHARS = 500
+
+
+def _clamp_description(description: str) -> str:
+    if len(description) <= CDP_MAX_DESCRIPTION_CHARS:
+        return description
+    clamped = description[: CDP_MAX_DESCRIPTION_CHARS - 3].rstrip() + "..."
+    logger.warning(
+        "description of %d chars exceeds CDP limit %d; truncated for the served "
+        "402 (CDP rejects verify+settle above the limit)",
+        len(description),
+        CDP_MAX_DESCRIPTION_CHARS,
+    )
+    return clamped
 
 
 def _use_cdp(network: str | None) -> bool:
@@ -455,8 +477,12 @@ def _build_discovery_extension(
     return extension
 
 
-def _build_resource_info(params: BuildSellerRequirementsInput) -> Any:
-    """ResourceInfo (url/description/mime + Bazaar service metadata) for a 402."""
+def _build_resource_info(params: BuildSellerRequirementsInput, description: str) -> Any:
+    """ResourceInfo (url/description/mime + Bazaar service metadata) for a 402.
+
+    ``description`` is the already-clamped value (see _clamp_description) so the
+    ResourceInfo cannot exceed the CDP description limit either.
+    """
     from x402.schemas import ResourceInfo
 
     tags = [
@@ -464,7 +490,7 @@ def _build_resource_info(params: BuildSellerRequirementsInput) -> Any:
     ][:5]
     return ResourceInfo(
         url=str(params.resource_url),
-        description=params.description,
+        description=description,
         mime_type=params.mime_type,
         service_name=settings.bazaar_service_name.strip()[:32] or None,
         tags=tags or None,
@@ -484,6 +510,8 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
             f"unsupported scheme '{params.scheme}'; only 'exact' is supported"
         )
 
+    description = _clamp_description(params.description)
+
     from x402 import ResourceConfig, x402ResourceServer
     from x402.http import encode_payment_required_header
     from x402.schemas import PaymentRequired
@@ -498,7 +526,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
         network=params.network,
         pay_to=pay_to,
         price=params.price,
-        description=params.description,
+        description=description,
     )
     requirements = server.build_payment_requirements(config)
 
@@ -508,7 +536,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     resource_info = None
     extensions = None
     if params.resource_url:
-        resource_info = _build_resource_info(params)
+        resource_info = _build_resource_info(params, description)
         discoverable = (
             params.discoverable
             if params.discoverable is not None
@@ -526,7 +554,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     payment_required = PaymentRequired(
         x402_version=2,
         accepts=list(requirements),
-        error=params.description,
+        error=description,
         resource=resource_info,
         extensions=extensions,
     )
