@@ -576,6 +576,22 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
     latency = round((time.monotonic() - t0) * 1000)
     log.info("mn/property-check settled", extra={"address": address, "status_code": 200, "latency_ms": latency})
 
+    settlement = result.get("settlement") or {}
+    tx = settlement.get("transaction") or settlement.get("txHash")
+    try:
+        from app.swarm import ledger_writer
+        from app.swarm.publisher import parse_price_usdc
+
+        ledger_writer.record_revenue(
+            agent_id="mn-property-check",
+            amount_usdc=parse_price_usdc(settings.mn_property_check_price),
+            network=settings.x402_default_network,
+            product_id="mn-property-check",
+            tx=str(tx) if tx else None,
+        )
+    except Exception:  # ledger write must never break paid delivery
+        log.warning("mn/property-check revenue ledger write failed", exc_info=True)
+
     import base64
     import json as _json
 

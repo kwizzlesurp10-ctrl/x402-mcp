@@ -265,3 +265,43 @@ async def test_check_property_escapes_quotes(mock_arcgis: str) -> None:
     # An apostrophe in the address must not break the ArcGIS where clause.
     report = await mn_compliance.check_property("100 O'Brien's Way")
     assert report["licensed"] is False
+
+
+def test_paid_request_records_revenue_ledger_row(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A settled property-check sale must land in ledger/revenue.jsonl."""
+    from app import ledger_io
+
+    monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
+    monkeypatch.setattr(ledger_io, "LEDGER", tmp_path)
+
+    async def fake_settle(signature: str, payment_required: str) -> dict:
+        return {
+            "is_valid": True,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xfeed"},
+            "invalid_reason": None,
+            "settlement_error": None,
+        }
+
+    async def fake_report(address: str) -> dict:
+        return {"address_queried": address, "licensed": True}
+
+    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(mn_compliance, "check_property", fake_report)
+
+    response = client.get(
+        "/mn/property-check",
+        params={"address": "1700 Penn Ave N"},
+        headers={"PAYMENT-SIGNATURE": "sig-abc"},
+    )
+    assert response.status_code == 200
+
+    rows = ledger_io.read_ledger_rows("revenue")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["product_id"] == "mn-property-check"
+    assert row["amount_usdc"] == 0.01
+    assert row["tx"] == "0xfeed"
+    assert row["settled"] is True
