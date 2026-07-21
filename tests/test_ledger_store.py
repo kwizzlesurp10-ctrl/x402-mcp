@@ -8,7 +8,7 @@ from __future__ import annotations
 import fakeredis
 import pytest
 
-from app import ledger_io, ledger_store
+from app import ledger_io, ledger_store, redis_client
 from app.ledger_store import RedisLedgerStore, build_ledger_store
 from app.swarm import ledger_writer
 
@@ -134,16 +134,25 @@ def test_bad_ledger_name_is_rejected(redis_ledger) -> None:
         redis_ledger.append("payroll", {})
 
 
-def test_files_stay_the_default_without_redis_url(monkeypatch) -> None:
-    monkeypatch.setattr(ledger_store.settings, "redis_url", "")
+def test_files_are_used_when_there_is_no_shared_client(monkeypatch) -> None:
+    """No Redis (unset URL, or unreachable) means the jsonl files."""
+    monkeypatch.setattr(redis_client, "client", None)
 
     assert build_ledger_store() is None
 
 
-def test_unreachable_redis_falls_back_to_files(monkeypatch) -> None:
-    """A dead Redis degrades the ledger; it must never stop the server booting."""
-    monkeypatch.setattr(ledger_store.settings, "redis_url", "redis://127.0.0.1:1/0")
-    monkeypatch.setattr(ledger_store, "fallback_reason", None)
+def test_redis_is_used_when_the_shared_client_exists(monkeypatch) -> None:
+    monkeypatch.setattr(
+        redis_client, "client", fakeredis.FakeRedis(decode_responses=True)
+    )
 
-    assert build_ledger_store() is None
-    assert ledger_store.fallback_reason  # /doctor fails on this
+    assert isinstance(build_ledger_store(), RedisLedgerStore)
+
+
+def test_unreachable_redis_degrades_instead_of_raising(monkeypatch) -> None:
+    """A dead Redis must never stop the server booting — it records why."""
+    monkeypatch.setattr(redis_client.settings, "redis_url", "redis://127.0.0.1:1/0")
+    monkeypatch.setattr(redis_client, "fallback_reason", None)
+
+    assert redis_client.build_client() is None
+    assert redis_client.fallback_reason  # /doctor fails on this

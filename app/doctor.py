@@ -9,8 +9,9 @@ from typing import Any, Literal
 
 import httpx
 
-from app import commerce, ledger_store
+from app import commerce, ledger_store, redis_client
 from app.config import settings
+from app.swarm.registry import swarm_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -206,7 +207,7 @@ def run_checks() -> dict[str, Any]:
                 )
             )
     elif settings.redis_url:
-        reason = ledger_store.fallback_reason or "unreachable at startup"
+        reason = redis_client.fallback_reason or "unreachable at startup"
         checks.append(
             _check(
                 "ledger",
@@ -225,6 +226,51 @@ def run_checks() -> dict[str, Any]:
                 "warn",
                 "File-backed ledgers — lost on restart if the host has no disk",
                 "Set REDIS_URL on any host without persistent storage",
+            )
+        )
+
+    # The registry holds what each product has actually earned; file-backed, a
+    # restart resets a sold product's revenue to zero while the money is real.
+    if swarm_registry.snapshot is not None:
+        checks.append(
+            _check(
+                "registry",
+                "Listing persistence",
+                "pass",
+                f"Swarm registry persisted to {swarm_registry.snapshot}",
+            )
+        )
+    elif settings.redis_url:
+        reason = redis_client.fallback_reason or "unreachable at startup"
+        checks.append(
+            _check(
+                "registry",
+                "Listing persistence",
+                "fail",
+                f"REDIS_URL set but the swarm registry fell back to FILES ({reason})"
+                " — listings and per-product revenue reset on the next restart",
+                "Verify REDIS_URL and Redis availability, then restart",
+            )
+        )
+    elif swarm_registry.persist_path is not None:
+        checks.append(
+            _check(
+                "registry",
+                "Listing persistence",
+                "warn",
+                "Swarm registry in a local file — lost on restart if the host "
+                "has no disk",
+                "Set REDIS_URL on any host without persistent storage",
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "registry",
+                "Listing persistence",
+                "warn",
+                "Swarm registry persistence disabled — listings die on restart",
+                "Unset SWARM_PRODUCTS_FILE or set REDIS_URL",
             )
         )
 

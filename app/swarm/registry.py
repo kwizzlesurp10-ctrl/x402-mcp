@@ -1,11 +1,11 @@
 """Registry of swarm runs and listed composite products.
 
 Runs and source scores mirror the app's other stores (quota_store, ops_events)
-— ephemeral, capped, lost on restart. Listed products and the settlement
-replay guard persist to a JSON file (`SWARM_PRODUCTS_FILE`, default
-`ledger/products.json`, git-ignored) so a restart doesn't silently unlist the
-catalog; set the var to an empty string to disable. Restart durability is
-bounded by the host filesystem — on ephemeral hosts mount a disk or use Redis.
+— ephemeral, capped, lost on restart. Listed products and the settlement replay
+guard persist: to Redis when one is configured (the only option that holds on a
+host with no disk, where a restart would otherwise reset a sold product's
+revenue to zero), otherwise to a JSON file (`SWARM_PRODUCTS_FILE`, default
+`ledger/products.json`, git-ignored; empty string disables it).
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import os
 from collections import deque
 from dataclasses import asdict, fields
 from pathlib import Path
+from typing import Any
 
 from app.swarm.models import CompositeProduct, SwarmRun
 
@@ -24,24 +25,67 @@ log = logging.getLogger("x402")
 _PRODUCT_FIELDS = {f.name for f in fields(CompositeProduct)}
 
 
+class RedisSnapshotStore:
+    """The registry snapshot in a single Redis key.
+
+    The payload is one small JSON blob (a handful of products plus the replay
+    guard), so a whole-snapshot GET/SET keeps the same semantics the file
+    backend has — including the atomicity, which SET gives us for free.
+    """
+
+    def __init__(self, client: Any, key: str = "swarm:registry") -> None:
+        self._client = client
+        self.key = key
+
+    def read(self) -> dict | None:
+        raw = self._client.get(self.key)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, json.JSONDecodeError) as exc:
+            log.warning("swarm registry: unreadable snapshot at %s (%s)", self.key, exc)
+            return None
+
+    def write(self, payload: dict) -> None:
+        self._client.set(self.key, json.dumps(payload))
+
+    def __str__(self) -> str:
+        return f"redis:{self.key}"
+
+
 class SwarmRegistry:
     def __init__(
-        self, max_runs: int = 200, persist_path: str | Path | None = None
+        self,
+        max_runs: int = 200,
+        persist_path: str | Path | None = None,
+        snapshot: RedisSnapshotStore | None = None,
     ) -> None:
         self._runs: deque[SwarmRun] = deque(maxlen=max_runs)
         self._products: dict[str, CompositeProduct] = {}
         self._sources: dict[str, dict[str, float]] = {}
         self._settled_txs: set[str] = set()  # settlement dedupe (replay guard)
         self.persist_path = Path(persist_path) if persist_path else None
+        # Redis wins when present: the hosts that need it have no disk to fall
+        # back to. persist_path stays live so tests can redirect file storage.
+        self.snapshot = snapshot
         self._load()
 
-    def _load(self) -> None:
+    def _read_snapshot(self) -> dict | None:
+        """Pull the persisted payload from whichever backend is configured."""
+        if self.snapshot is not None:
+            return self.snapshot.read()
         if self.persist_path is None or not self.persist_path.exists():
-            return
+            return None
         try:
-            data = json.loads(self.persist_path.read_text(encoding="utf-8"))
+            return json.loads(self.persist_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             log.warning("swarm registry: unreadable %s (%s)", self.persist_path, exc)
+            return None
+
+    def _load(self) -> None:
+        data = self._read_snapshot()
+        if data is None:
             return
         for raw in data.get("products", []):
             known = {k: v for k, v in raw.items() if k in _PRODUCT_FIELDS}
@@ -58,17 +102,23 @@ class SwarmRegistry:
             log.info(
                 "swarm registry: restored %d listed product(s) from %s",
                 len(self._products),
-                self.persist_path,
+                self.snapshot or self.persist_path,
             )
 
     def save(self) -> None:
-        """Persist products + settlement guard. Atomic write; no-op if disabled."""
-        if self.persist_path is None:
+        """Persist products + settlement guard. Atomic; no-op if disabled."""
+        if self.snapshot is None and self.persist_path is None:
             return
         payload = {
             "products": [asdict(p) for p in self._products.values()],
             "settled_txs": sorted(self._settled_txs),
         }
+        if self.snapshot is not None:
+            try:
+                self.snapshot.write(payload)
+            except Exception as exc:  # noqa: BLE001 — a sale must still complete
+                log.error("swarm registry: persist failed to %s (%s)", self.snapshot, exc)
+            return
         try:
             self.persist_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.persist_path.with_suffix(".json.tmp")
@@ -167,4 +217,15 @@ def _default_products_path() -> Path | None:
     return path
 
 
-swarm_registry = SwarmRegistry(persist_path=_default_products_path())
+def _default_snapshot() -> RedisSnapshotStore | None:
+    """Use Redis for the registry whenever one is configured and reachable."""
+    from app import redis_client
+
+    if redis_client.client is None:
+        return None
+    return RedisSnapshotStore(redis_client.client)
+
+
+swarm_registry = SwarmRegistry(
+    persist_path=_default_products_path(), snapshot=_default_snapshot()
+)

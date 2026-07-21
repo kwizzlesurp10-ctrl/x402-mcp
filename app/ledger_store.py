@@ -19,8 +19,6 @@ import json
 import logging
 from typing import Any
 
-from app.config import settings
-
 log = logging.getLogger("x402")
 
 LEDGER_NAMES = ("spend", "revenue")
@@ -29,9 +27,6 @@ LEDGER_NAMES = ("spend", "revenue")
 # and the aggregate endpoints read the whole list, so this bounds both memory on
 # a free Redis plan and the work /swarm/revenue does per request.
 MAX_ROWS = 50_000
-
-# Set when REDIS_URL was configured but we fell back to files anyway.
-fallback_reason: str | None = None
 
 
 def _validate(name: str) -> str:
@@ -82,37 +77,15 @@ class RedisLedgerStore:
 def build_ledger_store() -> RedisLedgerStore | None:
     """Pick the ledger backend at import time; None means the jsonl files.
 
-    Mirrors build_quota_store: REDIS_URL unset -> files, reachable -> Redis,
-    unreachable -> files plus a loud log and a fallback_reason /doctor can fail
-    on. Never raises, because an unreachable Redis must not stop the server from
-    booting — a storefront that serves 402s with a degraded ledger is still
-    better than one that is down.
+    REDIS_URL unset -> files. Reachable -> Redis. Unreachable -> files, with
+    app.redis_client recording why so /doctor can fail on it.
     """
-    if not settings.redis_url:
-        return None
-    try:
-        import redis
+    from app import redis_client
 
-        client = redis.Redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_connect_timeout=2.0,
-            socket_timeout=2.0,
-        )
-        client.ping()
-    except Exception as exc:  # noqa: BLE001 — any failure means fallback
-        log.error(
-            "REDIS_URL is set but Redis is unreachable (%s: %s) — the spend and "
-            "revenue ledgers are falling back to FILES. On an ephemeral host "
-            "that means settled sales will be lost on the next restart.",
-            type(exc).__name__,
-            exc,
-        )
-        global fallback_reason
-        fallback_reason = f"{type(exc).__name__}: {exc}"
+    if redis_client.client is None:
         return None
     log.info("Ledger store: Redis (settled spend/revenue survive a restart)")
-    return RedisLedgerStore(client)
+    return RedisLedgerStore(redis_client.client)
 
 
 ledger_store: RedisLedgerStore | None = build_ledger_store()
