@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # List price for a synthesized Pulse report. Operator-approved 2026-07-16:
     # repriced from $8.00 to sit near the ~$0.30 ecosystem average per call.
     pulse_price: str = "$0.25"
+    # Pin the Pulse listing to a fixed product_id so its purchase URL survives a
+    # restart. Discovery catalogs (CDP Bazaar) index the URL, which embeds the
+    # id — on an ephemeral host a fresh uuid per boot would strand every indexed
+    # buyer on a 404. Set to a hex id to enable boot-time republish; empty = off.
+    pinned_pulse_product_id: str = ""
 
     # Host OS monitoring (mission control): sampling cadence + health thresholds.
     os_monitor_enabled: bool = True

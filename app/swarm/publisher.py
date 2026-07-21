@@ -9,6 +9,7 @@ the margin is entirely in the synthesis.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any
 
@@ -18,6 +19,12 @@ from app.models import BuildSellerRequirementsInput
 from app.ops_events import emit_swarm_step
 from app.swarm.models import CompositeProduct, purchase_discovery_metadata
 from app.swarm.registry import swarm_registry
+
+log = logging.getLogger("x402")
+
+# Stable seller identity for the pinned listing, so revenue rows stay attributable
+# across restarts instead of picking up a fresh uuid on every boot.
+_PINNED_SELLER_AGENT_ID = "pinned-pulse-seller"
 
 
 def parse_price_usdc(price_str: str) -> float:
@@ -59,15 +66,62 @@ def render_report(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+async def restore_pinned_listing() -> CompositeProduct | None:
+    """Make sure PINNED_PULSE_PRODUCT_ID is listed and sellable, republishing if not.
+
+    Called at startup. On an ephemeral host (Render free) a restart wipes
+    ledger/products.json, so the registry comes back empty and the purchase URL
+    sitting in the CDP Bazaar catalog answers 404 — the listing is indexed but
+    dead, and buyers who discovered it get nothing. Republishing onto the same id
+    rebuilds a fresh Pulse behind the same URL.
+
+    Returns None when pinning is disabled or the republish failed; never raises,
+    because a listing that can't be rebuilt must not stop the server from
+    booting (the rest of the API, /health included, still works).
+    """
+    pinned = settings.pinned_pulse_product_id.strip()
+    if not pinned:
+        return None
+
+    existing = swarm_registry.get_product(pinned)
+    if existing and (existing.seller_requirements or {}).get("payment_required_header"):
+        log.info("pinned listing %s survived the restart; not republishing", pinned)
+        return existing
+
+    try:
+        product = await publish_pulse_product(
+            agent_id=_PINNED_SELLER_AGENT_ID, product_id=pinned
+        )
+    except Exception:  # noqa: BLE001 — boot must not fail on a listing rebuild
+        log.exception("pinned listing %s could not be republished", pinned)
+        return None
+
+    log.info(
+        "pinned listing %s republished at $%.2f on %s",
+        pinned,
+        product.price_usdc,
+        product.network,
+    )
+    return product
+
+
 async def publish_pulse_product(
-    agent_id: str, price_usdc: float | None = None
+    agent_id: str,
+    price_usdc: float | None = None,
+    product_id: str | None = None,
 ) -> CompositeProduct:
-    """Synthesize a live Pulse and list it as a payable x402 product."""
+    """Synthesize a live Pulse and list it as a payable x402 product.
+
+    Pass `product_id` to republish onto an existing id — the purchase URL embeds
+    it, so reusing the id is what keeps an already-cataloged listing resolvable
+    across a restart. The id has to be set before the seller requirements are
+    built, since the discovery metadata carries the URL derived from it.
+    """
     data = await pulse.get_pulse()
     price = price_usdc if price_usdc is not None else parse_price_usdc(settings.pulse_price)
 
     product = CompositeProduct(
-        product_id=uuid.uuid4().hex,
+        product_id=product_id or uuid.uuid4().hex,
         topic=f"Base Network Pulse @ block {data['latest_block']}",
         cost_basis_usdc=0.0,  # quality input data is free to read
         price_usdc=price,

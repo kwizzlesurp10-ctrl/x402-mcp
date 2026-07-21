@@ -39,10 +39,21 @@ services:
         value: "x402 MCP Storefront"
       - key: BAZAAR_SERVICE_TAGS
         value: "base,intelligence,x402,data"
+      # --- listing durability on an ephemeral host ---
+      # The free plan has no persistent disk: a restart or redeploy wipes
+      # ledger/products.json, and the purchase URL indexed in the CDP Bazaar
+      # catalog then 404s. Pinning the id makes startup republish a fresh Pulse
+      # behind the SAME url, so cataloged buyers keep resolving. Do not change
+      # this value — it is the id that is already in the catalog.
+      - key: PINNED_PULSE_PRODUCT_ID
+        value: "d22bbf5f3c4b4666a6f80980c7bc7c50"
       # --- seller-only posture ---
       - key: SWARM_ENABLED
         value: "false"        # no buyer role on a public box
       - key: DASHBOARD_ACTIONS
-        value: "true"         # needed once for POST /pulse/publish; flip to false after
+        value: "true"         # kept on as the manual escape hatch: if the boot-time
+                              # republish fails (e.g. facilitator 401), POST
+                              # /pulse/publish is the only way to restore a listing
+                              # without a redeploy.
       - key: PUBLIC_BASE_URL
         value: "https://x402-mcp.onrender.com"  # VERIFY this matches the assigned URL
