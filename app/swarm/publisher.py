@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from app import pulse, x402_services
@@ -66,6 +67,22 @@ def render_report(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _is_stale(product: CompositeProduct) -> bool:
+    """Has the restored report aged past what we can honestly sell as live?"""
+    max_age = settings.pinned_pulse_max_age_seconds
+    if max_age <= 0:
+        return False
+    if not product.created_at:
+        return True  # persisted before the field existed — refresh it once
+    try:
+        created = datetime.fromisoformat(product.created_at)
+    except ValueError:
+        return True
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - created).total_seconds() > max_age
+
+
 async def restore_pinned_listing() -> CompositeProduct | None:
     """Make sure PINNED_PULSE_PRODUCT_ID is listed and sellable, republishing if not.
 
@@ -84,7 +101,10 @@ async def restore_pinned_listing() -> CompositeProduct | None:
         return None
 
     existing = swarm_registry.get_product(pinned)
-    if existing and (existing.seller_requirements or {}).get("payment_required_header"):
+    sellable = bool(
+        existing and (existing.seller_requirements or {}).get("payment_required_header")
+    )
+    if sellable and not _is_stale(existing):
         log.info("pinned listing %s survived the restart; not republishing", pinned)
         return existing
 
@@ -94,11 +114,20 @@ async def restore_pinned_listing() -> CompositeProduct | None:
         )
     except Exception:  # noqa: BLE001 — boot must not fail on a listing rebuild
         log.exception("pinned listing %s could not be republished", pinned)
-        return None
+        # A stale listing still sells and still resolves the cataloged URL, so
+        # keep it rather than leaving the URL dead.
+        return existing if sellable else None
+
+    if existing is not None:
+        # The rebuild is a fresh report behind the same id, not a new product —
+        # carry what this listing has already earned across it.
+        product.revenue_usdc = existing.revenue_usdc
+        swarm_registry.save()
 
     log.info(
-        "pinned listing %s republished at $%.2f on %s",
+        "pinned listing %s %s at $%.2f on %s",
         pinned,
+        "refreshed (stale report)" if sellable else "republished",
         product.price_usdc,
         product.network,
     )
@@ -132,6 +161,7 @@ async def publish_pulse_product(
         status="draft",
         seller_agent_id=agent_id,
         ltv_cac_projected=0.0,
+        created_at=datetime.now(UTC).isoformat(),
     )
 
     # build_seller_requirements does sync facilitator I/O (server.initialize());

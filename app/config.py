@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # id — on an ephemeral host a fresh uuid per boot would strand every indexed
     # buyer on a 404. Set to a hex id to enable boot-time republish; empty = off.
     pinned_pulse_product_id: str = ""
+    # How old a restored pinned listing may be before startup rebuilds its
+    # report. Without this the durable registry would freeze one boot's Pulse
+    # forever and keep selling it as live. 0 disables the refresh.
+    pinned_pulse_max_age_seconds: int = 900
 
     # Host OS monitoring (mission control): sampling cadence + health thresholds.
     os_monitor_enabled: bool = True

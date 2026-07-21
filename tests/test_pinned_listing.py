@@ -8,6 +8,8 @@ fresh uuid per boot would strand every buyer who found us through discovery on a
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.config import settings
@@ -65,25 +67,33 @@ async def test_republishes_onto_the_pinned_id_when_the_registry_is_empty(
     assert product.product_id == PINNED
 
 
+def _survivor(**over) -> CompositeProduct:
+    """A listing restored from the registry after a restart."""
+    fields = {
+        "product_id": PINNED,
+        "topic": "Base Network Pulse @ block 48915100",
+        "cost_basis_usdc": 0.0,
+        "price_usdc": 0.25,
+        "markup": 0.0,
+        "network": "eip155:8453",
+        "sources": [],
+        "report": "report",
+        "status": "sold",
+        "revenue_usdc": 0.5,
+        "seller_requirements": {"payment_required_header": "hdr"},
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    fields.update(over)
+    return CompositeProduct(**fields)
+
+
 @pytest.mark.asyncio
-async def test_keeps_the_surviving_listing_instead_of_republishing(
+async def test_keeps_a_fresh_surviving_listing_instead_of_republishing(
     registry, stub_publish, monkeypatch
 ) -> None:
     """A host that did keep its disk must not lose the sale history to a rebuild."""
     monkeypatch.setattr(settings, "pinned_pulse_product_id", PINNED)
-    survivor = CompositeProduct(
-        product_id=PINNED,
-        topic="Base Network Pulse @ block 48915100",
-        cost_basis_usdc=0.0,
-        price_usdc=0.25,
-        markup=0.0,
-        network="eip155:8453",
-        sources=[],
-        report="report",
-        status="sold",
-        revenue_usdc=0.5,
-        seller_requirements={"payment_required_header": "hdr"},
-    )
+    survivor = _survivor()
     registry.list_product(survivor)
 
     product = await publisher.restore_pinned_listing()
@@ -91,6 +101,66 @@ async def test_keeps_the_surviving_listing_instead_of_republishing(
     assert stub_publish == []
     assert product is survivor
     assert product.revenue_usdc == 0.5
+
+
+@pytest.mark.asyncio
+async def test_a_stale_listing_is_refreshed_but_keeps_its_earnings(
+    registry, stub_publish, monkeypatch
+) -> None:
+    """The Pulse sells as live data; a frozen report must not outlive its window."""
+    monkeypatch.setattr(settings, "pinned_pulse_product_id", PINNED)
+    monkeypatch.setattr(settings, "pinned_pulse_max_age_seconds", 900)
+    stale = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    registry.list_product(_survivor(created_at=stale))
+
+    product = await publisher.restore_pinned_listing()
+
+    assert stub_publish == [PINNED]  # rebuilt...
+    assert product.product_id == PINNED  # ...behind the same cataloged URL...
+    assert product.revenue_usdc == 0.5  # ...carrying what it already earned
+
+
+@pytest.mark.asyncio
+async def test_a_listing_with_no_timestamp_is_refreshed(
+    registry, stub_publish, monkeypatch
+) -> None:
+    """Rows persisted before created_at existed cannot be trusted as fresh."""
+    monkeypatch.setattr(settings, "pinned_pulse_product_id", PINNED)
+    registry.list_product(_survivor(created_at=None))
+
+    await publisher.restore_pinned_listing()
+
+    assert stub_publish == [PINNED]
+
+
+@pytest.mark.asyncio
+async def test_refresh_can_be_disabled(registry, stub_publish, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pinned_pulse_product_id", PINNED)
+    monkeypatch.setattr(settings, "pinned_pulse_max_age_seconds", 0)
+    stale = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+    registry.list_product(_survivor(created_at=stale))
+
+    await publisher.restore_pinned_listing()
+
+    assert stub_publish == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_refresh_keeps_the_stale_listing_serving(
+    registry, monkeypatch
+) -> None:
+    """A stale 402 still resolves the cataloged URL; a dead one does not."""
+    monkeypatch.setattr(settings, "pinned_pulse_product_id", PINNED)
+    stale = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    survivor = _survivor(created_at=stale)
+    registry.list_product(survivor)
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("base rpc unreachable")
+
+    monkeypatch.setattr(publisher, "publish_pulse_product", _boom)
+
+    assert await publisher.restore_pinned_listing() is survivor
 
 
 @pytest.mark.asyncio

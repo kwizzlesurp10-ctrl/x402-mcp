@@ -49,6 +49,11 @@ class CompositeProduct:
     ltv_cac_projected: float = 0.0
     run_id: str | None = None
     seller_agent_id: str | None = None
+    # When the report was synthesized (ISO-8601, UTC). The Pulse is sold as
+    # *live* network economics, so a restored snapshot needs a way to know it
+    # has gone stale. None means "written before this field existed" — treated
+    # as stale so the first restore after upgrading refreshes it.
+    created_at: str | None = None
 
     @property
     def margin_usdc(self) -> float:
