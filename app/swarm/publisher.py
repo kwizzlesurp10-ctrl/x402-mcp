@@ -172,13 +172,21 @@ async def publish_pulse_product(
         BuildSellerRequirementsInput(
             network=settings.swarm_sell_network,
             price=f"${price:.6f}",
+            # Deliberately free of the block height: discovery catalogs index
+            # this description once, at publish, and never revisit it — while
+            # the listing itself is rebuilt with newer data. A block number here
+            # would be frozen at whatever the catalog first saw and drift
+            # further every day, advertising stale data to every buyer browsing
+            # Bazaar. The block belongs in the report, which is generated per
+            # publish and is what the buyer actually receives.
             description=(
                 "Base mainnet settlement intelligence (Base Network Pulse) for "
-                "pricing x402 / USDC agent micropayments: live network economics "
-                f"at block {data['latest_block']} — block time, base fee and "
-                "priority fee (gas), ETH price, and the USD cost to settle an ETH "
-                "transfer and an ERC-20/USDC transfer. GET, no inputs; returns "
-                "JSON computed from Base RPC + spot price, no API key required."
+                "pricing x402 / USDC agent micropayments: current network "
+                "economics — latest block height and block time, base fee and "
+                "priority fee (gas), ETH spot price, and the USD cost to settle "
+                "an ETH transfer and an ERC-20/USDC transfer. GET, no inputs; "
+                "returns JSON computed from Base RPC + spot price, no API key "
+                "required."
             ),
             **purchase_discovery_metadata(product, settings.public_base_url),
         ),
