@@ -1,20 +1,46 @@
+# Render Blueprint — SELLER-ONLY public x402 storefront (docs/DEPLOY-PLAN.md).
+#
+# SAFETY: this is a PUBLIC box. It carries X402_PAY_TO_ADDRESS + CDP creds ONLY.
+# NEVER add EVM_PRIVATE_KEY / SVM_PRIVATE_KEY here — the spend key stays on the
+# operator machine. /health must show wallet_configured:false post-deploy.
+#
+# Uses the root ./Dockerfile (honours Render's dynamic $PORT; copies only app
+# code, no secrets baked). Free plan spins down after ~15min idle, so publish
+# the listing and run the discoverable settle while the box is warm.
 services:
   - type: web
     name: x402-mcp
     runtime: docker
-    plan: starter  # $7/mo — always-on (free tier spins down after 15min)
+    plan: free
     region: oregon
     envVars:
-      - key: EVM_PRIVATE_KEY
-        sync: false  # set manually in Render dashboard
+      # --- secrets: set in the Render dashboard, never synced from git ---
       - key: X402_PAY_TO_ADDRESS
+        sync: false           # mainnet USDC receive wallet (consistent address)
+      - key: CDP_API_KEY_ID
         sync: false
-      - key: X402_DEFAULT_NETWORK
-        value: "eip155:8453"  # Base mainnet for revenue
+      - key: CDP_API_KEY_SECRET
+        sync: false
       - key: OPERATOR_TOKEN
-        sync: false  # set manually — protects /quota endpoint
+        sync: false           # protects /quota
+      # --- mainnet revenue coherence (doctor FAILS a public testnet box) ---
+      - key: CDP_NETWORKS
+        value: "eip155:8453"
+      - key: REVENUE_NETWORK
+        value: "eip155:8453"
+      - key: X402_DEFAULT_NETWORK
+        value: "eip155:8453"
+      # --- Bazaar discoverability ---
+      - key: BAZAAR_DISCOVERABLE
+        value: "true"
+      - key: BAZAAR_SERVICE_NAME
+        value: "x402 MCP Storefront"
+      - key: BAZAAR_SERVICE_TAGS
+        value: "base,intelligence,x402,data"
+      # --- seller-only posture ---
+      - key: SWARM_ENABLED
+        value: "false"        # no buyer role on a public box
+      - key: DASHBOARD_ACTIONS
+        value: "true"         # needed once for POST /pulse/publish; flip to false after
       - key: PUBLIC_BASE_URL
-        fromService:
-          type: web
-          name: x402-mcp
-          property: host
+        value: "https://x402-mcp.onrender.com"  # VERIFY this matches the assigned URL
