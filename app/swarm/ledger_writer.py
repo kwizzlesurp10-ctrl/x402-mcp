@@ -1,8 +1,10 @@
 """Append-only writer for the spend/revenue ledgers the dashboard reads.
 
 The repo shipped only a *reader* (app.ledger_io); the swarm records cost basis
-and realized revenue here so margin is derivable. Paths resolve through
-app.ledger_io.LEDGER at call time so tests can redirect storage via monkeypatch.
+and realized revenue here so margin is derivable. Rows go to Redis when one is
+configured (see app.ledger_store — required on hosts with no persistent disk),
+otherwise to jsonl. File paths resolve through app.ledger_io.LEDGER at call time
+so tests can redirect storage via monkeypatch.
 """
 
 from __future__ import annotations
@@ -22,6 +24,12 @@ def _atomic(amount_usdc: float) -> int:
 def _append(name: str, row: dict[str, Any]) -> dict[str, Any]:
     if name not in ("spend", "revenue"):
         raise ValueError("ledger name must be spend or revenue")
+
+    from app import ledger_store as store_module
+
+    if store_module.ledger_store is not None:
+        return store_module.ledger_store.append(name, row)
+
     ledger_dir = ledger_io.LEDGER
     ledger_dir.mkdir(parents=True, exist_ok=True)
     path = ledger_dir / f"{name}.jsonl"

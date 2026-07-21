@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
-from app import commerce
+from app import commerce, ledger_store
 from app.config import settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -179,6 +179,52 @@ def run_checks() -> dict[str, Any]:
                 "warn",
                 "In-memory quota store — resets on restart",
                 "Set REDIS_URL before selling to real buyers",
+            )
+        )
+
+    # The ledgers are the only local record that a sale happened; on an
+    # ephemeral host a file-backed ledger is lost on the next restart.
+    if ledger_store.ledger_store is not None:
+        try:
+            ledger_store.ledger_store.ping()
+            checks.append(
+                _check(
+                    "ledger",
+                    "Ledger persistence",
+                    "pass",
+                    "Redis ledger active (settled spend/revenue survive a restart)",
+                )
+            )
+        except Exception as exc:
+            checks.append(
+                _check(
+                    "ledger",
+                    "Ledger persistence",
+                    "fail",
+                    f"Redis ledger lost its connection: {exc}",
+                    "Restore Redis availability, then restart the server",
+                )
+            )
+    elif settings.redis_url:
+        reason = ledger_store.fallback_reason or "unreachable at startup"
+        checks.append(
+            _check(
+                "ledger",
+                "Ledger persistence",
+                "fail",
+                f"REDIS_URL set but the ledgers fell back to FILES ({reason}) — "
+                "settled sales will be lost on the next restart",
+                "Verify REDIS_URL and Redis availability, then restart",
+            )
+        )
+    else:
+        checks.append(
+            _check(
+                "ledger",
+                "Ledger persistence",
+                "warn",
+                "File-backed ledgers — lost on restart if the host has no disk",
+                "Set REDIS_URL on any host without persistent storage",
             )
         )
 

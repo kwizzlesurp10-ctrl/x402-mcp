@@ -10,13 +10,21 @@ LEDGER = ROOT / "ledger"
 
 
 def read_ledger_rows(name: str, *, limit: int | None = 1000) -> list[dict]:
-    """Parse spend.jsonl or revenue.jsonl; newest first.
+    """Read the spend or revenue ledger; newest first.
 
     `limit` caps the number of rows for display; pass `limit=None` to read the
-    entire file (used for spend/revenue aggregation, which must not truncate).
+    whole ledger (used for spend/revenue aggregation, which must not truncate).
+
+    Reads Redis when REDIS_URL is configured and reachable, otherwise the jsonl
+    files. The store is resolved per call so tests can swap it out.
     """
     if name not in ("spend", "revenue"):
         raise ValueError("ledger name must be spend or revenue")
+
+    from app import ledger_store as store_module
+
+    if store_module.ledger_store is not None:
+        return store_module.ledger_store.read(name, limit)
 
     path = LEDGER / f"{name}.jsonl"
     if not path.exists():

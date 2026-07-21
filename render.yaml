@@ -23,6 +23,12 @@ services:
         sync: false
       - key: OPERATOR_TOKEN
         sync: false           # protects /quota
+      - key: REDIS_URL
+        sync: false           # REQUIRED here: this box has no persistent disk, so
+                              # without Redis the spend/revenue ledgers and paid
+                              # entitlements are lost on every restart. /doctor
+                              # warns while it is unset and FAILS if it is set but
+                              # unreachable. Any managed Redis works (Upstash etc.).
       # --- mainnet revenue coherence (doctor FAILS a public testnet box) ---
       - key: CDP_NETWORKS
         value: "eip155:8453"
