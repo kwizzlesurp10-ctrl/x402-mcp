@@ -30,6 +30,8 @@ services:
         value: "eip155:8453"
       - key: X402_DEFAULT_NETWORK
         value: "eip155:8453"
+      - key: SWARM_SELL_NETWORK
+        value: "eip155:8453"   # Pulse/composite LISTINGS build on mainnet (default is testnet)
       # --- Bazaar discoverability ---
       - key: BAZAAR_DISCOVERABLE
         value: "true"
