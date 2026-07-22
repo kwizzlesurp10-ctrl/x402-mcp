@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     # needs a mainnet-capable facilitator such as Coinbase CDP).
     swarm_sell_network: str = "eip155:84532"
 
+    # Per-transaction Base fee decision (paid HTTP resource, x402-gated).
+    # The cheap loop-resident tier beside the $0.05 full Pulse: measured demand
+    # concentrates in calls a bot makes on every iteration, and $0.01 gives a
+    # first-call entry point at the market's p25 price.
+    tx_decision_price: str = "$0.01"
+
     # MN property compliance product (paid HTTP resource, x402-gated)
     mn_data_base_url: str = (
         "https://services.arcgis.com/afSMGVsC7QlRK1kZ/ArcGIS/rest/services"

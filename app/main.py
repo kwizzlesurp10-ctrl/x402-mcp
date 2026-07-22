@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
+    PlainTextResponse,
     RedirectResponse,
     StreamingResponse,
 )
@@ -186,6 +187,22 @@ async def health() -> dict:
 @app.get("/.well-known/mcp")
 async def well_known_mcp() -> dict:
     return build_mcp_manifest()
+
+
+@app.get("/.well-known/x402")
+async def well_known_x402() -> dict:
+    """Machine manifest of the paid surface, built from live config."""
+    from app import agent_surface
+
+    return agent_surface.well_known_x402()
+
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+async def llms_txt() -> str:
+    """Agent-facing docs: endpoints, prices, and the failure modes that matter."""
+    from app import agent_surface
+
+    return agent_surface.llms_txt()
 
 
 @app.get("/stats")
@@ -627,6 +644,112 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
 
     receipt = base64.b64encode(_json.dumps(result["settlement"]).encode()).decode()
     return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
+
+
+@app.get("/base/tx-decision")
+async def base_tx_decision(
+    request: Request,
+    gas: str = Query(
+        default="usdc",
+        description="Gas preset (eth|usdc|erc20|x402) or a custom integer of gas units",
+    ),
+    urgency: str = Query(
+        default="flexible",
+        description="now = fee only, always submit; soon = time-sensitive; "
+        "flexible = wait for a cheap window",
+    ),
+) -> JSONResponse:
+    """Paid x402 resource: per-transaction submit/wait + fee decision ($0.01).
+
+    The loop-resident tier of the Pulse: bots call this before every send.
+    Same wire protocol as /mn/property-check — 402 without a signature,
+    verify + settle + deliver with one.
+    """
+    from app import tx_decision
+
+    t0 = time.monotonic()
+    if not settings.x402_pay_to_address:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "seller_not_configured", "detail": "X402_PAY_TO_ADDRESS unset"},
+        )
+    if urgency not in tx_decision.URGENCIES:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_urgency", "detail": f"urgency must be one of {tx_decision.URGENCIES}"},
+        )
+    gas_units = tx_decision.GAS_PRESETS.get(gas.lower())
+    if gas_units is None:
+        try:
+            gas_units = int(gas)
+        except ValueError:
+            gas_units = -1
+        if not 21_000 <= gas_units <= 30_000_000:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "invalid_gas",
+                    "detail": "gas must be eth|usdc|erc20|x402 or an integer in [21000, 30000000]",
+                },
+            )
+
+    payment_required = tx_decision.build_payment_required_header()
+    signature = request.headers.get("PAYMENT-SIGNATURE")
+    if not signature:
+        if not demand.is_self_traffic(request.headers):
+            demand.record_challenge("base-tx-decision")
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_required},
+            content={
+                "error": "payment_required",
+                "resource": tx_decision.resource_url(),
+                "price": settings.tx_decision_price,
+                "network": settings.x402_default_network,
+                "description": tx_decision.RESOURCE_DESCRIPTION,
+                "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
+                "requirements are in the PAYMENT-REQUIRED response header.",
+            },
+        )
+
+    result = await tx_decision.verify_and_settle(signature, payment_required)
+    if not result["is_valid"] or not result["payment_settled"]:
+        log.warning("base/tx-decision payment invalid", extra={"status_code": 402})
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_required},
+            content={
+                "error": "payment_invalid",
+                "invalid_reason": result.get("invalid_reason"),
+                "settlement_error": result.get("settlement_error"),
+            },
+        )
+
+    decision = await tx_decision.advise(gas_units, urgency)
+    latency = round((time.monotonic() - t0) * 1000)
+    log.info("base/tx-decision settled", extra={"status_code": 200, "latency_ms": latency})
+
+    settlement = result.get("settlement") or {}
+    tx = settlement.get("transaction") or settlement.get("txHash")
+    try:
+        from app.swarm import ledger_writer
+        from app.swarm.publisher import parse_price_usdc
+
+        ledger_writer.record_revenue(
+            agent_id="base-tx-decision",
+            amount_usdc=parse_price_usdc(settings.tx_decision_price),
+            network=settings.x402_default_network,
+            product_id="base-tx-decision",
+            tx=str(tx) if tx else None,
+        )
+    except Exception:  # ledger write must never break paid delivery
+        log.warning("base/tx-decision revenue ledger write failed", exc_info=True)
+
+    import base64
+    import json as _json
+
+    receipt = base64.b64encode(_json.dumps(result["settlement"]).encode()).decode()
+    return JSONResponse(content=decision, headers={"PAYMENT-RESPONSE": receipt})
 
 
 # Mount MCP Streamable HTTP / SSE transport when available.

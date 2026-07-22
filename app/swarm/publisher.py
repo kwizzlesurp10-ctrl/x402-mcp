@@ -179,14 +179,17 @@ async def publish_pulse_product(
             # further every day, advertising stale data to every buyer browsing
             # Bazaar. The block belongs in the report, which is generated per
             # publish and is what the buyer actually receives.
+            # Written as the queries an agent would type — the catalog ranks on
+            # full-text + semantic match over this string, and nobody searches
+            # for a brand name they have never heard of.
             description=(
-                "Base mainnet settlement intelligence (Base Network Pulse) for "
-                "pricing x402 / USDC agent micropayments: current network "
-                "economics — latest block height and block time, base fee and "
-                "priority fee (gas), ETH spot price, and the USD cost to settle "
-                "an ETH transfer and an ERC-20/USDC transfer. GET, no inputs; "
-                "returns JSON computed from Base RPC + spot price, no API key "
-                "required."
+                "Base gas price now, base fee and priority fee in gwei, block "
+                "time, congestion and utilization trend, ETH price USD, and the "
+                "USD cost to settle an ETH transfer, USDC ERC-20 transfer, or "
+                "x402 payment on Base mainnet — one settle-now-or-wait verdict "
+                "with rationale. Full market briefing; for the per-transaction "
+                "submit/fee call see /base/tx-decision. GET, no inputs, no API "
+                "key; computed live from Base RPC blocks."
             ),
             **purchase_discovery_metadata(product, settings.public_base_url),
         ),
