@@ -1,0 +1,82 @@
+name: storefront monitor
+
+# Availability and integrity check for the public storefront.
+#
+# This began life as a keep-warm ping: the free Render plan spun down after
+# ~15 minutes idle, and a cold start dropped the in-memory registry so the
+# purchase URL indexed in the CDP Bazaar catalog answered 404 instead of 402.
+# The box is on an always-on plan now and there is nothing left to keep warm,
+# but the alarm is worth keeping — it is what surfaced the outage on
+# 2026-07-21, when a listing died silently and took two sales' records with it.
+#
+# What it watches, in order of how badly you want to know:
+#   1. the service answers at all
+#   2. the cataloged purchase URL still serves a payment challenge
+#   3. no /doctor check is failing (e.g. Redis set but unreachable, which
+#      degrades silently and only costs you at the next restart)
+
+on:
+  schedule:
+    # Every 15 minutes. Nothing depends on the cadence any more, so this is
+    # tuned for "know within a quarter hour" rather than to beat a spin-down
+    # timer. GitHub throttles scheduled runs under load regardless.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_URL: https://x402-mcp.onrender.com
+      PRODUCT_ID: d22bbf5f3c4b4666a6f80980c7bc7c50
+    steps:
+      - name: Service responds
+        run: |
+          # --max-time 120: a deploy restart can still take a while to come up.
+          code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 120 "$BASE_URL/health")
+          echo "health -> $code"
+          cat /tmp/health.json
+          test "$code" = "200"
+
+      - name: Cataloged listing still serves a payment challenge
+        run: |
+          url="$BASE_URL/swarm/products/$PRODUCT_ID/purchase"
+          code=$(curl -sS -o /tmp/listing.json -w '%{http_code}' --max-time 120 "$url")
+          echo "listing -> $code"
+          if [ "$code" = "402" ]; then
+            echo "OK: listing is alive and serving its payment challenge."
+            exit 0
+          fi
+          cat /tmp/listing.json || true
+          echo "::error::Listing $PRODUCT_ID returned $code (expected 402)."
+          echo "::error::Buyers who found this URL in the Bazaar catalog are getting nothing."
+          echo "::error::Do NOT fix this with POST /pulse/publish — that mints a new"
+          echo "::error::product id and abandons the URL the catalog already knows."
+          echo "::error::Check /doctor first: if registry persistence is failing, the"
+          echo "::error::listing cannot survive a restart. With PINNED_PULSE_PRODUCT_ID"
+          echo "::error::set and Redis healthy, a restart restores this URL by itself."
+          exit 1
+
+      - name: No failing doctor checks
+        run: |
+          code=$(curl -sS -o /tmp/doctor.json -w '%{http_code}' --max-time 120 "$BASE_URL/doctor")
+          if [ "$code" != "200" ]; then
+            echo "::error::/doctor returned $code"
+            exit 1
+          fi
+          # Degraded persistence is the dangerous case: it serves fine today and
+          # loses the books at the next restart. Surface it while it is cheap.
+          failures=$(python3 -c "
+          import json
+          checks = json.load(open('/tmp/doctor.json'))['checks']
+          bad = [c for c in checks if c['status'] == 'fail']
+          for c in bad:
+              print(f\"::error::doctor {c['id']}: {c['message']}\")
+          print(len(bad))
+          " | tail -1)
+          echo "failing checks: $failures"
+          test "$failures" = "0"
