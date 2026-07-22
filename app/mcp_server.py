@@ -270,9 +270,14 @@ async def run_swarm_research(
     topic: str,
     max_price_usdc: float | None = None,
     agent_id: str | None = None,
+    allow_paid_inputs: bool | None = None,
 ) -> str:
-    """Run the swarm Agency: buy cheap upstream x402 services, compose a
-    composite research report, and list it for resale (buy → compose → list)."""
+    """Run the swarm Agency: compose a research product and list it for resale.
+
+    Spends nothing by default — the report is synthesized from free inputs, so
+    unsold inventory costs nothing. Pass allow_paid_inputs=True to buy upstream
+    x402 services first (buy → compose → list), which books a cost basis before
+    knowing whether the composite will sell."""
     # Checked before _execute_tool so a refusal does not burn a quota call.
     if not settings.swarm_enabled:
         return json.dumps(
@@ -288,7 +293,7 @@ async def run_swarm_research(
         "run_swarm_research",
         agent_id,
         lambda resolved: swarm_orchestrator.run_swarm_research(
-            topic, resolved, max_price_usdc
+            topic, resolved, max_price_usdc, allow_paid_inputs
         ),
     )
 

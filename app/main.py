@@ -122,6 +122,11 @@ class SwarmRunRequest(BaseModel):
     topic: str = Field(description="Research topic for the swarm to buy/compose/list")
     max_price_usdc: float | None = Field(default=None, ge=0)
     agent_id: str | None = None
+    allow_paid_inputs: bool | None = Field(
+        default=None,
+        description="Spend on upstream inputs. Defaults to SWARM_ALLOW_PAID_INPUTS "
+        "(off), in which case the cycle synthesizes from free inputs instead.",
+    )
 
 
 class StripeCheckoutRequest(BaseModel):
@@ -356,7 +361,7 @@ async def swarm_run(body: SwarmRunRequest) -> dict:
         )
     agent_id = quota_store.resolve_agent_id(body.agent_id)
     return await swarm_orchestrator.run_swarm_research(
-        body.topic, agent_id, body.max_price_usdc
+        body.topic, agent_id, body.max_price_usdc, body.allow_paid_inputs
     )
 
 

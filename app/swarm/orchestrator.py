@@ -8,6 +8,7 @@ event. Money moves for real when EVM_PRIVATE_KEY (buy) and X402_PAY_TO_ADDRESS
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -19,6 +20,9 @@ from app.ops_events import emit_swarm_step
 from app.swarm import ledger_writer, policy as policy_mod, roles
 from app.swarm.models import CompositeProduct, SwarmRun
 from app.swarm.registry import swarm_registry
+
+
+log = logging.getLogger("x402")
 
 
 class SwarmDisabledError(RuntimeError):
@@ -46,13 +50,52 @@ def require_swarm_enabled() -> None:
         )
 
 
+async def _synthesize_zero_cost_product(
+    run: SwarmRun, agent_id: str, reason: str
+) -> dict[str, Any]:
+    """List a product built from free inputs, so the cycle costs nothing.
+
+    This is the Pulse economics: the report is synthesized from free Base RPC
+    and spot data, so the cost basis is 0, unsold inventory is free to hold, and
+    any sale is essentially all margin. Buying upstream inputs inverts that — it
+    books a cost immediately against a sale that may never come.
+    """
+    from app.swarm import publisher
+
+    run.status = "composing"
+    run.steps.append({"role": "archivist", "synthesis": "free-inputs", "why": reason})
+    product = await publisher.publish_pulse_product(agent_id)
+    product.run_id = run.run_id
+    run.product = product
+    run.status = "listed"
+    run.finished_ts = _now()
+    run.steps.append(
+        {
+            "role": "merchant",
+            "product_id": product.product_id,
+            "price_usdc": product.price_usdc,
+            "cost_basis_usdc": product.cost_basis_usdc,
+        }
+    )
+    return run.to_dict()
+
+
 async def run_swarm_research(
     topic: str,
     agent_id: str,
     max_price_usdc: float | None = None,
+    allow_paid_inputs: bool | None = None,
 ) -> dict[str, Any]:
-    """Execute one full Agency cycle for a research topic and return the run."""
+    """Execute one full Agency cycle for a research topic and return the run.
+
+    By default the cycle spends nothing: it synthesizes a product from free
+    inputs rather than buying upstream feeds. Pass allow_paid_inputs=True (or
+    set SWARM_ALLOW_PAID_INPUTS) to run the buy -> compose -> list path, which
+    books a real cost basis before it knows whether anything will sell.
+    """
     require_swarm_enabled()
+    if allow_paid_inputs is None:
+        allow_paid_inputs = settings.swarm_allow_paid_inputs
     run = SwarmRun(
         run_id=uuid.uuid4().hex,
         topic=topic,
@@ -67,6 +110,11 @@ async def run_swarm_research(
         if max_price_usdc is not None
         else policy.max_price_per_call_usdc
     )
+
+    if not allow_paid_inputs:
+        return await _synthesize_zero_cost_product(
+            run, agent_id, "paid inputs disabled (SWARM_ALLOW_PAID_INPUTS)"
+        )
 
     try:
         # SCOUT
@@ -143,6 +191,10 @@ async def run_swarm_research(
             action="swarm_error",
             detail={"error": str(exc)},
         )
+        # Deliberately no free-synthesis fallback here. The caller opted into
+        # spending; a failure on that path is a real failure and should surface
+        # as one, not be papered over with a different product. Synthesis is the
+        # default route, not an error handler.
     finally:
         run.finished_ts = _now()
 

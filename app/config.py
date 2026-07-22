@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     swarm_markup: float = 3.0  # composite price = cost basis * markup
     swarm_min_price_usdc: float = 0.01  # price floor for a composite product
     swarm_max_upstream_calls: int = 3  # max upstream buys per run
+    # Whether a cycle may spend on upstream inputs. Off by default: measured
+    # composite runs carried a real cost basis and then did not sell (LTV:CAC
+    # 1.35 against a 3.0 target), while the Pulse product reads free Base RPC
+    # and spot data, so its unsold inventory costs nothing and every sale is
+    # ~100% margin. A cycle with paid inputs off synthesizes instead of buying.
+    swarm_allow_paid_inputs: bool = False
     # Comma-separated fallback upstream x402 URLs used when Bazaar discovery is empty.
     swarm_upstream_urls: str = ""
     swarm_target_ltv_cac: float = 3.0  # target revenue/cost ratio; also the min pricing multiple

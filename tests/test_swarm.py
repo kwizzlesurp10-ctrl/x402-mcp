@@ -27,6 +27,8 @@ def _swarm_enabled(monkeypatch):
     tests/test_swarm_enabled_gate.py.
     """
     monkeypatch.setattr(settings, "swarm_enabled", True)
+    # These cover the buy path specifically; free synthesis is the default.
+    monkeypatch.setattr(settings, "swarm_allow_paid_inputs", True)
 
 _POLICY = {
     "max_price_per_call_usdc": 0.05,
