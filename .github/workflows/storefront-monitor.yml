@@ -45,7 +45,10 @@ jobs:
       - name: Cataloged listing still serves a payment challenge
         run: |
           url="$BASE_URL/swarm/products/$PRODUCT_ID/purchase"
-          code=$(curl -sS -o /tmp/listing.json -w '%{http_code}' --max-time 120 "$url")
+          # X-Demand-Ignore keeps this check out of the demand counters — a
+          # monitor hitting the listing every 15 minutes is not a buyer, and
+          # counting it would make challenges_served climb on its own forever.
+          code=$(curl -sS -o /tmp/listing.json -w '%{http_code}' --max-time 120             -H 'X-Demand-Ignore: storefront-monitor' "$url")
           echo "listing -> $code"
           if [ "$code" = "402" ]; then
             echo "OK: listing is alive and serving its payment challenge."

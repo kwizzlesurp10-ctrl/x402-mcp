@@ -27,6 +27,11 @@ LAST_SEEN_KEY = "demand:402:last"
 # dividing them by views collected since would report conversions above 100%.
 SINCE_KEY = "demand:402:since"
 
+# Requests carrying this header are our own — the uptime monitor, deploy smoke
+# checks, anything on a timer. They are NOT demand, and counting them makes the
+# metric climb forever whether or not a single buyer ever shows up.
+SELF_TRAFFIC_HEADER = "x-demand-ignore"
+
 # Used when Redis is absent. Lost on restart, exactly like the in-memory quota
 # store — on a diskless host without REDIS_URL nothing here survives anyway.
 _memory: Counter[str] = Counter()
@@ -38,6 +43,14 @@ def _client() -> Any | None:
     from app import redis_client
 
     return redis_client.client
+
+
+def is_self_traffic(headers: Any) -> bool:
+    """True when a request is our own tooling rather than a prospective buyer."""
+    try:
+        return bool(headers.get(SELF_TRAFFIC_HEADER))
+    except Exception:  # noqa: BLE001 — never break a request over a counter
+        return False
 
 
 def record_challenge(resource_key: str) -> None:

@@ -231,3 +231,40 @@ def test_the_endpoint_serves_the_report() -> None:
 
     assert body["total_challenges_served"] >= 1
     assert any(r["resource"] == "pulse-1" for r in body["resources"])
+
+
+# --- our own traffic must not read as demand ----------------------------------
+
+
+def test_self_traffic_is_not_counted() -> None:
+    """The uptime monitor hits the listing every 15 minutes. That is not a buyer."""
+    assert demand.is_self_traffic({"x-demand-ignore": "storefront-monitor"}) is True
+    assert demand.is_self_traffic({}) is False
+
+
+def test_a_marked_request_does_not_increment(monkeypatch) -> None:
+    from app.swarm.models import CompositeProduct
+    from app.swarm.registry import swarm_registry
+
+    swarm_registry.list_product(
+        CompositeProduct(
+            product_id="ignored-1",
+            topic="t",
+            cost_basis_usdc=0.0,
+            price_usdc=0.05,
+            markup=0.0,
+            network="eip155:8453",
+            sources=[],
+            report="r",
+            status="listed",
+            seller_requirements={"payment_required_header": "hdr", "pay_to": "0xa"},
+        )
+    )
+
+    response = client.get(
+        "/swarm/products/ignored-1/purchase",
+        headers={"X-Demand-Ignore": "storefront-monitor"},
+    )
+
+    assert response.status_code == 402  # still serves normally
+    assert demand.challenges().get("ignored-1") is None  # just not counted

@@ -230,7 +230,7 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
       <tbody id="sales-body"><tr><td class="env" colspan="3">Loading sales…</td></tr></tbody>
     </table>
     <table>
-      <thead><tr><th>Demand (402s served)</th><th>Views</th><th>Sold</th></tr></thead>
+      <thead><tr><th>Demand (402s served)</th><th>Views</th><th>Sold in window</th></tr></thead>
       <tbody id="demand-body"><tr><td class="env" colspan="3">Loading demand…</td></tr></tbody>
     </table>
   </section>
@@ -426,7 +426,7 @@ async function pollStore(){
       <tr>
         <td class="tool">${r.resource}</td>
         <td>${r.challenges_served}</td>
-        <td>${r.sales_settled}${r.conversion === null ? "" : ` <span class="env">(${(r.conversion*100).toFixed(0)}%)</span>`}</td>
+        <td>${r.sales_in_window}${r.conversion === null ? "" : ` <span class="env">(${(r.conversion*100).toFixed(1)}%)</span>`}</td>
       </tr>`).join("") : `<tr><td class="env" colspan="3">no 402s served yet</td></tr>`;
   }catch(e){ tape("err", e.message); }
 }
