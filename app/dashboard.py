@@ -214,6 +214,23 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
     </div>
   </section>
 
+  <section id="p-store">
+    <h2>Storefront <span class="count" id="store-count"></span></h2>
+    <dl>
+      <dt>realized revenue</dt><dd id="s-revenue">—</dd>
+      <dt>upstream spend</dt><dd id="s-spend">—</dd>
+      <dt>listings</dt><dd id="s-listed">—</dd>
+    </dl>
+    <table>
+      <thead><tr><th>Listing</th><th>Price</th><th>Earned</th></tr></thead>
+      <tbody id="store-body"><tr><td class="env" colspan="3">Loading listings…</td></tr></tbody>
+    </table>
+    <table>
+      <thead><tr><th>Settled sale</th><th>Amount</th><th>Tx</th></tr></thead>
+      <tbody id="sales-body"><tr><td class="env" colspan="3">Loading sales…</td></tr></tbody>
+    </table>
+  </section>
+
   <section id="p-tape">
     <h2>Event tape <span class="count" id="tape-count"></span> <span id="tape-paused">⏸ paused</span></h2>
     <div id="tape" role="log" aria-live="polite"></div>
@@ -361,6 +378,44 @@ async function pollQuota(){
   }catch(e){ tape("err", e.message); }
 }
 
+/* ---- storefront: what is listed, and what has actually been paid ----
+   Polled far slower than health/quota on purpose. These three endpoints read
+   the ledgers and registry, which are Redis-backed in production on a plan
+   with a monthly command budget — a tab left open all day at the 5s cadence
+   would eat a meaningful share of it. Skipped entirely while the tab is
+   hidden, for the same reason. */
+const usd = (n) => "$" + Number(n || 0).toFixed(Math.abs(Number(n)) < 0.01 ? 6 : 2);
+
+async function pollStore(){
+  if (document.hidden) return;
+  try{
+    const [products, report, sales] = await Promise.all([
+      getJSON("/swarm/products"),
+      getJSON("/swarm/revenue"),
+      getJSON("/ledger/revenue"),
+    ]);
+
+    $("s-revenue").textContent = usd(report.total_revenue_usdc);
+    $("s-spend").textContent = usd(report.total_spend_usdc);
+    $("s-listed").textContent = `${report.listed_count} listed · ${report.sold_count} sold`;
+    $("store-count").textContent = `· ${products.length}`;
+
+    $("store-body").innerHTML = products.length ? products.map(p => `
+      <tr>
+        <td class="tool" title="${p.product_id}">${p.topic}</td>
+        <td>${usd(p.price_usdc)}</td>
+        <td>${p.revenue_usdc ? usd(p.revenue_usdc) : "—"}</td>
+      </tr>`).join("") : `<tr><td class="env" colspan="3">nothing listed</td></tr>`;
+
+    $("sales-body").innerHTML = sales.length ? sales.slice(0, 8).map(s => `
+      <tr>
+        <td class="tool">${s.ts.slice(0, 19).replace("T", " ")} · ${s.product_id || "—"}</td>
+        <td>${usd(s.amount_usdc)}</td>
+        <td class="env">${s.tx ? s.tx.slice(0, 10) + "…" : "—"}</td>
+      </tr>`).join("") : `<tr><td class="env" colspan="3">no settled sales yet</td></tr>`;
+  }catch(e){ tape("err", e.message); }
+}
+
 async function loadManifest(){
   try{
     const m = await getJSON("/.well-known/mcp");
@@ -416,9 +471,11 @@ document.addEventListener("keydown", (e) => {
 });
 
 tick(); setInterval(tick, 1000);
-(async () => { await loadManifest(); loadUpgrade(); pollHealth(); pollQuota(); })();
+(async () => { await loadManifest(); loadUpgrade(); pollHealth(); pollQuota(); pollStore(); })();
 setInterval(pollHealth, 5000);
 setInterval(pollQuota, 5000);
+setInterval(pollStore, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pollStore(); });
 </script>
 </body>
 </html>
