@@ -36,9 +36,14 @@ class Settings(BaseSettings):
     base_rpc_url: str = "https://mainnet.base.org"
     eth_price_url: str = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
     pulse_depth: int = 12  # blocks sampled per pulse
-    # List price for a synthesized Pulse report. Operator-approved 2026-07-16:
-    # repriced from $8.00 to sit near the ~$0.30 ecosystem average per call.
-    pulse_price: str = "$0.25"
+    # List price for a synthesized Pulse report. $8.00 -> $0.25 on 2026-07-16,
+    # then -> $0.05 on 2026-07-22. The $0.25 step assumed a ~$0.30 ecosystem
+    # average; measuring the CDP catalog instead (24,788 resources) put the
+    # median paid call at $0.014, with ~90% at or under $0.10 — so $0.25 was
+    # top-decile pricing, not average. The Pulse costs ~$0 to produce (free RPC
+    # + spot price), so volume is worth more here than margin. $0.05 sits in
+    # the dense part of the distribution while staying above the sub-cent floor.
+    pulse_price: str = "$0.05"
     # Pin the Pulse listing to a fixed product_id so its purchase URL survives a
     # restart. Discovery catalogs (CDP Bazaar) index the URL, which embeds the
     # id — on an ephemeral host a fresh uuid per boot would strand every indexed
