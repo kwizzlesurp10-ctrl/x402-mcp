@@ -21,8 +21,29 @@ from app.swarm.models import CompositeProduct, SwarmRun
 from app.swarm.registry import swarm_registry
 
 
+class SwarmDisabledError(RuntimeError):
+    """Raised when the buyer role is invoked on a box that has it switched off."""
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def require_swarm_enabled() -> None:
+    """Refuse to run the buyer role unless SWARM_ENABLED is on.
+
+    Enforced here rather than at each caller because this is the one function
+    every entry point funnels through — the HTTP route, the MCP tool, and
+    anything added later. A seller-only deployment sets SWARM_ENABLED=false to
+    declare it never buys; before this check that setting did nothing, and the
+    only thing actually stopping a public box from spending was the absence of
+    a wallet key.
+    """
+    if not settings.swarm_enabled:
+        raise SwarmDisabledError(
+            "SWARM_ENABLED is false; the buyer role (buy -> compose -> list) is "
+            "off on this deployment. Set SWARM_ENABLED=true to allow it."
+        )
 
 
 async def run_swarm_research(
@@ -31,6 +52,7 @@ async def run_swarm_research(
     max_price_usdc: float | None = None,
 ) -> dict[str, Any]:
     """Execute one full Agency cycle for a research topic and return the run."""
+    require_swarm_enabled()
     run = SwarmRun(
         run_id=uuid.uuid4().hex,
         topic=topic,

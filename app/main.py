@@ -341,8 +341,15 @@ async def pulse_publish() -> dict:
 async def swarm_run(body: SwarmRunRequest) -> dict:
     """Run one swarm cycle in-process so the listing is hosted by this server.
 
-    Gated behind DASHBOARD_ACTIONS — it moves real funds when a wallet is set.
+    Two independent gates, because they mean different things: SWARM_ENABLED
+    says this deployment has a buyer role at all, DASHBOARD_ACTIONS says
+    mutating HTTP actions are allowed. A seller-only box wants the first off.
     """
+    if not settings.swarm_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="SWARM_ENABLED is false; the buyer role is off on this deployment.",
+        )
     if not settings.dashboard_actions:
         raise HTTPException(
             status_code=403, detail="DASHBOARD_ACTIONS is disabled; running is off."

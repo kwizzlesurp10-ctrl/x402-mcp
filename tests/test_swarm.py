@@ -17,6 +17,17 @@ from app.swarm.registry import swarm_registry
 
 TESTNET = "eip155:84532"
 
+
+@pytest.fixture(autouse=True)
+def _swarm_enabled(monkeypatch):
+    """These exercise the buyer role, which SWARM_ENABLED gates off by default.
+
+    Deny-by-default is deliberate — a seller-only deployment should not be able
+    to spend just because someone forgot a flag. The gate itself is covered in
+    tests/test_swarm_enabled_gate.py.
+    """
+    monkeypatch.setattr(settings, "swarm_enabled", True)
+
 _POLICY = {
     "max_price_per_call_usdc": 0.05,
     "daily_cap_usdc": 0.50,

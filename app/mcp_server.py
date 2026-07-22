@@ -273,6 +273,17 @@ async def run_swarm_research(
 ) -> str:
     """Run the swarm Agency: buy cheap upstream x402 services, compose a
     composite research report, and list it for resale (buy → compose → list)."""
+    # Checked before _execute_tool so a refusal does not burn a quota call.
+    if not settings.swarm_enabled:
+        return json.dumps(
+            {
+                "error": "SWARM_ENABLED is false; the buyer role is off on this "
+                "deployment.",
+                "data": None,
+                "meta": None,
+            },
+            indent=2,
+        )
     return await _execute_tool(
         "run_swarm_research",
         agent_id,
