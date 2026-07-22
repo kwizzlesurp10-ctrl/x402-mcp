@@ -42,7 +42,7 @@ from app.stripe_payments import (
     create_checkout_session,
     handle_stripe_webhook,
 )
-from app import os_monitor, wallet_read, x402_services
+from app import demand, os_monitor, wallet_read, x402_services
 
 setup_logging()
 logger = logging.getLogger("x402")
@@ -391,6 +391,7 @@ async def purchase_composite(product_id: str, request: Request) -> JSONResponse:
         "X-PAYMENT"
     )
     if not signature:
+        demand.record_challenge(product_id)
         return JSONResponse(
             status_code=402,
             content={
@@ -438,6 +439,12 @@ async def purchase_composite(product_id: str, request: Request) -> JSONResponse:
         },
         headers=headers,
     )
+
+
+@app.get("/demand")
+async def demand_report() -> dict:
+    """Sales funnel: 402 challenges served vs sales settled, per resource."""
+    return demand.build_report()
 
 
 @app.get("/swarm/revenue")
@@ -565,6 +572,7 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
         log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
+        demand.record_challenge("mn-property-check")
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},

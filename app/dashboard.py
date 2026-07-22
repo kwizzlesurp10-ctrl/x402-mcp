@@ -229,6 +229,10 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
       <thead><tr><th>Settled sale</th><th>Amount</th><th>Tx</th></tr></thead>
       <tbody id="sales-body"><tr><td class="env" colspan="3">Loading sales…</td></tr></tbody>
     </table>
+    <table>
+      <thead><tr><th>Demand (402s served)</th><th>Views</th><th>Sold</th></tr></thead>
+      <tbody id="demand-body"><tr><td class="env" colspan="3">Loading demand…</td></tr></tbody>
+    </table>
   </section>
 
   <section id="p-tape">
@@ -389,10 +393,11 @@ const usd = (n) => "$" + Number(n || 0).toFixed(Math.abs(Number(n)) < 0.01 ? 6 :
 async function pollStore(){
   if (document.hidden) return;
   try{
-    const [products, report, sales] = await Promise.all([
+    const [products, report, sales, demand] = await Promise.all([
       getJSON("/swarm/products"),
       getJSON("/swarm/revenue"),
       getJSON("/ledger/revenue"),
+      getJSON("/demand"),
     ]);
 
     $("s-revenue").textContent = usd(report.total_revenue_usdc);
@@ -413,6 +418,16 @@ async function pollStore(){
         <td>${usd(s.amount_usdc)}</td>
         <td class="env">${s.tx ? s.tx.slice(0, 10) + "…" : "—"}</td>
       </tr>`).join("") : `<tr><td class="env" colspan="3">no settled sales yet</td></tr>`;
+
+    /* Views with no sales is a price/product signal; zero views is a discovery
+       signal. Showing both stops those two being read as the same thing. */
+    const d = demand.resources || [];
+    $("demand-body").innerHTML = d.length ? d.map(r => `
+      <tr>
+        <td class="tool">${r.resource}</td>
+        <td>${r.challenges_served}</td>
+        <td>${r.sales_settled}${r.conversion === null ? "" : ` <span class="env">(${(r.conversion*100).toFixed(0)}%)</span>`}</td>
+      </tr>`).join("") : `<tr><td class="env" colspan="3">no 402s served yet</td></tr>`;
   }catch(e){ tape("err", e.message); }
 }
 
