@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.kwizzlesurp10-ctrl/x402-mcp",
+  "description": "Pay for HTTP APIs and charge for your own: x402 micropayments in USDC on Base.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://x402-mcp.onrender.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://x402-mcp.onrender.com/mcp/mcp"
+    }
+  ]
+}
