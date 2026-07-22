@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app.commerce import QuotaExceededError, quota_store
 from app.config import settings
@@ -22,6 +24,29 @@ from app import stripe_payments, x402_services
 from app.ops_events import emit_tool_event
 from app.swarm import orchestrator as swarm_orchestrator
 
+
+def _transport_security() -> TransportSecuritySettings:
+    """Allow this deployment's own hostname through DNS-rebinding protection.
+
+    FastMCP defaults to allowing localhost only, so on a public host every
+    Streamable HTTP request is rejected with 421 "Invalid Host header" and the
+    server is unreachable to any remote MCP client — which is most of the point
+    of deploying it. The protection stays ON; the deployment's own host is added
+    to the allowlist rather than the check being switched off.
+    """
+    allowed = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    origins = ["http://localhost:*", "http://127.0.0.1:*"]
+    public = urlparse(settings.public_base_url).netloc
+    if public and not public.startswith(("localhost", "127.0.0.1")):
+        allowed.append(public)
+        origins.append(f"https://{public}")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed,
+        allowed_origins=origins,
+    )
+
+
 mcp = FastMCP(
     "x402-micropayments",
     instructions=(
@@ -30,6 +55,7 @@ mcp = FastMCP(
         "build/verify seller payment configs, and upgrade to Pro via x402. "
         "Commerce meta included on every response."
     ),
+    transport_security=_transport_security(),
 )
 
 
