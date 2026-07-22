@@ -83,7 +83,9 @@ async def main(argv: list[str] | None = None) -> int:
         PayAndFetchInput(
             url=args.url,
             method=args.method.upper(),
-            headers={"Content-Type": args.content_type} if args.body else None,
+            # PayAndFetchInput.headers is a dict with a default factory and
+            # rejects None, so the no-body case must pass an empty dict.
+            headers={"Content-Type": args.content_type} if args.body else {},
             body=args.body,
             preferred_network=args.network,
             max_price_usdc=args.max_usdc,
