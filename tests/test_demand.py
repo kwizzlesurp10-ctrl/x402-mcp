@@ -102,6 +102,59 @@ def test_report_joins_challenges_to_settled_sales(ledger) -> None:
     assert report["overall_conversion"] == round(1 / 11, 4)
 
 
+def test_sales_predating_the_counter_do_not_inflate_conversion(ledger) -> None:
+    """The live bug: counting started tonight, the ledger held older sales, and
+    dividing one by the other reported a 200% conversion rate."""
+    ledger_writer.record_revenue(  # settled long before counting began
+        agent_id="seller",
+        amount_usdc=0.25,
+        network="eip155:8453",
+        product_id="pulse-1",
+        tx="0xold",
+    )
+    import json
+
+    path = ledger.joinpath("revenue.jsonl")
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["ts"] = "2020-01-01T00:00:00+00:00"
+    path.write_text(json.dumps(rows[0]) + "\n", encoding="utf-8")
+
+    demand.record_challenge("pulse-1")  # counting starts now
+
+    row = next(r for r in demand.build_report()["resources"] if r["resource"] == "pulse-1")
+
+    assert row["sales_settled"] == 1  # history is still reported...
+    assert row["sales_in_window"] == 0  # ...but not counted against new views
+    assert row["conversion"] == 0.0
+    assert row["conversion"] <= 1.0
+
+
+def test_conversion_can_exceed_one_when_a_challenge_is_reused(ledger) -> None:
+    """Not a bug, and worth pinning so nobody "fixes" it by clamping.
+
+    A buyer may cache a PAYMENT-REQUIRED header and settle against it more than
+    once without re-fetching the 402, so sales legitimately can outnumber
+    challenges. The number to distrust is one built from sales that predate
+    counting — that is what the window guards, not this.
+    """
+    demand.record_challenge("pulse-1")
+    for i in range(5):
+        ledger_writer.record_revenue(
+            agent_id="seller",
+            amount_usdc=0.05,
+            network="eip155:8453",
+            product_id="pulse-1",
+            tx=f"0x{i}",
+        )
+
+    row = next(
+        r for r in demand.build_report()["resources"] if r["resource"] == "pulse-1"
+    )
+
+    assert row["conversion"] == 5.0  # reported honestly, not clamped
+    assert row["sales_in_window"] == 5
+
+
 def test_conversion_is_none_with_no_views(ledger) -> None:
     """A ratio over zero views says nothing; do not report 0% as a finding."""
     ledger_writer.record_revenue(
