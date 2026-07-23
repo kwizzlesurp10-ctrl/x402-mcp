@@ -32,6 +32,35 @@ SINCE_KEY = "demand:402:since"
 # metric climb forever whether or not a single buyer ever shows up.
 SELF_TRAFFIC_HEADER = "x-demand-ignore"
 
+# Per-resource tally of WHO is knocking, so "views" can be read as demand vs
+# bot noise. A raw user-agent has unbounded cardinality (and can carry PII-ish
+# bits), so requests are bucketed into a small fixed set of client classes. The
+# question this answers: are the challenges genuine agent clients, or crawlers?
+CLIENTS_KEY = "demand:402:clients"
+_memory_clients: dict[str, Counter[str]] = {}
+
+# Ordered most-specific first; first match wins.
+_CLIENT_SIGNATURES = (
+    ("x402-client", ("x402", "x402httpx", "x402-fetch", "x402-axios")),
+    ("coinbase-agentkit", ("agentkit", "cdp-sdk", "coinbase")),
+    ("langchain-agent", ("langchain", "langgraph", "crewai", "autogpt")),
+    ("python-http", ("python-httpx", "httpx", "aiohttp", "python-requests", "urllib")),
+    ("node-http", ("node-fetch", "undici", "axios", "got (", "node.js")),
+    ("browser", ("mozilla", "chrome", "safari", "webkit")),
+    ("crawler-bot", ("bot", "crawler", "spider", "scan", "probe", "curl", "wget", "monitor")),
+)
+
+
+def classify_client(user_agent: str | None) -> str:
+    """Bucket a User-Agent into a coarse client class. Never the raw string."""
+    if not user_agent:
+        return "unknown"
+    ua = user_agent.lower()
+    for label, needles in _CLIENT_SIGNATURES:
+        if any(n in ua for n in needles):
+            return label
+    return "other"
+
 # Used when Redis is absent. Lost on restart, exactly like the in-memory quota
 # store — on a diskless host without REDIS_URL nothing here survives anyway.
 _memory: Counter[str] = Counter()
@@ -53,12 +82,13 @@ def is_self_traffic(headers: Any) -> bool:
         return False
 
 
-def record_challenge(resource_key: str) -> None:
-    """Note that `resource_key` served a 402. Never raises."""
+def record_challenge(resource_key: str, user_agent: str | None = None) -> None:
+    """Note that `resource_key` served a 402, and to what class of client. Never raises."""
     if not resource_key:
         return
     global _memory_since
     stamp = datetime.now(UTC).isoformat()
+    client_class = classify_client(user_agent)
     try:
         client = _client()
         if client is None:
@@ -66,14 +96,32 @@ def record_challenge(resource_key: str) -> None:
                 _memory_since = stamp
             _memory[resource_key] += 1
             _memory_last[resource_key] = stamp
+            _memory_clients.setdefault(resource_key, Counter())[client_class] += 1
             return
         pipe = client.pipeline()
         pipe.hincrby(CHALLENGE_KEY, resource_key, 1)
         pipe.hset(LAST_SEEN_KEY, resource_key, stamp)
         pipe.set(SINCE_KEY, stamp, nx=True)  # first write wins
+        pipe.hincrby(CLIENTS_KEY, f"{resource_key}|{client_class}", 1)
         pipe.execute()
     except Exception:  # noqa: BLE001 — a counter must never break a sale
         log.warning("demand: failed to record a challenge for %s", resource_key)
+
+
+def clients_by_resource() -> dict[str, dict[str, int]]:
+    """Per-resource breakdown of client classes that hit each 402."""
+    out: dict[str, dict[str, int]] = {}
+    try:
+        client = _client()
+        if client is None:
+            return {k: dict(v) for k, v in _memory_clients.items()}
+        raw = client.hgetall(CLIENTS_KEY) or {}
+        for field, count in raw.items():
+            resource, _, cls = field.rpartition("|")
+            out.setdefault(resource, {})[cls] = int(count)
+    except Exception:  # noqa: BLE001
+        log.warning("demand: failed to read client breakdown")
+    return out
 
 
 def challenges() -> dict[str, int]:
@@ -137,6 +185,11 @@ def build_report() -> dict[str, Any]:
     served = challenges()
     seen = last_seen()
     since = counting_since()
+    clients = clients_by_resource()
+
+    # A view is only plausibly a buyer if a real client made it. Crawlers,
+    # monitors, and bare browsers are not going to sign a USDC authorization.
+    bot_classes = {"crawler-bot", "browser", "unknown"}
 
     since_dt = _parse_ts(since) if since else None
 
@@ -157,10 +210,17 @@ def build_report() -> dict[str, Any]:
     for key in sorted(set(served) | set(paid)):
         views = served.get(key, 0)
         sales = paid.get(key, 0)
+        by_client = clients.get(key, {})
+        qualified = sum(n for cls, n in by_client.items() if cls not in bot_classes)
         rows.append(
             {
                 "resource": key,
                 "challenges_served": views,
+                # Views from a client that could actually pay (excludes crawlers,
+                # bare browsers, and un-identified traffic). This is the number
+                # that means "prospective buyer", not "something hit the URL".
+                "qualified_views": qualified,
+                "clients": by_client,
                 "sales_settled": sales,
                 "sales_in_window": counted.get(key, 0),
                 "revenue_usdc": round(revenue.get(key, 0.0), 6),
@@ -172,14 +232,16 @@ def build_report() -> dict[str, Any]:
                 "last_challenge_at": seen.get(key),
             }
         )
-    rows.sort(key=lambda r: r["challenges_served"], reverse=True)
+    rows.sort(key=lambda r: r["qualified_views"], reverse=True)
 
     total_views = sum(served.values())
+    total_qualified = sum(r["qualified_views"] for r in rows)
     total_sales = sum(paid.values())
     total_in_window = sum(counted.values())
     return {
         "resources": rows,
         "total_challenges_served": total_views,
+        "total_qualified_views": total_qualified,
         "total_sales_settled": total_sales,
         "counting_since": since,
         "total_sales_in_window": total_in_window,
@@ -187,10 +249,10 @@ def build_report() -> dict[str, Any]:
             round(total_in_window / total_views, 4) if total_views else None
         ),
         "note": (
-            "challenges_served counts 402s handed out, i.e. agents that found "
-            "the resource and read its price. A high count with no sales is a "
-            "price/product signal; a zero count is a discovery signal. "
-            "conversion uses only sales settled since counting_since, so it is "
-            "not skewed by sales that predate the instrumentation."
+            "challenges_served counts every 402 handed out; qualified_views "
+            "excludes crawlers, bare browsers and unidentified traffic (see "
+            "clients). Read qualified_views, not challenges_served, as demand: "
+            "qualified with no sales is a price/product signal; zero qualified "
+            "is a discovery signal even if challenges_served is high."
         ),
     }

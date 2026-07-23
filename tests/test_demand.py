@@ -268,3 +268,45 @@ def test_a_marked_request_does_not_increment(monkeypatch) -> None:
 
     assert response.status_code == 402  # still serves normally
     assert demand.challenges().get("ignored-1") is None  # just not counted
+
+
+# --- client classification: is a view a buyer or a bot? -----------------------
+
+
+def test_classify_client_buckets() -> None:
+    assert demand.classify_client("x402-fetch/1.0") == "x402-client"
+    assert demand.classify_client("python-httpx/0.27") == "python-http"
+    assert demand.classify_client("node-fetch/3.0") == "node-http"
+    assert demand.classify_client("Mozilla/5.0 (Windows) Chrome/120") == "browser"
+    assert demand.classify_client("curl/8.4.0") == "crawler-bot"
+    assert demand.classify_client("SomeBot/1.0 crawler") == "crawler-bot"
+    assert demand.classify_client("") == "unknown"
+    assert demand.classify_client(None) == "unknown"
+    assert demand.classify_client("HAL9000/2001") == "other"
+
+
+def test_qualified_views_exclude_bots_and_browsers(ledger, monkeypatch) -> None:
+    """The whole point: separate prospective buyers from crawler noise."""
+    monkeypatch.setattr(demand, "_memory_clients", {})
+    demand.record_challenge("p", "x402-fetch/1.0")       # a real client
+    demand.record_challenge("p", "python-httpx/0.27")    # a real client
+    demand.record_challenge("p", "curl/8.4.0")           # bot
+    demand.record_challenge("p", "Mozilla/5.0 Chrome")   # browser, not a payer
+    demand.record_challenge("p", None)                    # unidentified
+
+    row = next(r for r in demand.build_report()["resources"] if r["resource"] == "p")
+
+    assert row["challenges_served"] == 5
+    assert row["qualified_views"] == 2  # only the two real clients
+    assert row["clients"]["x402-client"] == 1
+    assert row["clients"]["crawler-bot"] == 1
+
+
+def test_qualified_views_survive_redis(redis_backed, monkeypatch) -> None:
+    demand.record_challenge("p", "x402-fetch/1.0")
+    demand.record_challenge("p", "curl/8")
+    monkeypatch.setattr(demand, "_memory_clients", {})  # simulate restart
+
+    row = next(r for r in demand.build_report()["resources"] if r["resource"] == "p")
+    assert row["qualified_views"] == 1
+    assert row["clients"] == {"x402-client": 1, "crawler-bot": 1}
