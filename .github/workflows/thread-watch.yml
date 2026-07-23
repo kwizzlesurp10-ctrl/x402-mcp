@@ -1,0 +1,129 @@
+name: thread watch
+
+# Watches the outreach threads on OTHER repos — the BankrBot skill PR and the
+# ClawRouter service issue — and opens a local issue the moment either gets a
+# new comment, a state change, or (for the PR) a review. A maintainer reply is
+# the thing that converts to a real agent buyer, and a lagged response on our
+# side is what loses it. This makes the reply reach you off-box, machine closed.
+#
+# State lives in the alert issues themselves: each new event opens exactly one
+# local issue whose title carries the event fingerprint, and we skip anything
+# already alerted. No committed state file, no external store.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SELF_REPO: ${{ github.repository }}
+      # Threads to watch: "owner/repo:kind:number". kind is pr or issue.
+      THREADS: 'BankrBot/skills:pr:588 BlockRunAI/ClawRouter:issue:216'
+      # Our own GitHub login — comments BY us are not events to alert on.
+      OUR_LOGIN: kwizzlesurp10-ctrl
+    steps:
+      - name: Poll outreach threads and alert on maintainer activity
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          SELF = os.environ["SELF_REPO"]
+          OURS = os.environ["OUR_LOGIN"].lower()
+
+          def gh(args):
+              r = subprocess.run(["gh", *args], capture_output=True, text=True)
+              if r.returncode != 0:
+                  print(f"  gh {' '.join(args)} -> {r.stderr.strip()[:160]}")
+                  return None
+              return r.stdout
+
+          def already_alerted(fingerprint):
+              out = gh(["issue", "list", "--repo", SELF, "--state", "all",
+                        "--search", fingerprint, "--json", "number", "--limit", "1"])
+              try:
+                  return bool(json.loads(out or "[]"))
+              except Exception:
+                  return False  # never suppress a real alert on a parse hiccup
+
+          def alert(fingerprint, title, body):
+              if already_alerted(fingerprint):
+                  print(f"  already alerted: {fingerprint}")
+                  return
+              gh(["issue", "create", "--repo", SELF, "--title", title,
+                  "--body", body, "--label", "outreach"])
+              print(f"  ALERTED: {fingerprint}")
+
+          for spec in os.environ["THREADS"].split():
+              repo, kind, number = spec.split(":")
+              ref = f"{repo}#{number}"
+              print(f"checking {ref} ({kind})")
+
+              if kind == "pr":
+                  raw = gh(["pr", "view", number, "--repo", repo, "--json",
+                            "state,isDraft,reviewDecision,comments,reviews,url,title"])
+              else:
+                  raw = gh(["issue", "view", number, "--repo", repo, "--json",
+                            "state,comments,url,title"])
+              if not raw:
+                  print(f"  could not read {ref}; skipping this run")
+                  continue
+              d = json.loads(raw)
+              url = d.get("url", "")
+
+              # 1) New comments from anyone who is not us.
+              for c in d.get("comments", []):
+                  who = (c.get("author") or {}).get("login", "").lower()
+                  if who == OURS or not who:
+                      continue
+                  cid = c.get("id") or c.get("url", "")
+                  fp = f"thread-evt {ref} comment {cid}"
+                  alert(
+                      fp,
+                      f"\U0001F4AC {ref}: reply from @{who}",
+                      f"A maintainer commented on your outreach thread.\n\n"
+                      f"- **Thread:** {url}\n- **By:** @{who}\n\n"
+                      f"> {(c.get('body') or '')[:500]}\n\n"
+                      f"Respond promptly — a lagged reply is what loses the integration. "
+                      f"Close this once handled.",
+                  )
+
+              # 2) PR review decisions (approve / changes requested).
+              for rv in d.get("reviews", []):
+                  who = (rv.get("author") or {}).get("login", "").lower()
+                  st = rv.get("state", "")
+                  if who == OURS or st in ("", "COMMENTED", "PENDING"):
+                      continue
+                  fp = f"thread-evt {ref} review {rv.get('id','')}"
+                  alert(
+                      fp,
+                      f"\U0001F4DD {ref}: review {st} by @{who}",
+                      f"- **Thread:** {url}\n- **Review:** {st} by @{who}\n\n"
+                      f"> {(rv.get('body') or '')[:500]}\n\nClose this once handled.",
+                  )
+
+              # 3) Terminal state: merged / closed.
+              state = d.get("state", "")
+              if state in ("MERGED", "CLOSED"):
+                  fp = f"thread-evt {ref} state {state}"
+                  good = state == "MERGED"
+                  emoji = "\U0001F389" if good else "\U0001F6D1"
+                  alert(
+                      fp,
+                      f"{emoji} {ref}: {state}",
+                      f"- **Thread:** {url}\n- **Now:** {state}\n\n"
+                      + ("Merged — the integration is live. Watch /demand qualified_views "
+                         "for that endpoint and the sale-watch for the first external payer."
+                         if good else
+                         "Closed without merge. Read the thread for why; the reason is "
+                         "market signal worth keeping."),
+                  )
+          PY
