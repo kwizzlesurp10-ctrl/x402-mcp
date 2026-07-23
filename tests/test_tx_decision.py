@@ -145,3 +145,12 @@ def test_unconfigured_seller_refuses_rather_than_serving_free(monkeypatch) -> No
     monkeypatch.setattr(settings, "x402_pay_to_address", "")
 
     assert client.get("/base/tx-decision").status_code == 503
+
+
+def test_gas_and_urgency_are_case_insensitive(monkeypatch) -> None:
+    """An agent sending NOW or USDC is a buyer; reject nothing a real client sends."""
+    monkeypatch.setattr(tx_decision, "build_payment_required_header", lambda: "aGRy")
+
+    for q in ("gas=USDC&urgency=NOW", "gas=Eth&urgency=Flexible", "gas=X402&urgency=Soon"):
+        r = client.get(f"/base/tx-decision?{q}")
+        assert r.status_code == 402, (q, r.status_code)

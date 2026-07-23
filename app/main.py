@@ -681,12 +681,15 @@ async def base_tx_decision(
             status_code=503,
             content={"error": "seller_not_configured", "detail": "X402_PAY_TO_ADDRESS unset"},
         )
+    # Case-insensitive, like gas: an agent sending urgency=NOW is a buyer, not
+    # a bad request. Rejecting reasonable capitalization loses the sale.
+    urgency = urgency.strip().lower()
     if urgency not in tx_decision.URGENCIES:
         return JSONResponse(
             status_code=422,
             content={"error": "invalid_urgency", "detail": f"urgency must be one of {tx_decision.URGENCIES}"},
         )
-    gas_units = tx_decision.GAS_PRESETS.get(gas.lower())
+    gas_units = tx_decision.GAS_PRESETS.get(gas.strip().lower())
     if gas_units is None:
         try:
             gas_units = int(gas)
