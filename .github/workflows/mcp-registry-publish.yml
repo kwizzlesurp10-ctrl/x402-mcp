@@ -1,0 +1,65 @@
+name: publish to mcp registry
+
+# Lists this server in the official MCP Registry
+# (registry.modelcontextprotocol.io) — the catalog buyer-side agents and MCP
+# clients browse to discover servers. As of 2026-07 the x402 peers are already
+# there (ai.firmbrain/x402-services, ai.lattiq/x402-trading-signals,
+# ai.tensorfeed/x402-base-mcp); this storefront was not, so agents shopping the
+# registry could not find it. server.json at the repo root is the listing.
+#
+# Auth is GitHub OIDC — no secret to store. The registry grants the
+# io.github.<owner>/* namespace to whoever proves, via the id-token, that they
+# own that GitHub identity; server.json is named
+# io.github.kwizzlesurp10-ctrl/x402-mcp, which matches this repo's owner, so the
+# publish authorizes itself.
+#
+# This is a remote server (streamable-http at x402-mcp.onrender.com), not a
+# packaged one, so there is nothing to build or push to npm/PyPI first — the
+# publish is just: fetch the CLI, log in, publish.
+#
+# Triggers:
+#   - workflow_dispatch: run it by hand for the first listing (or a re-list).
+#   - push of a v* tag: keep the registry in sync with tagged releases; the tag
+#     name (minus the leading v) overrides the version in server.json so each
+#     release publishes as its own registry version.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  id-token: write   # required: OIDC token used to authenticate to the registry
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: server.json is present and valid
+        run: |
+          test -f server.json || { echo "::error::server.json not found at repo root"; exit 1; }
+          name=$(python3 -c "import json;print(json.load(open('server.json'))['name'])")
+          echo "publishing registry name: $name"
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Set version from tag
+        # Only on a v* tag push; workflow_dispatch keeps server.json's version.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
+          echo "version set to $VERSION"
+
+      - name: Authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish
