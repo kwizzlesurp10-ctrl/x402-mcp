@@ -586,7 +586,15 @@ async def mn_property_check(request: Request, address: str) -> JSONResponse:
             content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
         )
 
-    payment_required = mn_compliance.build_payment_required_header()
+    try:
+        payment_required = mn_compliance.build_payment_required_header()
+    except Exception:  # never seen a cache: facilitator down on a cold start
+        log.warning("mn/property-check: cannot build challenge", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "30"},
+            content={"error": "challenge_unavailable", "detail": "retry shortly"},
+        )
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
         log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
@@ -693,7 +701,15 @@ async def base_tx_decision(
                 },
             )
 
-    payment_required = tx_decision.build_payment_required_header()
+    try:
+        payment_required = tx_decision.build_payment_required_header()
+    except Exception:  # never seen a cache: facilitator down on a cold start
+        log.warning("base/tx-decision: cannot build challenge", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "30"},
+            content={"error": "challenge_unavailable", "detail": "retry shortly"},
+        )
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
         if not demand.is_self_traffic(request.headers):

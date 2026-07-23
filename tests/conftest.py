@@ -151,6 +151,17 @@ def probe_402_url() -> str:
     server.shutdown()
 
 
+@pytest.fixture(autouse=True)
+def _clear_challenge_cache():
+    """The 402-challenge cache is module-level and would otherwise leak a built
+    header (and its stubbed build_seller_requirements output) across tests."""
+    from app import challenge_cache
+
+    challenge_cache._mem.clear()
+    yield
+    challenge_cache._mem.clear()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def isolated_swarm_registry(tmp_path_factory):
     """Point the swarm registry singleton at a tmp products file so tests

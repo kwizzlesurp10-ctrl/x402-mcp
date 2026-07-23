@@ -157,23 +157,35 @@ DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
 
 
 def build_payment_required_header() -> str:
-    """Base64 x402 v2 PAYMENT-REQUIRED header for this resource."""
+    """Base64 x402 v2 PAYMENT-REQUIRED header for this resource.
+
+    Cached per (network, price, resource): the header is static, and building it
+    hits the CDP facilitator, which 502s. Serving a cached header keeps selling
+    through a facilitator outage instead of 500-ing every unpaid request.
+    """
+    from app import challenge_cache
     from app.models import BuildSellerRequirementsInput
     from app.x402_services import build_seller_requirements
 
-    built = build_seller_requirements(
-        BuildSellerRequirementsInput(
-            network=settings.x402_default_network,
-            price=settings.tx_decision_price,
-            description=RESOURCE_DESCRIPTION,
-            resource_url=resource_url(),
-            mime_type="application/json",
-            discovery_method="GET",
-            discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
-            discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
-        )
-    )
-    return built["payment_required_header"]
+    network = settings.x402_default_network
+    price = settings.tx_decision_price
+    fp = f"{network}|{price}|{resource_url()}|disc={settings.bazaar_discoverable}"
+
+    def _build() -> str:
+        return build_seller_requirements(
+            BuildSellerRequirementsInput(
+                network=network,
+                price=price,
+                description=RESOURCE_DESCRIPTION,
+                resource_url=resource_url(),
+                mime_type="application/json",
+                discovery_method="GET",
+                discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
+            )
+        )["payment_required_header"]
+
+    return challenge_cache.get_or_build("base-tx-decision", fp, _build)
 
 
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:
