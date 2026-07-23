@@ -6,20 +6,22 @@ name: storefront monitor
 # ~15 minutes idle, and a cold start dropped the in-memory registry so the
 # purchase URL indexed in the CDP Bazaar catalog answered 404 instead of 402.
 # The box is on an always-on plan now and there is nothing left to keep warm,
-# but the alarm is worth keeping — it is what surfaced the outage on
-# 2026-07-21, when a listing died silently and took two sales' records with it.
+# but the alarm is worth keeping — it surfaced the outage on 2026-07-21, when a
+# listing died silently and took two sales' records with it.
 #
 # What it watches, in order of how badly you want to know:
 #   1. the service answers at all
-#   2. the cataloged purchase URL still serves a payment challenge
+#   2. EVERY paid endpoint can actually take an agent's payment (402 + a real
+#      PAYMENT-REQUIRED header — a 402 with no header is a dead storefront that
+#      still looks alive)
 #   3. no /doctor check is failing (e.g. Redis set but unreachable, which
 #      degrades silently and only costs you at the next restart)
+#
+# A failed run notifies you via GitHub. That IS the "you are not up and selling"
+# alert — it fires whenever an agent that found a listing would get nothing.
 
 on:
   schedule:
-    # Every 15 minutes. Nothing depends on the cadence any more, so this is
-    # tuned for "know within a quarter hour" rather than to beat a spin-down
-    # timer. GitHub throttles scheduled runs under load regardless.
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
@@ -42,27 +44,36 @@ jobs:
           cat /tmp/health.json
           test "$code" = "200"
 
-      - name: Cataloged listing still serves a payment challenge
+      - name: Every paid endpoint can take an agent's payment
         run: |
-          url="$BASE_URL/swarm/products/$PRODUCT_ID/purchase"
-          # X-Demand-Ignore keeps this check out of the demand counters — a
-          # monitor hitting the listing every 15 minutes is not a buyer, and
-          # counting it would make challenges_served climb on its own forever.
-          code=$(curl -sS -o /tmp/listing.json -w '%{http_code}' --max-time 120             -H 'X-Demand-Ignore: storefront-monitor' "$url")
-          echo "listing -> $code"
-          if [ "$code" = "402" ]; then
-            echo "OK: listing is alive and serving its payment challenge."
-            exit 0
+          # "Up and selling" is more than 200 OK: each paid resource must return
+          # 402 WITH a usable PAYMENT-REQUIRED header, or an agent that found it
+          # cannot pay. X-Demand-Ignore keeps these probes out of demand counts.
+          fail=0
+          check() {
+            name="$1"; url="$2"
+            hdrs=$(curl -sS -D - -o /dev/null --max-time 120 \
+              -H 'X-Demand-Ignore: storefront-monitor' "$url" || true)
+            code=$(printf '%s' "$hdrs" | grep -iE '^HTTP/' | head -1 | awk '{print $2}')
+            has_hdr=$(printf '%s' "$hdrs" | grep -ci '^payment-required:')
+            echo "$name -> HTTP $code, PAYMENT-REQUIRED present: $has_hdr"
+            if [ "$code" = "402" ] && [ "$has_hdr" -ge 1 ]; then
+              echo "  OK: $name can take a payment."
+            else
+              echo "::error::$name is NOT sellable: HTTP $code, header present=$has_hdr (want 402 + header)."
+              fail=1
+            fi
+          }
+          check "pulse-listing" "$BASE_URL/swarm/products/$PRODUCT_ID/purchase"
+          check "tx-decision"   "$BASE_URL/base/tx-decision?gas=usdc&urgency=flexible"
+          check "mn-property"   "$BASE_URL/mn/property-check?address=1700+Penn+Ave+N"
+          if [ "$fail" = "1" ]; then
+            echo "::error::At least one paid endpoint cannot take an agent purchase."
+            echo "::error::Agents that discovered these URLs are getting nothing. Check /doctor;"
+            echo "::error::if the pinned listing 404s, do NOT POST /pulse/publish (a new id"
+            echo "::error::abandons the cataloged URL) — with Redis healthy a restart restores it."
+            exit 1
           fi
-          cat /tmp/listing.json || true
-          echo "::error::Listing $PRODUCT_ID returned $code (expected 402)."
-          echo "::error::Buyers who found this URL in the Bazaar catalog are getting nothing."
-          echo "::error::Do NOT fix this with POST /pulse/publish — that mints a new"
-          echo "::error::product id and abandons the URL the catalog already knows."
-          echo "::error::Check /doctor first: if registry persistence is failing, the"
-          echo "::error::listing cannot survive a restart. With PINNED_PULSE_PRODUCT_ID"
-          echo "::error::set and Redis healthy, a restart restores this URL by itself."
-          exit 1
 
       - name: No failing doctor checks
         run: |
@@ -71,8 +82,6 @@ jobs:
             echo "::error::/doctor returned $code"
             exit 1
           fi
-          # Degraded persistence is the dangerous case: it serves fine today and
-          # loses the books at the next restart. Surface it while it is cheap.
           failures=$(python3 -c "
           import json
           checks = json.load(open('/tmp/doctor.json'))['checks']

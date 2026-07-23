@@ -1,0 +1,111 @@
+name: sale watch
+
+# Watches Base on-chain for the one event neither the operator nor any tool can
+# manufacture: a payment into the storefront's receive wallet from a wallet that
+# is NOT ours. That is a stranger's agent actually buying.
+#
+# Every self-settle (cataloging, re-index) comes from the operator buyer wallet
+# below, so anything else is a real external sale. When one appears, the job
+# opens a GitHub issue — that notifies you and leaves a durable, dedup-able
+# record. The run stays green; the ISSUE is the alert, not a failed run.
+#
+# Caveat: if a second operator box (the Linux instance) ever buys from this
+# storefront with its own wallet, add that address to OUR_WALLETS or it will
+# read as a stranger. Today only one buyer wallet exists.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      RPC: https://mainnet.base.org
+      USDC: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+      PAY_TO: '0xAB745e5F576667037696e78ba7dA28E193E4423D'
+      # Comma-separated, lowercase. Every wallet WE settle from. Anything else
+      # paying PAY_TO is a stranger.
+      OUR_WALLETS: '0x67ffc9b439ae24b0f7c7ca837c4adfafa06f9d38'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Scan Base for stranger payments and alert
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request
+
+          RPC = os.environ["RPC"]
+          USDC = os.environ["USDC"]
+          PAY_TO = os.environ["PAY_TO"].lower()
+          OURS = {w.strip().lower() for w in os.environ["OUR_WALLETS"].split(",") if w.strip()}
+          REPO = os.environ["GH_REPO"]
+          XFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+          def rpc(method, params):
+              req = urllib.request.Request(
+                  RPC,
+                  data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                  # public Base RPC 403s the default urllib User-Agent.
+                  headers={"content-type": "application/json", "user-agent": "x402-sale-watch/1.0"},
+              )
+              return json.loads(urllib.request.urlopen(req, timeout=45).read())["result"]
+
+          latest = int(rpc("eth_blockNumber", []), 16)
+          # ~2s blocks; cron every 30 min. Scan the last ~2 hours (3600 blocks)
+          # every run so a delayed/skipped run cannot miss a sale. Dedup by
+          # issue title keeps the overlap harmless.
+          start = latest - 3600
+          topic_to = "0x" + "0" * 24 + PAY_TO[2:]
+          logs = rpc("eth_getLogs", [{
+              "fromBlock": hex(start), "toBlock": hex(latest),
+              "address": USDC, "topics": [XFER, None, topic_to],
+          }])
+
+          strangers = []
+          for lg in logs:
+              frm = "0x" + lg["topics"][1][-40:]
+              if frm.lower() in OURS:
+                  continue
+              amt = int(lg["data"], 16) / 1e6
+              strangers.append((frm, amt, lg["transactionHash"], int(lg["blockNumber"], 16)))
+
+          print(f"scanned {latest-start} blocks; {len(logs)} payments in, {len(strangers)} from strangers")
+
+          def issue_exists(tx):
+              out = subprocess.run(
+                  ["gh", "issue", "list", "--repo", REPO, "--state", "all",
+                   "--search", tx, "--json", "number", "--limit", "1"],
+                  capture_output=True, text=True,
+              )
+              return bool(json.loads(out.stdout or "[]"))
+
+          for frm, amt, tx, blk in strangers:
+              if issue_exists(tx):
+                  print(f"  already alerted: {tx}")
+                  continue
+              title = f"\U0001F4B0 External sale: ${amt:.4f} USDC from {frm[:10]}…"
+              body = (
+                  f"A wallet that is not ours paid the storefront.\n\n"
+                  f"- **Amount:** ${amt:.6f} USDC\n"
+                  f"- **From:** `{frm}`\n"
+                  f"- **To (pay_to):** `{PAY_TO}`\n"
+                  f"- **Tx:** https://basescan.org/tx/{tx}\n"
+                  f"- **Block:** {blk}\n\n"
+                  f"This is a real external purchase — the first-ever was 0xadacdfdd on "
+                  f"2026-07-22 (old $0.25 Pulse). Cross-check /ledger/revenue and /demand "
+                  f"to see which product and client class. Close this issue once acknowledged."
+              )
+              subprocess.run(
+                  ["gh", "issue", "create", "--repo", REPO,
+                   "--title", title, "--body", body, "--label", "sale"],
+                  check=False,
+              )
+              print(f"  ALERTED: {tx}")
+          PY
