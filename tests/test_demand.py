@@ -310,3 +310,18 @@ def test_qualified_views_survive_redis(redis_backed, monkeypatch) -> None:
     row = next(r for r in demand.build_report()["resources"] if r["resource"] == "p")
     assert row["qualified_views"] == 1
     assert row["clients"] == {"x402-client": 1, "crawler-bot": 1}
+
+
+def test_distinct_user_agents_are_sampled_and_capped(monkeypatch) -> None:
+    """Naming the actual clients is what separates an indexer from a shopper."""
+    monkeypatch.setattr(demand, "_memory_ua", {})
+    monkeypatch.setattr(demand, "_UA_SAMPLE_CAP", 3)
+    for ua in ["x402-fetch/1", "x402-fetch/1", "httpx/0.27", "curl/8", "node-fetch/3"]:
+        demand.record_challenge("p", ua)
+
+    samples = demand.ua_samples()["p"]
+    assert "x402-fetch/1" in samples and len(set(samples)) == len(samples)  # deduped
+    assert len(samples) <= 3  # capped
+
+    row = next(r for r in demand.build_report()["resources"] if r["resource"] == "p")
+    assert set(row["user_agents"]) == set(samples)

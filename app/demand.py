@@ -39,6 +39,15 @@ SELF_TRAFFIC_HEADER = "x-demand-ignore"
 CLIENTS_KEY = "demand:402:clients"
 _memory_clients: dict[str, Counter[str]] = {}
 
+# A bounded sample of the DISTINCT raw User-Agents per resource. The client
+# class tells you "payment-capable or bot"; the raw string tells you WHO — a
+# named ecosystem indexer (x402scan, CDP crawler, a re-indexer) reads very
+# differently from a varied set of real agent runtimes. Capped so cardinality
+# stays bounded; UA strings are software identifiers, not personal data.
+UA_SAMPLE_KEY = "demand:402:ua"
+_UA_SAMPLE_CAP = 40
+_memory_ua: dict[str, set[str]] = {}
+
 # Ordered most-specific first; first match wins.
 _CLIENT_SIGNATURES = (
     ("x402-client", ("x402", "x402httpx", "x402-fetch", "x402-axios")),
@@ -97,6 +106,7 @@ def record_challenge(resource_key: str, user_agent: str | None = None) -> None:
             _memory[resource_key] += 1
             _memory_last[resource_key] = stamp
             _memory_clients.setdefault(resource_key, Counter())[client_class] += 1
+            _sample_ua(None, resource_key, user_agent)
             return
         pipe = client.pipeline()
         pipe.hincrby(CHALLENGE_KEY, resource_key, 1)
@@ -104,8 +114,44 @@ def record_challenge(resource_key: str, user_agent: str | None = None) -> None:
         pipe.set(SINCE_KEY, stamp, nx=True)  # first write wins
         pipe.hincrby(CLIENTS_KEY, f"{resource_key}|{client_class}", 1)
         pipe.execute()
+        _sample_ua(client, resource_key, user_agent)
     except Exception:  # noqa: BLE001 — a counter must never break a sale
         log.warning("demand: failed to record a challenge for %s", resource_key)
+
+
+def _sample_ua(client: Any, resource_key: str, user_agent: str | None) -> None:
+    """Keep up to _UA_SAMPLE_CAP distinct raw UAs per resource. Best-effort."""
+    if not user_agent:
+        return
+    ua = user_agent[:160]
+    key = f"{UA_SAMPLE_KEY}:{resource_key}"
+    try:
+        if client is None:
+            s = _memory_ua.setdefault(resource_key, set())
+            if ua in s or len(s) < _UA_SAMPLE_CAP:
+                s.add(ua)
+            return
+        # SADD is a no-op for a dup; only grow while under the cap.
+        if client.sismember(key, ua) or client.scard(key) < _UA_SAMPLE_CAP:
+            client.sadd(key, ua)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def ua_samples() -> dict[str, list[str]]:
+    """Distinct raw User-Agents sampled per resource."""
+    try:
+        client = _client()
+        if client is None:
+            return {k: sorted(v) for k, v in _memory_ua.items()}
+        out: dict[str, list[str]] = {}
+        for res in challenges():
+            members = client.smembers(f"{UA_SAMPLE_KEY}:{res}") or set()
+            if members:
+                out[res] = sorted(members)
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def clients_by_resource() -> dict[str, dict[str, int]]:
@@ -186,6 +232,7 @@ def build_report() -> dict[str, Any]:
     seen = last_seen()
     since = counting_since()
     clients = clients_by_resource()
+    uas = ua_samples()
 
     # A view is only plausibly a buyer if a real client made it. Crawlers,
     # monitors, and bare browsers are not going to sign a USDC authorization.
@@ -223,6 +270,7 @@ def build_report() -> dict[str, Any]:
                 "clients": by_client,
                 "sales_settled": sales,
                 "sales_in_window": counted.get(key, 0),
+                "user_agents": uas.get(key, []),
                 "revenue_usdc": round(revenue.get(key, 0.0), 6),
                 # Only sales inside the measured window, so this can never
                 # exceed 1.0 by comparing old sales against new views.
