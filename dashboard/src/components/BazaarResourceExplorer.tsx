@@ -11,7 +11,44 @@ interface ResourceProduct {
   seller: string;
 }
 
+/** Public storefront — never window.location (Mission Control SPA is not the API). */
+const STOREFRONT_BASE = (
+  import.meta.env.VITE_STOREFRONT_BASE_URL || "https://x402-mcp.onrender.com"
+).replace(/\/$/, "");
+
 const PRODUCTS: ResourceProduct[] = [
+  {
+    id: "us-city-catalog",
+    name: "US City Open-Data Compliance Catalog",
+    category: "Real Estate Open Data",
+    priceUsdc: 0,
+    network: "Base Mainnet (8453)",
+    endpoint: "/us/cities",
+    description:
+      "Free machine catalog of 14-jurisdiction property compliance endpoints. Canonical Visit URL for Gold402/24K.",
+    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+  },
+  {
+    id: "sea-property-check-sample",
+    name: "Seattle RRIO free sample",
+    category: "Real Estate Open Data",
+    priceUsdc: 0,
+    network: "Base Mainnet (8453)",
+    endpoint: "/us/sea/property-check/sample",
+    description: "Canonical free-sample Resource URL for the US city network",
+    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+  },
+  {
+    id: "sea-property-check-01",
+    name: "Seattle Property Compliance (paid example)",
+    category: "Real Estate Open Data",
+    priceUsdc: 0.01,
+    network: "Base Mainnet (8453)",
+    endpoint: "/us/sea/property-check",
+    description:
+      "Canonical paid Resource URL — Seattle RRIO rental registration via City of Seattle open data",
+    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+  },
   {
     id: "4cc95d8e0d7b4c628d3afcab0edf32ae",
     name: "Base Network Pulse",
@@ -27,7 +64,7 @@ const PRODUCTS: ResourceProduct[] = [
     name: "Minneapolis Rental Compliance",
     category: "Real Estate Open Data",
     priceUsdc: 0.01,
-    network: "Base Sepolia (84532)",
+    network: "Base Mainnet (8453)",
     endpoint: "/mn/property-check?address=3500+Nicollet+Ave",
     description: "Rental compliance snapshot composed from live city open data and license records",
     seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
@@ -64,8 +101,7 @@ export function BazaarResourceExplorer({ density }: { density: string }) {
   const handleSimulateProbe = () => {
     setProbing(true);
     setProbeResult(null);
-    const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:8402";
-    const fullUrl = `${origin}${selectedProduct.endpoint}`;
+    const fullUrl = `${STOREFRONT_BASE}${selectedProduct.endpoint}`;
 
     setTimeout(() => {
       setProbing(false);

@@ -6,13 +6,25 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 
 **Storefront:** https://x402-mcp.onrender.com — x402 v2 challenges served, USDC verified + settled through the Coinbase CDP facilitator (`eip155:8453`).
 
+### Canonical Visit / Resource URLs (24K / Gold402 / scanners)
+
+| Role | URL |
+|------|-----|
+| **Catalog** | https://x402-mcp.onrender.com/us/cities |
+| **Paid example** | https://x402-mcp.onrender.com/us/sea/property-check |
+| **Free sample** | https://x402-mcp.onrender.com/us/sea/property-check/sample |
+
+Point buyers, MCP remotes, and directory listings at the **storefront** host above — not the Mission Control SPA (`*.vercel.app`). SPA paths serve the React shell and do not proxy payment-gated APIs.
+
 | Product | Price | What you get |
 |---------|-------|--------------|
-| `GET /mn/property-check?address=…` | $0.01 USDC | Minneapolis rental-compliance snapshot composed from 3 live City of Minneapolis open datasets — the first machine-payable housing-compliance data for agents |
+| `GET /us/cities` | free | Machine catalog of the US open-data compliance network (14 jurisdictions) |
+| `GET /us/{code}/property-check` | $0.01 USDC | Per-city rental/code compliance join (paid example: Seattle `/us/sea/property-check`) |
+| `GET /us/{code}/property-check/sample` | free | Fixed-address sample (example: `/us/sea/property-check/sample`) |
+| `GET /mn/property-check?address=…` | $0.01 USDC | Minneapolis rental-compliance snapshot (also available as `/us/mn/property-check`) |
 | `GET /swarm/products/{id}/purchase` | $0.25 USDC | Base Network Pulse: live settlement-conditions intelligence (EIP-1559 math + real RPC + ETH spot), listed with the x402 Bazaar discovery extension |
 
-The public seller host holds **no spend key** — it only verifies and settles inbound payments ([docs/SELLER-STOREFRONT.md](docs/SELLER-STOREFRONT.md)). Roadmap: [ROADMAP.md](ROADMAP.md).
-
+The public seller host holds **no spend key** — it only verifies and settles inbound payments ([docs/SELLER-STOREFRONT.md](docs/SELLER-STOREFRONT.md)). City network details: [docs/CITY-NETWORK.md](docs/CITY-NETWORK.md). Roadmap: [ROADMAP.md](ROADMAP.md).
 ## Features
 
 - **16 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
@@ -55,24 +67,27 @@ curl http://localhost:8402/health
 # then open http://localhost:8402/dashboard
 ```
 
-## Paid HTTP Resource: MN Property Check
+## Paid HTTP Resources: US City Compliance Network
 
-First-party sellable endpoint (the seller side of this repo's own tooling):
+**Canonical discovery (use these in directories):**
+
+```
+GET https://x402-mcp.onrender.com/us/cities
+GET https://x402-mcp.onrender.com/us/sea/property-check/sample
+GET https://x402-mcp.onrender.com/us/sea/property-check?address=…
+```
+
+Each paid city path is x402-gated at **$0.01 USDC** (`CITY_NETWORK_PRICE` / `MN_PROPERTY_CHECK_PRICE` for MN). Unpaid requests get a
+`402` with x402 v2 `PAYMENT-REQUIRED` terms; paid requests are verified and
+settled via the facilitator, then served with a `PAYMENT-RESPONSE` receipt.
+
+**Minneapolis** remains available at the legacy path:
 
 ```
 GET /mn/property-check?address=1700%20Penn%20Ave%20N
 ```
 
-x402-gated at **$0.01 USDC** (`MN_PROPERTY_CHECK_PRICE`). Unpaid requests get a
-`402` with x402 v2 `PAYMENT-REQUIRED` terms; paid requests are verified and
-settled via the facilitator, then served with a `PAYMENT-RESPONSE` receipt.
-
-One call returns a composite Minneapolis rental-compliance snapshot from live
-City of Minneapolis Open Data: active rental license (status, tier, licensed
-units, expiration, ward/neighborhood), regulatory violation case history
-(APN-joined), and condemned/boarded status. Owner phone/email in the source
-data are intentionally never served. Public records, as-is; not legal advice.
-
+One call returns a composite rental/code compliance snapshot from live city open data (license/registration status, violation history, and related fields as available per jurisdiction). Owner phone/email in source data are intentionally never served. Public records, as-is; not legal advice. Full city list: [docs/CITY-NETWORK.md](docs/CITY-NETWORK.md).
 ## MCP Tools
 
 | Tool | Description |

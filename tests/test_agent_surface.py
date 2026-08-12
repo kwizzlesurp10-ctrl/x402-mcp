@@ -51,6 +51,11 @@ def test_llms_txt_is_plain_text_with_live_prices() -> None:
     assert "PAYMENT-SIGNATURE" in response.text
     # Free MN sample is advertised so agents can verify quality before paying.
     assert "/mn/property-check/sample" in response.text
+    # Canonical Visit / Resource URLs for Gold402 / 24K / scanners.
+    base = settings.public_base_url.rstrip("/")
+    assert f"{base}/us/cities" in response.text
+    assert f"{base}/us/sea/property-check" in response.text
+    assert f"{base}/us/sea/property-check/sample" in response.text
 
 
 def test_llms_txt_documents_failure_modes_not_just_the_happy_path() -> None:

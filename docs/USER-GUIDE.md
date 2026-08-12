@@ -46,8 +46,17 @@ The buyer side needs a funded wallet (`EVM_PRIVATE_KEY`). That is exactly why th
 
 ### The seller side
 
-The same server sells. `build_seller_requirements` mints the `402` challenge for your own endpoint; `verify_payment_payload` checks a buyer's payload with the facilitator. Two first-party endpoints are live as worked examples: `GET /mn/property-check?address=...` at $0.01 (a Minneapolis rental-compliance snapshot composed from live city open data) and `GET /swarm/products/{id}/purchase` at $0.25 (Base Network Pulse — settlement-conditions intelligence computed from real RPC and spot data). All sales settle to `X402_PAY_TO_ADDRESS`; the seller host never holds a spend key.
+The same server sells. `build_seller_requirements` mints the `402` challenge for your own endpoint; `verify_payment_payload` checks a buyer's payload with the facilitator.
 
+**Canonical Visit / Resource URLs** for directories (Gold402 / 24K / scanners) — always the storefront host, never Mission Control SPA:
+
+| Role | URL |
+| --- | --- |
+| Catalog | https://x402-mcp.onrender.com/us/cities |
+| Paid example | https://x402-mcp.onrender.com/us/sea/property-check |
+| Free sample | https://x402-mcp.onrender.com/us/sea/property-check/sample |
+
+Also live: `GET /mn/property-check?address=...` at $0.01 (Minneapolis legacy path) and `GET /swarm/products/{id}/purchase` at $0.25 (Base Network Pulse). All sales settle to `X402_PAY_TO_ADDRESS`; the seller host never holds a spend key. See [CITY-NETWORK.md](CITY-NETWORK.md).
 Above both sides sits a commerce overlay (`app/commerce.py`): free tier at 500 calls/month and 10/min, a pro tier and per-use credits purchasable over x402 or Stripe, and a `meta` envelope on every tool response reporting quota. `app/swarm/` closes the loop — it buys cheap upstream services, composes a priced composite, and lists it for resale.
 
 ### Who this is for
@@ -353,17 +362,19 @@ return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
 
 Two details worth copying. First, gate on `payment_settled`, not just `is_valid` — verification passing only means the signature was well-formed; `SettleResponse.success` is what proves funds moved. Second, the `PAYMENT-RESPONSE` header carries the settlement receipt back to the buyer; the composite purchase endpoint additionally sets `Access-Control-Expose-Headers: PAYMENT-REQUIRED,PAYMENT-RESPONSE` so browser clients can read them.
 
-Try the unpaid half against the live storefront:
+Try the unpaid half against the live storefront (canonical paid example is Seattle):
 
 ```bash
-curl -i "https://x402-mcp.onrender.com/mn/property-check?address=1700%20Penn%20Ave%20N"
+curl -s https://x402-mcp.onrender.com/us/cities | head
+curl -i "https://x402-mcp.onrender.com/us/sea/property-check/sample"   # free sample
+curl -i "https://x402-mcp.onrender.com/us/sea/property-check?address=test"
 # HTTP/1.1 402  +  PAYMENT-REQUIRED: <base64>
 ```
 
 Decode that header with the buyer-side probe (no wallet needed) to see exactly what you published:
 
 ```bash
-.venv/Scripts/python -c "import asyncio,json;from app.models import GetPaymentRequirementsInput as I;from app import x402_services as x;print(json.dumps(asyncio.run(x.get_payment_requirements(I(url='https://x402-mcp.onrender.com/mn/property-check?address=1700 Penn Ave N'))),indent=2))"
+.venv/Scripts/python -c "import asyncio,json;from app.models import GetPaymentRequirementsInput as I;from app import x402_services as x;print(json.dumps(asyncio.run(x.get_payment_requirements(I(url='https://x402-mcp.onrender.com/us/sea/property-check?address=test'))),indent=2))"
 ```
 
 ### Pricing
@@ -373,11 +384,11 @@ Prices are plain dollar strings (`"$0.01"`), configured per product in `app/conf
 | Setting | Default | Sells |
 | --- | --- | --- |
 | `X402_DEFAULT_PRICE` | `$0.01` | fallback price |
+| `CITY_NETWORK_PRICE` | `$0.01` | `/us/{code}/property-check` (catalog: `/us/cities`) |
 | `MN_PROPERTY_CHECK_PRICE` | `$0.01` | `/mn/property-check` |
 | `PULSE_PRICE` | `$0.25` | `/swarm/products/{id}/purchase` |
 | `PRO_TIER_PRICE` | `$29.00` | MCP pro tier |
 | `TOOL_CREDIT_PACK_PRICE` | `$1.00` | 100 tool credits |
-
 Network choice matters as much as the number. `SWARM_SELL_NETWORK` decides where composites list. For the commerce paths, `resolve_revenue_network()` picks `REVENUE_NETWORK` if set, else the first entry in `CDP_NETWORKS` when CDP creds exist, else `X402_DEFAULT_NETWORK` — deliberately, so a mainnet-credentialed deploy can't hand out real quota for free Sepolia USDC just because the default network is Sepolia.
 
 One non-obvious constraint: **descriptions are clamped to 500 characters** (`CDP_MAX_DESCRIPTION_CHARS`). The CDP facilitator rejects both verify *and* settle above that, so a long description silently breaks revenue, not just discovery. The clamp is central and logs a warning when it fires.

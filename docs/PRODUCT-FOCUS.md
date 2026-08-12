@@ -3,6 +3,16 @@
 **Decided 2026-08-02, from `/demand` rather than from opinion.** Read this before
 building anything new on a paid endpoint.
 
+**Directory / marketing Visit URLs (do not use Mission Control SPA):**
+
+| Role | URL |
+|------|-----|
+| Catalog | https://x402-mcp.onrender.com/us/cities |
+| Paid example | https://x402-mcp.onrender.com/us/sea/property-check |
+| Free sample | https://x402-mcp.onrender.com/us/sea/property-check/sample |
+
+See [CITY-NETWORK.md](CITY-NETWORK.md).
+
 ## The measurement
 
 `app/demand.py` counts 402 challenges served per resource against sales settled,

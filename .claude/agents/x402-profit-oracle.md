@@ -137,8 +137,15 @@ After adding **any** route:
 .venv\Scripts\python.exe -m pytest tests/test_openapi_discovery.py::test_the_operator_surface_is_not_published tests/test_openapi_discovery.py::test_a_new_route_is_private_by_default -q
 ```
 
-Live probes that move no money (the header keeps them out of the funnel):
+Live probes that move no money (the header keeps them out of the funnel).
+Canonical Visit / Resource URLs for marketing and directories:
+Catalog `https://x402-mcp.onrender.com/us/cities`, paid example
+`https://x402-mcp.onrender.com/us/sea/property-check`, free sample
+`https://x402-mcp.onrender.com/us/sea/property-check/sample`.
+Never advertise Mission Control SPA hosts as the Resource URL.
 ```
+curl.exe -s "https://x402-mcp.onrender.com/us/cities"                                                                   # free catalog
+curl.exe -s -o NUL -w "%{http_code}\n" -H "x-demand-ignore: 1" "https://x402-mcp.onrender.com/us/sea/property-check" # must be 402
 curl.exe -s -o NUL -w "%{http_code}\n" -H "x-demand-ignore: 1" "https://x402-mcp.onrender.com/mn/property-check"   # must be 402
 curl.exe -s "https://x402-mcp.onrender.com/health"                                                                 # wallet_configured must be false
 ```

@@ -2,6 +2,23 @@
 
 Multi-city paid x402 product under `/us/{code}/property-check`.
 
+## Canonical Visit / Resource URLs
+
+Use these absolute storefront URLs in Gold402, 24K Labs, Bazaar, MCP marketing, and agent docs. **Do not** list Mission Control (`x402-mission-control.vercel.app` or other SPA hosts) as the Resource URL — those serve the React shell only and do not proxy payment-gated APIs.
+
+| Role | URL |
+|------|-----|
+| **Catalog** | https://x402-mcp.onrender.com/us/cities |
+| **Paid example** (Seattle RRIO) | https://x402-mcp.onrender.com/us/sea/property-check |
+| **Free sample** (Seattle) | https://x402-mcp.onrender.com/us/sea/property-check/sample |
+
+Related machine surfaces on the same host:
+
+- OpenAPI: https://x402-mcp.onrender.com/openapi.json
+- `llms.txt`: https://x402-mcp.onrender.com/llms.txt
+- `/.well-known/x402`: https://x402-mcp.onrender.com/.well-known/x402
+- MCP remote: https://x402-mcp.onrender.com/mcp/mcp
+
 ## Cities (v1–v2)
 
 | Code | City | State | Open data focus |
@@ -35,7 +52,10 @@ Oakland rental list (403 non-tabular), Cincinnati code (coords only), many ArcGI
 | GET | `/us/{code}/property-check/sample` | free fixed-address sample |
 | GET | `/us/{code}/property-check?address=` | `$0.01` USDC on Base (`city_network_price`) |
 
-Minneapolis **canonical** path remains `/mn/property-check` (unchanged).  
+**Public directory Visit URL** for the network product is always the catalog  
+(`https://x402-mcp.onrender.com/us/cities`), with Seattle as the paid/sample example.
+
+Minneapolis **legacy** path remains `/mn/property-check` (unchanged).  
 Network path `/us/mn/property-check` is a uniform-envelope alias for catalog agents.
 
 ## Wire protocol

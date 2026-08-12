@@ -7,7 +7,7 @@
     "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
     "source": "github"
   },
-  "websiteUrl": "https://x402-mcp.onrender.com",
+  "websiteUrl": "https://x402-mcp.onrender.com/us/cities",
   "remotes": [
     {
       "type": "streamable-http",
