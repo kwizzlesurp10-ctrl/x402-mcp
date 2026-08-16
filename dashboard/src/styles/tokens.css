@@ -187,12 +187,6 @@ button:active:not(:disabled) {
   transform: translateY(0);
 }
 
-@media (max-width: 768px) {
-  .hide-mobile {
-    display: none !important;
-  }
-}
-
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -200,6 +194,158 @@ textarea:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--neon-cyan);
   outline-offset: 2px;
+}
+
+/* Touch-friendly defaults (kept subtle on desktop) */
+button,
+select,
+input[type="checkbox"],
+label {
+  touch-action: manipulation;
+}
+
+/* ── Mobile summary view (UI-HANDOFF P2 #19: ≤768px) ──
+   Keep: mission progress + hero stats + activity stream.
+   Collapse 12-col grid to single column; tighten chrome. */
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
+  }
+
+  .show-mobile {
+    display: initial !important;
+  }
+
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  body {
+    /* iOS notch / home-indicator safe areas */
+    padding-left: env(safe-area-inset-left, 0);
+    padding-right: env(safe-area-inset-right, 0);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .grid-12 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Override inline span-N styles so every cell is full-width */
+  .grid-12 > * {
+    grid-column: 1 / -1 !important;
+    min-width: 0;
+  }
+
+  .panel {
+    padding: 14px 14px;
+    border-radius: 10px;
+  }
+
+  .panel:hover {
+    /* Avoid hover lift jank on touch */
+    transform: none;
+    box-shadow: var(--glass-shadow), var(--glass-inset);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  /* App chrome */
+  .mc-header {
+    margin: 10px 10px 0 !important;
+    padding: 12px 14px !important;
+    gap: 10px !important;
+    align-items: flex-start !important;
+  }
+
+  .mc-header-brand {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+
+  .mc-header-brand strong {
+    font-size: 16px !important;
+  }
+
+  .mc-header-actions {
+    width: 100%;
+    gap: 8px !important;
+  }
+
+  .mc-header-actions button,
+  .mc-header-actions select {
+    min-height: 36px;
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+  }
+
+  /* Compact mode badge label on small screens */
+  .mc-mode-badge .mc-mode-full {
+    display: none;
+  }
+
+  .mc-mode-badge .mc-mode-short {
+    display: inline !important;
+  }
+
+  .mc-mission {
+    margin: 10px 10px 0 !important;
+    padding: 12px 14px !important;
+  }
+
+  .mc-mission-bar {
+    width: 80px !important;
+  }
+
+  .mc-ticker-wrap {
+    padding: 0 10px !important;
+  }
+
+  /* Modals / dialogs — never wider than viewport */
+  .mc-modal-panel {
+    width: min(520px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: min(85vh, calc(100dvh - 24px - env(safe-area-inset-bottom, 0px))) !important;
+    margin: 12px !important;
+  }
+
+  .mc-palette-panel {
+    width: min(440px, calc(100vw - 24px)) !important;
+    margin: 12vh auto 0 !important;
+  }
+
+  /* Hero numeral scales down a bit on narrow screens */
+  #panel-hero .mono {
+    font-size: clamp(24px, 8vw, 32px) !important;
+  }
+
+  /* Activity list uses more of the viewport on phones */
+  #panel-activity ul {
+    max-height: min(50vh, 360px) !important;
+  }
+
+  .mc-operator-header {
+    padding: 10px 12px !important;
+    gap: 10px !important;
+  }
+
+  footer {
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    font-size: 11px !important;
+  }
+}
+
+/* Desktop-only helper (hidden on mobile via hide-mobile; shown by default) */
+.show-mobile {
+  display: none;
+}
+
+.mc-mode-badge .mc-mode-short {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

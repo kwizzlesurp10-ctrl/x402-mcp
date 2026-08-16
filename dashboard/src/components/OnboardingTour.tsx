@@ -26,7 +26,7 @@ export function OnboardingTour({ onDone }: { onDone: () => void }) {
       role="dialog"
       aria-label="Onboarding tour"
     >
-      <div className="panel" style={{ width: 400 }}>
+      <div className="panel mc-modal-panel" style={{ width: 400 }}>
         <p style={{ color: "var(--text-muted)", margin: 0 }}>
           Step {step + 1} of {STEPS.length}
         </p>

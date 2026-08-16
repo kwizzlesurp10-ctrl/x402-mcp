@@ -28,6 +28,7 @@ export function OperatorHeader({
 
   return (
     <div
+      className="mc-operator-header"
       style={{
         background: "var(--panel-2)",
         borderBottom: "1px solid var(--line)",

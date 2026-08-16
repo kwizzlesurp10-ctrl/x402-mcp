@@ -229,9 +229,28 @@ body {
   }
 }
 
-/* Responsive */
+/* Responsive — keep in sync with styles/tokens.css mobile summary view */
 @media (max-width: 768px) {
   .hide-mobile {
     display: none !important;
   }
+
+  .show-mobile {
+    display: initial !important;
+  }
+
+  .grid-12 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .grid-12 > * {
+    grid-column: 1 / -1 !important;
+    min-width: 0;
+  }
+}
+
+.show-mobile {
+  display: none;
 }

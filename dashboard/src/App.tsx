@@ -350,7 +350,7 @@ export default function App() {
         onRetry={reconnect}
       />
       <div
-        className="panel"
+        className="panel mc-header"
         style={{
           margin: "0 16px 16px 16px",
           display: "flex",
@@ -362,9 +362,18 @@ export default function App() {
           background: "linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(6, 9, 14, 0.9) 100%)",
         }}
       >
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="mc-header-actions" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div
+            className="mc-mode-badge"
+            role="button"
+            tabIndex={0}
             onClick={() => setDemo((d) => !d)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setDemo((d) => !d);
+              }
+            }}
             title={
               demo
                 ? "Currently in Public Ecosystem Showcase Mode. Click to switch to Private Operator Terminal."
@@ -394,7 +403,8 @@ export default function App() {
                 boxShadow: demo ? "0 0 8px #F59E0B" : "0 0 8px #00F0FF",
               }}
             />
-            {demo ? "🌐 Public Ecosystem Showcase" : "🛡️ Private Operator Terminal"}
+            <span className="mc-mode-full">{demo ? "🌐 Public Ecosystem Showcase" : "🛡️ Private Operator Terminal"}</span>
+            <span className="mc-mode-short">{demo ? "🌐 Showcase" : "🛡️ Operator"}</span>
           </div>
 
           <label style={{ fontSize: 13, color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
@@ -424,19 +434,19 @@ export default function App() {
             <option value="operator">Operator</option>
           </select>
           <button type="button" onClick={() => setWizardOpen(true)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#fff", padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
-            Setup wizard
+            Setup
           </button>
           <button type="button" onClick={() => setSellerOpen(true)} style={{ background: "linear-gradient(135deg, var(--neon-cyan), var(--base))", border: "none", color: "#000", fontWeight: 700, padding: "6px 16px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
-            Sell something
+            Sell
           </button>
-          <button type="button" onClick={() => setPaletteOpen(true)} className="mono" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--text-muted)", padding: "6px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
+          <button type="button" onClick={() => setPaletteOpen(true)} className="mono hide-mobile" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--text-muted)", padding: "6px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
             ⌘K
           </button>
           <button type="button" onClick={() => setMissionOpen((v) => !v)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#fff", padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
             Mission
           </button>
-          <button type="button" onClick={() => setTourOpen(true)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#fff", padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
-            Show me around
+          <button type="button" onClick={() => setTourOpen(true)} className="hide-mobile" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#fff", padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
+            Tour
           </button>
         </div>
       </div>
@@ -457,7 +467,7 @@ export default function App() {
           role="dialog"
           aria-label="Setup wizard"
         >
-          <div className="panel" style={{ width: 520, maxHeight: "80vh", overflow: "auto" }}>
+          <div className="panel mc-modal-panel" style={{ width: 520, maxHeight: "80vh", overflow: "auto" }}>
             <h2>First-run setup</h2>
             <p style={{ color: "var(--text-muted)" }}>Complete these checks before going live.</p>
             <ul style={{ listStyle: "none", padding: 0 }}>
@@ -487,18 +497,21 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ padding: "0 16px" }}>
+      <div className="mc-ticker-wrap hide-mobile" style={{ padding: "0 16px" }}>
         <FoundationTicker />
       </div>
 
       <main className="grid-12">
-        <div style={{ gridColumn: "span 12" }}>
+        <div className="hide-mobile" style={{ gridColumn: "span 12" }}>
           <ParallaxProtocolHero />
         </div>
 
-        <ChainDistributionBar density={density} />
-        <BazaarResourceExplorer density={density} />
-        <FacilitatorLeaderboard density={density} />
+        <div className="hide-mobile" style={{ display: "contents" }}>
+          <ChainDistributionBar density={density} />
+          <BazaarResourceExplorer density={density} />
+          <FacilitatorLeaderboard density={density} />
+        </div>
+
         <section id="panel-hero" className="panel" style={{ gridColumn: "span 3" }}>
           <h3>
             {density === "guided" ? "Money left after costs" : "Net position"}
@@ -529,14 +542,8 @@ export default function App() {
           )}
         </section>
 
-        <section id="panel-wallet" className="panel hide-mobile" style={{ gridColumn: "span 3" }}>
-          <h3>
-            Wallet <PanelHelp term="atomic units" title="Wallet" />
-          </h3>
-          <WalletPanel wallet={wallet} density={density} />
-        </section>
-
-        <section className="panel hide-mobile" style={{ gridColumn: "span 3" }}>
+        {/* Compact quota stays on mobile as a second hero stat */}
+        <section className="panel" style={{ gridColumn: "span 3" }}>
           <h3>
             Quota <PanelHelp term="quota" title="Quota" />
           </h3>
@@ -564,6 +571,13 @@ export default function App() {
           )}
         </section>
 
+        <section id="panel-wallet" className="panel hide-mobile" style={{ gridColumn: "span 3" }}>
+          <h3>
+            Wallet <PanelHelp term="atomic units" title="Wallet" />
+          </h3>
+          <WalletPanel wallet={wallet} density={density} />
+        </section>
+
         <section className="panel hide-mobile" style={{ gridColumn: "span 3" }}>
           <h3>
             Rate <PanelHelp term="quota" title="Rate limit" />
@@ -572,11 +586,12 @@ export default function App() {
           <div className="mono">{stats?.agents[0]?.rate_limit_remaining ?? "—"} / min left</div>
         </section>
 
-        <OsHealthPanel os={os} />
+        <div className="hide-mobile" style={{ display: "contents" }}>
+          <OsHealthPanel os={os} />
+          <ActiveStorefront products={products} revenueRows={revenue} activityEvents={activity} />
+        </div>
 
-        <ActiveStorefront products={products} revenueRows={revenue} activityEvents={activity} />
-
-        <section className="panel" style={{ gridColumn: "span 8" }}>
+        <section id="panel-activity" className="panel" style={{ gridColumn: "span 8" }}>
           <h3>Activity</h3>
           {activity.length === 0 ? (
             <EmptyPanel title="Quiet" action="Tool calls appear here via SSE." />
@@ -607,8 +622,10 @@ export default function App() {
 
         {density === "operator" && (
           <>
-            <PulsePanel pulse={pulse} />
-            <SwarmActivity events={activity} products={products} revenue={swarmRevenue ?? undefined} />
+            <div className="hide-mobile" style={{ display: "contents" }}>
+              <PulsePanel pulse={pulse} />
+              <SwarmActivity events={activity} products={products} revenue={swarmRevenue ?? undefined} />
+            </div>
             <section id="panel-spend" className="panel hide-mobile" style={{ gridColumn: "span 6" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <h3 style={{ margin: 0 }}>Spend ledger</h3>
