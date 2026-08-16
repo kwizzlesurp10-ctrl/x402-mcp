@@ -72,6 +72,25 @@ check_us_city_property(city_code="mn", address="1700 Penn Ave N")
 A2A Agent Card skills under `/.well-known/agent.json` (see `app/agent_surface.py`)
 advertise the same HTTP interfaces; MCP tool names are the Cursor/stdio entry.
 
+**Agent cheat sheet:** [examples/us-city-agent-path.md](examples/us-city-agent-path.md)
+
+### Operator: sample health + keepalive
+
+```bash
+# Free reliability probe (catalog + every /sample)
+.venv/bin/python scripts/probe_city_samples.py
+
+# Keepalive plan (dry-run). City/MN only — never Pulse or /base/tx-decision.
+# Skips resources with 0 external sales once challenges ≥ 600 (override: --force).
+.venv/bin/python scripts/city_keepalive.py
+
+# Local buyer only (never put EVM_PRIVATE_KEY on Render):
+BUYER_ENV=/home/keef/secrets/x402-buyer.env \
+  .venv/bin/python scripts/city_keepalive.py --execute
+```
+
+Read `GET /demand` → `sales_external` before paying keepalive. Operator settles are not demand.
+
 ## Config
 
 - `CITY_NETWORK_PRICE` / `city_network_price` (default `$0.01`)
