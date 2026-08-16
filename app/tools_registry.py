@@ -104,6 +104,24 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "process signals with an ok/warn/critical health verdict",
         "tier": "free",
     },
+    {
+        "name": "list_us_cities",
+        "description": "US City Open-Data Compliance Network catalog "
+        "(codes, paid_url, sample_url, golden path)",
+        "tier": "free",
+    },
+    {
+        "name": "get_us_city_property_sample",
+        "description": "Free fixed-address property compliance sample for one US city",
+        "tier": "free",
+    },
+    {
+        "name": "check_us_city_property",
+        "description": "Paid US city property compliance check via x402 "
+        "(pay_and_fetch on /us/{code}/property-check)",
+        "tier": "free",
+        "requires_env": ["EVM_PRIVATE_KEY"],
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)

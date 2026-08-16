@@ -69,6 +69,15 @@ async def us_city_sample(city_code: str) -> JSONResponse:
             "paid_endpoint": gate.resource_url(spec),
             "price": gate.price_for(spec),
             "report": report,
+            "next": {
+                "paid_url": gate.resource_url(spec),
+                "mcp_tool": "check_us_city_property",
+                "mcp_args": {
+                    "city_code": spec.code,
+                    "address": "<street address 1-120 chars>",
+                },
+                "http": f"{gate.resource_url(spec)}?address=<url-encoded street>",
+            },
         }
     )
 
@@ -138,7 +147,9 @@ async def us_city_property_check(
                 "how_to_pay": (
                     "Retry with PAYMENT-SIGNATURE header (x402 v2); requirements "
                     "are in the PAYMENT-REQUIRED response header. Free fixed-address "
-                    f"sample (no payment): GET {gate.sample_url(spec)}."
+                    f"sample (no payment): GET {gate.sample_url(spec)}. "
+                    "MCP golden path: list_us_cities → get_us_city_property_sample → "
+                    "check_us_city_property (or pay_and_fetch on this resource URL)."
                 ),
             },
         )

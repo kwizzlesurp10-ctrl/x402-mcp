@@ -9,13 +9,14 @@ Production MCP server for the [x402](https://x402.org) HTTP micropayment protoco
 | Product | Price | What you get |
 |---------|-------|--------------|
 | `GET /mn/property-check?address=…` | $0.01 USDC | Minneapolis rental-compliance snapshot composed from 3 live City of Minneapolis open datasets — the first machine-payable housing-compliance data for agents |
+| `GET /us/{code}/property-check?address=…` | $0.01 USDC | **US City Open-Data Compliance Network** (14 jurisdictions) — same wire protocol; free catalog `/us/cities` + free `/sample`; MCP: `list_us_cities` → `get_us_city_property_sample` → `check_us_city_property` |
 | `GET /swarm/products/{id}/purchase` | $0.25 USDC | Base Network Pulse: live settlement-conditions intelligence (EIP-1559 math + real RPC + ETH spot), listed with the x402 Bazaar discovery extension |
 
 The public seller host holds **no spend key** — it only verifies and settles inbound payments ([docs/SELLER-STOREFRONT.md](docs/SELLER-STOREFRONT.md)). Roadmap: [ROADMAP.md](ROADMAP.md).
 
 ## Features
 
-- **16 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **19 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, US city compliance, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
 - **x402/Coinbase rail** (primary): x402 v2 wire format end to end — challenge generation, verify + settle via the CDP facilitator on Base mainnet, Bazaar discoverability on listings
 - **Stripe payment rail** (fiat alternative): `create_stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
@@ -93,6 +94,9 @@ data are intentionally never served. Public records, as-is; not legal advice.
 | `swarm_revenue_report` | Portfolio revenue intelligence: spend, revenue, LTV:CAC, margins, per-source profit scores |
 | `get_base_pulse` | Live Base Network Pulse: synthesized settlement-conditions intelligence (base fee, utilization, USD cost, verdict) from real RPC data |
 | `get_os_metrics` | Host OS telemetry: CPU, memory, swap, disk, network, and process signals with an ok/warn/critical health verdict |
+| `list_us_cities` | Free US City Open-Data Compliance catalog (codes, paid_url, sample_url, MCP golden path) |
+| `get_us_city_property_sample` | Free fixed-address property compliance sample for one city code |
+| `check_us_city_property` | Paid city property compliance via x402 (same HTTP resource external buyers use) |
 
 ## Environment
 

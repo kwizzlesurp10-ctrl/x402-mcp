@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
+from app.tools_registry import TOOL_COUNT
 
 
 def _base() -> str:
@@ -243,7 +244,7 @@ def llms_txt() -> str:
         "## Machine surfaces",
         "",
         f"- x402 manifest: {base}/.well-known/x402",
-        f"- MCP manifest:  {base}/.well-known/mcp (16 tools, Streamable HTTP at /mcp/mcp)",
+        f"- MCP manifest:  {base}/.well-known/mcp ({TOOL_COUNT} tools, Streamable HTTP at /mcp/mcp)",
         f"- A2A Agent Card: {base}/.well-known/agent-card.json",
         f"- Health: {base}/health · Checks: {base}/doctor · Ops: {base}/dashboard",
         "",
@@ -287,7 +288,8 @@ def agent_card() -> dict[str, Any]:
                 "Free machine-readable catalog of multi-city US property compliance "
                 f"endpoints. Returns network=us-city-open-data-compliance, price, "
                 f"CAIP-2 {network}, and per-city paid_url, sample_url, sample_address, "
-                "sources_label, and tags. No payment required."
+                "sources_label, and tags. No payment required. "
+                f"MCP tool: list_us_cities. HTTP: GET {base}/us/cities."
             ),
             "tags": [
                 "catalog",
@@ -317,7 +319,9 @@ def agent_card() -> dict[str, Any]:
                 f"Price: {price} USDC on {network} via x402 "
                 "(HTTP 402 + PAYMENT-SIGNATURE). Output: JSON compliance report "
                 "from city open data. Free fixed-address samples at "
-                "/us/{code}/property-check/sample without payment."
+                "/us/{code}/property-check/sample without payment. "
+                "MCP: get_us_city_property_sample then check_us_city_property "
+                "(or pay_and_fetch on paid_url)."
             ),
             "tags": [
                 "property",
@@ -343,7 +347,8 @@ def agent_card() -> dict[str, Any]:
             "description": (
                 "Free fixed-address sample report for any supported city code. "
                 "Same JSON shape as the paid property-check; no payment required. "
-                "Use for integration testing before paying for arbitrary addresses."
+                "Use for integration testing before paying for arbitrary addresses. "
+                "MCP tool: get_us_city_property_sample(city_code)."
             ),
             "tags": [
                 "sample",

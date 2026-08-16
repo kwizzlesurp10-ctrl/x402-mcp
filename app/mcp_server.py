@@ -53,6 +53,8 @@ mcp = FastMCP(
         "MCP server for x402 HTTP micropayments. Discover paid services, "
         "probe 402 payment requirements, pay-and-fetch protected resources, "
         "build/verify seller payment configs, and upgrade to Pro via x402. "
+        "US City Open-Data Compliance Network: list_us_cities → "
+        "get_us_city_property_sample → check_us_city_property (paid). "
         "Commerce meta included on every response."
     ),
     transport_security=_transport_security(),
@@ -382,6 +384,67 @@ async def get_os_metrics(
         agent_id,
         lambda _: _sync_result(
             os_monitor.get_os_metrics(include_processes=include_processes)
+        ),
+    )
+
+
+@mcp.tool()
+async def list_us_cities(agent_id: str | None = None) -> str:
+    """US City Open-Data Compliance Network catalog (free).
+
+    Lists supported city codes, paid_url, sample_url, sample_address, price,
+    and the MCP golden path: sample → paid check. Same product as GET /us/cities.
+    """
+    from app.city_compliance import mcp_tools as city_mcp
+
+    return await _execute_tool(
+        "list_us_cities", agent_id, lambda _: city_mcp.list_us_cities()
+    )
+
+
+@mcp.tool()
+async def get_us_city_property_sample(
+    city_code: str,
+    agent_id: str | None = None,
+) -> str:
+    """Free fixed-address property compliance sample for one US city.
+
+    Same JSON shape as the paid check. Use before paying to validate the city
+    code and response envelope. city_code examples: mn, sea, nyc, chi.
+    """
+    from app.city_compliance import mcp_tools as city_mcp
+
+    return await _execute_tool(
+        "get_us_city_property_sample",
+        agent_id,
+        lambda _: city_mcp.get_us_city_property_sample(city_code),
+    )
+
+
+@mcp.tool()
+async def check_us_city_property(
+    city_code: str,
+    address: str,
+    max_price_usdc: float | None = None,
+    preferred_network: str | None = None,
+    agent_id: str | None = None,
+) -> str:
+    """Paid US city property compliance check via x402 (same HTTP resource buyers use).
+
+    Settles USDC when EVM_PRIVATE_KEY is configured on this MCP host; otherwise
+    returns a 402 payment probe + how_to_pay handoff (no charge). Prefer
+    get_us_city_property_sample first for a free fixed-address shape check.
+    """
+    from app.city_compliance import mcp_tools as city_mcp
+
+    return await _execute_tool(
+        "check_us_city_property",
+        agent_id,
+        lambda _: city_mcp.check_us_city_property(
+            city_code,
+            address,
+            max_price_usdc=max_price_usdc,
+            preferred_network=preferred_network,
         ),
     )
 
