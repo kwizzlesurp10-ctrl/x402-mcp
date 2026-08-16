@@ -28,6 +28,10 @@ STRANGER = "0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09"
 def redis_ledger(monkeypatch):
     store = RedisLedgerStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(ledger_store, "ledger_store", store)
+    # Drop any prior 10s /ledger response cache so each test sees this store.
+    from app.main import invalidate_ledger_cache
+
+    invalidate_ledger_cache()
     return store
 
 

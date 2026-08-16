@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app import challenge_cache
+from app import challenge_cache, main as main_mod
 from app.config import settings
 from app.main import app
 
@@ -24,8 +24,10 @@ PAY_TO = "0xAB745e5F576667037696e78ba7dA28E193E4423D"
 @pytest.fixture(autouse=True)
 def _clean_cache():
     challenge_cache.clear()
+    main_mod._demo_paid_built.clear()
     yield
     challenge_cache.clear()
+    main_mod._demo_paid_built.clear()
 
 
 @pytest.fixture
@@ -101,33 +103,33 @@ def test_fingerprint_is_stable_for_identical_inputs() -> None:
     assert challenge_cache.fingerprint(**parts) == challenge_cache.fingerprint(**parts)
 
 
-async def test_stale_challenge_is_served_when_rebuild_fails() -> None:
-    """A stale 402 beats no 402."""
+def test_stale_challenge_is_served_when_rebuild_fails() -> None:
+    """A stale 402 beats no 402 (current API: name + fingerprint + sync builder)."""
     calls = {"n": 0}
 
-    async def _builder():
+    def _builder() -> str:
         calls["n"] += 1
         if calls["n"] == 1:
-            return {"header": "good"}
+            return "good"
         raise RuntimeError("facilitator down")
 
-    key = challenge_cache.fingerprint(x=1)
-    first = await challenge_cache.get_or_build(key, _builder, ttl_seconds=0)
-    second = await challenge_cache.get_or_build(key, _builder, ttl_seconds=0)
+    first = challenge_cache.get_or_build("demo-stale", "fp-a", _builder)
+    # Different fingerprint forces a rebuild attempt; failure serves last-known-good.
+    second = challenge_cache.get_or_build("demo-stale", "fp-b", _builder)
 
-    assert first == {"header": "good"}
-    assert second == {"header": "good"}
+    assert first == "good"
+    assert second == "good"
     assert calls["n"] == 2
 
 
-async def test_cold_start_failure_propagates() -> None:
+def test_cold_start_failure_propagates() -> None:
     """With nothing cached there is nothing honest to serve — the caller 503s."""
 
-    async def _builder():
+    def _builder() -> str:
         raise RuntimeError("facilitator down")
 
     with pytest.raises(RuntimeError):
-        await challenge_cache.get_or_build(challenge_cache.fingerprint(y=2), _builder)
+        challenge_cache.get_or_build("demo-cold", "fp-cold", _builder)
 
 
 # ---------- advertised resource URL ----------

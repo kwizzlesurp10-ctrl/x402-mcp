@@ -824,6 +824,92 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
     }
 
 
+async def build_payment_required_for_resource(
+    *,
+    resource_url: str,
+    description: str | None = None,
+    price: str | None = None,
+    network: str | None = None,
+    pay_to: str | None = None,
+    scheme: str = "exact",
+    include_bazaar: bool = True,
+) -> dict[str, Any]:
+    """Build PaymentRequired body + base64 PAYMENT-REQUIRED for a protected URL.
+
+    Used by GET /demo/paid (seller demo). Thin async wrapper over
+    build_seller_requirements so tests can monkeypatch this symbol.
+    """
+    from app.models import BuildSellerRequirementsInput
+
+    pay = pay_to or settings.x402_pay_to_address
+    if not pay:
+        raise ValueError("X402_PAY_TO_ADDRESS required for seller demo resource")
+
+    net = network or settings.x402_default_network
+    prc = price or settings.x402_default_price
+    desc = description or "Paid demo resource"
+
+    result = build_seller_requirements(
+        BuildSellerRequirementsInput(
+            network=net,
+            pay_to=pay,
+            price=prc,
+            scheme=scheme,
+            description=desc,
+            resource_url=resource_url,
+            mime_type="application/json",
+            discoverable=include_bazaar,
+            discovery_method="GET",
+            discovery_input_example={},
+            discovery_output_example={
+                "ok": True,
+                "secret": "x402-seller-demo-ok",
+                "payment_settled": True,
+            },
+            service_name="x402-seller-demo",
+            service_tags=["demo", "testnet", "x402"],
+        )
+    )
+    # Decode header back to a JSON-serialisable body for the 402 response payload.
+    payment_required_body: dict[str, Any]
+    try:
+        from x402.http import decode_payment_required_header
+
+        pr = decode_payment_required_header(result["payment_required_header"])
+        payment_required_body = (
+            pr.model_dump(by_alias=True, exclude_none=True)
+            if hasattr(pr, "model_dump")
+            else dict(pr)
+        )
+    except Exception:
+        payment_required_body = {
+            "error": "Payment required",
+            "x402Version": 2,
+        }
+
+    return {
+        "payment_required": payment_required_body,
+        "payment_required_header": result["payment_required_header"],
+        "requirements": result.get("requirements") or [],
+        "pay_to": pay,
+        "price": prc,
+        "network": net,
+    }
+
+
+async def verify_and_settle_from_headers(
+    payment_signature: str,
+    payment_required_header: str,
+) -> dict[str, Any]:
+    """Verify + settle a buyer PAYMENT-SIGNATURE against PAYMENT-REQUIRED."""
+    return await _verify_and_settle_payment(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required_header,
+        )
+    )
+
+
 def build_tool_credits_requirements(agent_id: str, credits: int) -> dict[str, Any]:
     """Build x402 payment requirements to purchase per-use MCP tool credits."""
     pay_to = settings.x402_pay_to_address

@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     # Mission-control dashboard: gate POST /seller/requirements (default read-only)
     dashboard_actions: bool = False
 
+    # Honour X-Forwarded-Host / X-Forwarded-Proto when building signed resource
+    # URLs for 402 challenges. Off by default: those headers land in a catalog
+    # once, so a caller must not choose them unless a trusted proxy is in front.
+    trust_forwarded_host: bool = False
+
     # Swarm Agency: buy cheap upstream x402 services, compose, resell the composite.
     swarm_enabled: bool = False
     swarm_markup: float = 3.0  # composite price = cost basis * markup
