@@ -5,12 +5,12 @@ import type { ProbeResponse } from "../types/api";
 
 interface InspectorProps {
   density: string;
-  demo: boolean;
+
 }
 
 type Tab = "probe" | "base64";
 
-export function Inspector({ density, demo }: InspectorProps) {
+export function Inspector({ density }: InspectorProps) {
   const [tab, setTab] = useState<Tab>("probe");
   const [url, setUrl] = useState("");
   const [method, setMethod] = useState("GET");

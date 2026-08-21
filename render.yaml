@@ -58,7 +58,7 @@ services:
       # commit. Lets /ledger/revenue and the dashboard tell a real external sale
       # apart from the operator paying itself.
       - key: OPERATOR_WALLETS
-        value: "0x67ffc9B439aE24B0f7C7cA837C4AdfAFA06F9d38"
+        value: "0x67ffc9B439aE24B0f7C7cA837C4AdfAFA06F9d38,0xc22c17Fca624dB679B2471f2Bb099E1E29a46209,0x9138fEA6e13a701694D4d598000Fc3c1dE3d594C"
       # --- seller-only posture ---
       - key: SWARM_ENABLED
         value: "false"        # no buyer role on a public box

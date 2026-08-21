@@ -228,6 +228,25 @@ def test_invalid_payment_returns_402(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["error"] == "payment_invalid"
 
 
+def test_malformed_signature_is_402_not_500(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Signed retry with un-decodable PAYMENT-SIGNATURE must not 500.
+
+    Production (2026-08-20) returned HTTP 500 internal_error for both a dummy
+    `e30=` payload and an SDK-signed pay_and_fetch, so agents never saw
+    payment_invalid. Decode/verify errors stay on the 402 path.
+    """
+    monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
+    response = client.get(
+        "/mn/property-check",
+        params={"address": "1700 Penn Ave N"},
+        headers={"PAYMENT-SIGNATURE": "e30="},  # base64("{}")
+    )
+    assert response.status_code == 402
+    body = response.json()
+    assert body["error"] == "payment_invalid"
+    assert body.get("invalid_reason")
+
+
 # ---- data layer against a mock ArcGIS backend -------------------------------
 
 _LICENSES = {

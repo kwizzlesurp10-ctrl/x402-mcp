@@ -47,6 +47,26 @@ async def test_pay_and_fetch_requires_wallet(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
+async def test_malformed_signature_returns_invalid_not_raise() -> None:
+    """Garbage PAYMENT-SIGNATURE must 402, not 500 — live Render 500'd on this."""
+    from app.models import VerifyPaymentInput
+
+    result = await x402_services._verify_and_settle_payment(
+        VerifyPaymentInput(payment_signature="e30=", payment_required="e30=")
+    )
+    assert result["is_valid"] is False
+    assert result["payment_settled"] is False
+    assert result["invalid_reason"]
+    assert result["invalid_reason"].startswith("malformed_payment")
+
+
+def test_buyer_cap_rounds_list_price_to_10000_atomic() -> None:
+    """int(0.01 * 1e6) truncates to 9999 on some platforms and refuses $0.01."""
+    assert x402_services.usdc_cap_atomic(0.01) == 10_000
+    assert x402_services.usdc_cap_atomic(0.02) == 20_000
+
+
+@pytest.mark.asyncio
 async def test_pay_and_fetch_price_cap_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     """max_price_usdc must surface as a clear refusal, not a raw SDK error."""
     from x402 import NoMatchingRequirementsError

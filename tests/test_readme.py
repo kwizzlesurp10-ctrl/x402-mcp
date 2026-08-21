@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.tools_registry import EXPECTED_TOOL_NAMES
+from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_COUNT
 
 EXPECTED_TOOLS = EXPECTED_TOOL_NAMES
 
@@ -12,10 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
 
 
-def test_readme_features_says_sixteen_tools() -> None:
+def test_readme_features_says_tool_count() -> None:
     text = README.read_text(encoding="utf-8")
-    assert "16 MCP tools" in text
-    assert "15 MCP tools" not in text
+    assert f"{TOOL_COUNT} MCP tools" in text
+    # Guard against stale adjacent counts left after a registry bump.
+    for n in range(TOOL_COUNT - 3, TOOL_COUNT + 3):
+        if n == TOOL_COUNT or n < 1:
+            continue
+        assert f"{n} MCP tools" not in text
 
 
 @pytest.mark.parametrize("tool_name", sorted(EXPECTED_TOOLS))

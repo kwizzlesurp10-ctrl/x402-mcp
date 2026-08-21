@@ -1,4 +1,5 @@
-const API = import.meta.env.VITE_API_BASE_URL || "";
+export const API_BASE = import.meta.env.VITE_PUBLIC_API_BASE_URL || "";
+export const API = import.meta.env.VITE_PUBLIC_API_BASE_URL || "";
 
 export type StatsResponse = {
   agents: Array<{
@@ -18,7 +19,21 @@ export type StatsResponse = {
     free_tier_monthly_quota: number;
     pro_tier_price: string;
     x402_default_network: string;
+    has_ownership_proofs?: boolean;
+    ownership_proofs_count?: number;
+    pay_to_address?: string;
   };
+};
+
+export type HealthResponse = {
+  status: string;
+  service: string;
+  x402_facilitator: string;
+  x402_facilitator_network: string;
+  wallet_configured: boolean;
+  stripe_configured: boolean;
+  pay_to_configured: boolean;
+  ownership_proofs_configured?: boolean;
 };
 
 export type DoctorCheck = {
@@ -30,6 +45,48 @@ export type DoctorCheck = {
 };
 
 export type LedgerRow = Record<string, unknown>;
+
+export type CityCatalogItem = {
+  code: string;
+  name: string;
+  state: string;
+  service_name: string;
+  price: string;
+  network: string;
+  paid_url: string;
+  sample_url: string;
+  sample_address: string;
+  sources_label: string;
+  tags: string[];
+  canonical_alias: string | null;
+};
+
+export type CityCatalog = {
+  network: string;
+  price: string;
+  network_caip2?: string;
+  cities: CityCatalogItem[];
+};
+
+export type DemandResource = {
+  resource: string;
+  challenges_served: number;
+  qualified_views: number;
+  sales_settled: number;
+  sales_in_window: number;
+  sales_external: number;
+  sales_operator: number;
+  sales_unknown: number;
+  revenue_usdc?: number;
+};
+
+export type DemandReport = {
+  resources: DemandResource[];
+  total_challenges_served?: number;
+  total_qualified_views?: number;
+  total_sales_external?: number;
+  total_sales_operator?: number;
+};
 
 export type SwarmProduct = {
   product_id: string;
@@ -127,6 +184,7 @@ export type WalletResponse = {
 };
 
 export const api = {
+  health: () => getJson<HealthResponse>("/health"),
   stats: () => getJson<StatsResponse>("/stats"),
   doctor: () => getJson<{ checks: DoctorCheck[]; summary: { ready: boolean; fail?: number } }>("/doctor"),
   ledgerSpend: () => getJson<LedgerRow[]>("/ledger/spend"),
@@ -136,6 +194,8 @@ export const api = {
   os: () => getJson<OsSnapshot>("/os"),
   swarmProducts: () => getJson<SwarmProduct[]>("/swarm/products"),
   swarmRevenue: () => getJson<SwarmRevenue>("/swarm/revenue"),
+  usCities: () => getJson<CityCatalog>("/us/cities"),
+  demand: () => getJson<DemandReport>("/demand"),
   probe: (url: string, method = "GET") =>
     getJson<Record<string, unknown>>(
       `/probe?url=${encodeURIComponent(url)}&method=${encodeURIComponent(method)}`,

@@ -1,4 +1,4 @@
-"""The machine-readable storefront surface: /llms.txt and /.well-known/x402.
+"""The machine-readable storefront surface: /llms.txt, /.well-known/x402, A2A agent card.
 
 Agents read these before paying — every high-demand x402 host documents for
 machines, not humans. Both documents are BUILT FROM LIVE CONFIG rather than
@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
+from app.tools_registry import TOOL_COUNT
 
 
 def _base() -> str:
@@ -123,12 +124,28 @@ def paid_resources() -> list[dict[str, Any]]:
             "price": settings.mn_property_check_price,
             "network": settings.x402_default_network,
             "name": "Minneapolis rental compliance",
-            "what": "One-call compliance_verdict (licensed_clean | "
-            "licensed_with_violations | unlicensed | condemned_or_boarded) plus "
-            "rental license status, violation history, and condemned/boarded "
-            "flag for a Minneapolis street address, from city open data. "
-            f"Free sample (fixed address): {base}/mn/property-check/sample.",
+            "what": "Is this Minneapolis MN rental licensed and code-compliant? "
+            "GET ?address= (1-120 chars) → compliance_verdict enum "
+            "licensed_clean|licensed_with_violations|unlicensed|condemned_or_boarded "
+            "plus license/violation/condemned fields from city open data. "
+            f"Free sample: {base}/mn/property-check/sample.",
             "params": {"address": "street address string, 1-120 chars (required)"},
+        },
+        {
+            "url": f"{base}/tasks/us-rental-diligence",
+            "method": "POST",
+            "price": settings.diligence_pack_price,
+            "network": settings.x402_default_network,
+            "name": "US Multi-City Rental Diligence Pack",
+            "what": "Screen up to 5 US rental addresses across the open-data city "
+            "network in one paid call. POST JSON "
+            "{properties:[{city_code,address}]}. Returns per-property "
+            "compliance reports + pack risk_summary. Single-address $0.01 "
+            f"tier remains at {base}/us/{{code}}/property-check.",
+            "params": {
+                "properties": "array of {city_code, address}, 1-5 items (required body)",
+                "include_base_pulse_context": "optional bool",
+            },
         },
         {
             "url": f"{base}/us/cities",
@@ -254,7 +271,8 @@ def llms_txt() -> str:
         "## Machine surfaces",
         "",
         f"- x402 manifest: {base}/.well-known/x402",
-        f"- MCP manifest:  {base}/.well-known/mcp (16 tools, Streamable HTTP at /mcp/mcp)",
+        f"- MCP manifest:  {base}/.well-known/mcp ({TOOL_COUNT} tools, Streamable HTTP at /mcp/mcp)",
+        f"- A2A Agent Card: {base}/.well-known/agent-card.json",
         f"- Health: {base}/health · Checks: {base}/doctor · Ops: {base}/dashboard",
         "",
         "## Operator",
@@ -265,3 +283,429 @@ def llms_txt() -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def agent_card() -> dict[str, Any]:
+    """A2A Protocol v1.0 Agent Card for ecosystem discovery.
+
+    Built from the live city registry and pricing config so skills cannot
+    drift from /us/cities. Advertises HTTP+JSON interfaces only — this host
+    is an x402 micropayment storefront, not a JSON-RPC A2A Task endpoint.
+    Streaming and push are disabled because they are not implemented.
+    """
+    base = _base()
+    try:
+        from app.city_compliance import registry
+    except Exception:  # pragma: no cover
+        cities: list[dict[str, Any]] = []
+    else:
+        cities = registry.list_cities()
+
+    codes = [c["code"] for c in cities]
+    codes_pipe = "|".join(codes) if codes else "mn"
+    # Prefer the network-wide city price when present; fall back to MN price.
+    price = getattr(settings, "city_network_price", None) or settings.mn_property_check_price
+    network = settings.x402_default_network
+
+    skills: list[dict[str, Any]] = [
+        {
+            "id": "us-cities-catalog",
+            "name": "US City Open-Data Compliance Catalog",
+            "description": (
+                "Free machine-readable catalog of multi-city US property compliance "
+                f"endpoints. Returns network=us-city-open-data-compliance, price, "
+                f"CAIP-2 {network}, and per-city paid_url, sample_url, sample_address, "
+                "sources_label, and tags. No payment required. "
+                f"MCP tool: list_us_cities. HTTP: GET {base}/us/cities."
+            ),
+            "tags": [
+                "catalog",
+                "discovery",
+                "us-cities",
+                "housing",
+                "compliance",
+                "open-data",
+                "x402",
+                "free",
+            ],
+            "examples": [
+                "List all US city property compliance endpoints",
+                "Which cities support rental compliance checks and at what price?",
+                f"GET {base}/us/cities",
+            ],
+            "inputModes": ["text/plain", "application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "us-city-property-check",
+            "name": "US City Property Compliance Check",
+            "description": (
+                f"Paid address-level open-data compliance report for one of "
+                f"{len(cities)} US jurisdictions. Input: city code "
+                f"({codes_pipe}) and street address (1-120 chars). "
+                f"Price: {price} USDC on {network} via x402 "
+                "(HTTP 402 + PAYMENT-SIGNATURE). Output: JSON compliance report "
+                "from city open data. Free fixed-address samples at "
+                "/us/{code}/property-check/sample without payment. "
+                "MCP: get_us_city_property_sample then check_us_city_property "
+                "(or pay_and_fetch on paid_url)."
+            ),
+            "tags": [
+                "property",
+                "compliance",
+                "rental",
+                "housing",
+                "violations",
+                "open-data",
+                "x402",
+                "usdc",
+                "base",
+            ],
+            "examples": [
+                f"Check Minneapolis rental license for 1700 Penn Ave N (city=mn)",
+                f"GET {base}/us/{{city_code}}/property-check?address={{street}}",
+            ],
+            "inputModes": ["text/plain", "application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "us-city-property-check-sample",
+            "name": "US City Property Compliance Sample (Free)",
+            "description": (
+                "Free fixed-address sample report for any supported city code. "
+                "Same JSON shape as the paid property-check; no payment required. "
+                "Use for integration testing before paying for arbitrary addresses. "
+                "MCP tool: get_us_city_property_sample(city_code)."
+            ),
+            "tags": [
+                "sample",
+                "free",
+                "property",
+                "compliance",
+                "open-data",
+                "x402",
+            ],
+            "examples": [
+                f"GET {base}/us/mn/property-check/sample",
+                f"GET {base}/us/sea/property-check/sample",
+                "Show the free Chicago sample compliance report (city=chi)",
+            ],
+            "inputModes": ["text/plain", "application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "us-rental-diligence-pack",
+            "name": "US Multi-City Rental Diligence Pack",
+            "description": (
+                f"Paid composite: screen 1–{getattr(settings, 'diligence_pack_max_properties', 5)} "
+                f"US rental addresses across the open-data city network in one call. "
+                f"POST JSON {{properties:[{{city_code,address}}]}} to "
+                f"{base}/tasks/us-rental-diligence at "
+                f"{getattr(settings, 'diligence_pack_price', '$1.50')} USDC on {network} (x402). "
+                "Returns per-property compliance reports plus pack risk_summary. "
+                "Single-address $0.01 checks remain at /us/{{code}}/property-check."
+            ),
+            "tags": [
+                "rental",
+                "compliance",
+                "multicity",
+                "housing",
+                "due-diligence",
+                "x402",
+                "usdc",
+                "composite",
+            ],
+            "examples": [
+                f"POST {base}/tasks/us-rental-diligence with two cities",
+                "Screen MN + SEA rental addresses in one paid pack",
+            ],
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+    ]
+
+    for c in cities:
+        code = c["code"]
+        sample_addr = c["sample_address"]
+        paid = c["paid_url"]
+        sample = c["sample_url"]
+        tags = list(
+            dict.fromkeys(
+                list(c.get("tags") or [])
+                + [code, c["name"].lower().replace(" ", ""), "compliance", "x402"]
+            )
+        )
+        skills.append(
+            {
+                "id": f"property-check-{code}",
+                "name": c["service_name"],
+                "description": (
+                    f"{c['service_name']} for {c['name']}, {c['state']}. "
+                    f"Source: {c['sources_label']}. "
+                    f"Paid: GET {paid}?address={{street}} at {c['price']} USDC "
+                    f"on {c['network']} (x402). Free sample: {sample} "
+                    f"(fixed address: {sample_addr})."
+                ),
+                "tags": tags,
+                "examples": [
+                    f"Check {c['name']} compliance for {sample_addr}",
+                    f"GET {paid}?address={sample_addr.replace(' ', '%20')}",
+                    f"Free sample: GET {sample}",
+                ],
+                "inputModes": ["text/plain", "application/json"],
+                "outputModes": ["application/json"],
+            }
+        )
+
+    return {
+        "name": "US City Open-Data Compliance (x402)",
+        "description": (
+            "Pay-per-call US multi-city property compliance agent. Discovers "
+            f"{len(cities)} open-data jurisdictions via free catalog "
+            f"{base}/us/cities; returns address-level rental/license/violation "
+            f"reports at {price} USDC on Base ({network}) using HTTP 402 "
+            "micropayments (x402 v2). No API key, no signup. Free samples at "
+            "/us/{city_code}/property-check/sample."
+        ),
+        "version": "0.1.0",
+        "protocolVersion": "1.0",
+        "provider": {
+            "organization": "x402-mcp",
+            "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
+        },
+        "documentationUrl": f"{base}/llms.txt",
+        "supportedInterfaces": [
+            {
+                "url": f"{base}/us/cities",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+            },
+            {
+                "url": f"{base}/us/{{city_code}}/property-check",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+            },
+            {
+                "url": f"{base}/tasks/us-rental-diligence",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+            },
+            {
+                "url": f"{base}/.well-known/x402",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+            },
+        ],
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+            "extendedAgentCard": False,
+        },
+        "defaultInputModes": ["text/plain", "application/json"],
+        "defaultOutputModes": ["application/json"],
+        "skills": skills,
+        "securitySchemes": {
+            "x402": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "PAYMENT-SIGNATURE",
+                "description": (
+                    f"x402 v2 micropayment on {network}. Unauthenticated GET "
+                    "returns HTTP 402 with PAYMENT-REQUIRED challenge (base64 "
+                    "JSON: amount, payTo, asset USDC, network). Client signs "
+                    "EIP-3009 transferWithAuthorization and retries with "
+                    "PAYMENT-SIGNATURE. Settlement is gasless for the buyer "
+                    f"(USDC required, not ETH). Catalog {base}/us/cities and "
+                    "all /sample endpoints require no payment. Authoritative "
+                    f"payment metadata: {base}/.well-known/x402"
+                ),
+            }
+        },
+        "security": [
+            {},
+            {"x402": []},
+        ],
+    }
+
+
+def agents_json() -> dict[str, Any]:
+    """Standard Agents Registry Schema (Agentic.Market / Open Agent Registry)."""
+    base = _base()
+    network = settings.x402_default_network
+    pay_to = settings.x402_pay_to_address or "0xAB745e5F576667037696e78ba7dA28E193E4423D"
+
+    try:
+        from app.city_compliance import registry
+
+        cities = registry.list_cities()
+    except Exception:
+        cities = []
+
+    city_price = getattr(settings, "city_network_price", None) or settings.mn_property_check_price
+
+    agents = [
+        {
+            "id": "us-rental-diligence",
+            "name": "US Multi-City Rental Diligence Pack",
+            "description": (
+                "Screen up to 5 US rental addresses across the open-data city network in one "
+                "paid composite call. Returns per-property compliance verdicts + pack risk summary."
+            ),
+            "url": f"{base}/tasks/us-rental-diligence",
+            "method": "POST",
+            "pricing": {
+                "amount": settings.diligence_pack_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": 1500000,
+            },
+            "protocols": ["x402-v2", "http-json"],
+            "tags": ["rental", "compliance", "multicity", "housing", "due-diligence", "x402", "usdc"],
+            "input_schema": {
+                "type": "object",
+                "required": ["properties"],
+                "properties": {
+                    "properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["city_code", "address"],
+                            "properties": {
+                                "city_code": {"type": "string", "description": "City code (e.g. mn, sea, nyc, chi)"},
+                                "address": {"type": "string", "description": "Street address"},
+                            },
+                        },
+                    },
+                    "include_base_pulse_context": {"type": "boolean", "default": False},
+                },
+            },
+        },
+        {
+            "id": "base-tx-decision",
+            "name": "Base Transaction Decision & Gas Optimizer",
+            "description": "Live Base RPC congestion, fee math (EIP-1559), and submit-or-wait execution guidance.",
+            "url": f"{base}/base/tx-decision",
+            "method": "GET",
+            "pricing": {
+                "amount": settings.tx_decision_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": 10000,
+            },
+            "protocols": ["x402-v2", "http-json"],
+            "tags": ["base", "crypto", "gas", "tx-optimizer", "x402", "usdc"],
+            "params": {
+                "gas": "eth|usdc|erc20|x402 or integer gas units",
+                "urgency": "now|soon|flexible",
+            },
+        },
+        {
+            "id": "base-finality-check",
+            "name": "Base Transaction Finality Check",
+            "description": "L1/L2 safe and finalized block tag verification for Base mainnet transactions.",
+            "url": f"{base}/base/finality-check",
+            "method": "GET",
+            "pricing": {
+                "amount": settings.finality_check_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": 10000,
+            },
+            "protocols": ["x402-v2", "http-json"],
+            "tags": ["base", "finality", "verification", "x402", "usdc"],
+            "params": {
+                "tx": "0x-prefixed 32-byte transaction hash",
+            },
+        },
+        {
+            "id": "us-city-compliance-network",
+            "name": "US City Open-Data Property Compliance Network",
+            "description": f"Address-level housing license, building violation, and code compliance checks across {len(cities)} US jurisdictions.",
+            "catalog_url": f"{base}/us/cities",
+            "method": "GET",
+            "pricing": {
+                "amount": city_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": 10000,
+            },
+            "protocols": ["x402-v2", "http-json"],
+            "tags": ["property", "compliance", "rental", "housing", "violations", "open-data", "x402"],
+            "jurisdictions": [c["code"] for c in cities],
+        },
+    ]
+
+    return {
+        "schema_version": "1.0.0",
+        "name": "x402 Micropayments & Agent Services",
+        "description": "Autonomous pay-per-call data services and MCP tool suite on Base mainnet.",
+        "homepage": base,
+        "documentation": f"{base}/llms.txt",
+        "provider": {
+            "name": "SEVTECH",
+            "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
+            "receive_address": pay_to,
+        },
+        "payment_networks": [network],
+        "settlement_address": pay_to,
+        "agents": agents,
+        "mcp": {
+            "manifest": f"{base}/.well-known/mcp",
+            "server_card": f"{base}/.well-known/mcp/server-card.json",
+            "streamable_http": f"{base}/mcp/mcp",
+            "sse": f"{base}/mcp/sse",
+        },
+        "agent_card": f"{base}/.well-known/agent-card.json",
+        "x402_manifest": f"{base}/.well-known/x402",
+        **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
+    }
+
+
+def mcp_server_card() -> dict[str, Any]:
+    """Remote MCP Server Card for Smithery.ai, Glama.ai, and MCP client indexing."""
+    base = _base()
+    from app.manifest import build_mcp_manifest
+
+    mcp_manifest = build_mcp_manifest()
+
+    return {
+        "serverInfo": {
+            "name": "io.github.kwizzlesurp10-ctrl/x402-mcp",
+            "title": "x402 Micropayments MCP",
+            "version": "0.1.0",
+            "description": (
+                "Pay-per-call HTTP APIs and MCP tools over x402: USDC on Base, "
+                "gasless settlement, US multi-city rental compliance diligence, "
+                "and Base gas/finality intelligence."
+            ),
+        },
+        "transport": {
+            "type": "streamable-http",
+            "url": f"{base}/mcp/mcp",
+            "sse_url": f"{base}/mcp/sse",
+        },
+        "authentication": {
+            "type": "x402",
+            "scheme": "EIP-3009",
+            "network": settings.x402_default_network,
+            "asset": "USDC",
+            "pay_to": settings.x402_pay_to_address or "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+        },
+        "capabilities": {
+            "tools": True,
+            "resources": False,
+            "prompts": False,
+        },
+        "tools": mcp_manifest["tools"],
+        "homepage": base,
+        "repository": {
+            "type": "git",
+            "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp.git",
+        },
+        "documentation": f"{base}/llms.txt",
+    }
+

@@ -2,7 +2,7 @@
 
 import type { LedgerRow } from "../types/api";
 
-export function ledgerToCsv(rows: LedgerRow[], name: string): string {
+export function ledgerToCsv(rows: LedgerRow[]): string {
   if (rows.length === 0) return "";
 
   const headers = ["ts", "amount_usdc", "amount_atomic", "network", "tx_hash", "agent_id", "status"];
@@ -22,7 +22,7 @@ export function ledgerToCsv(rows: LedgerRow[], name: string): string {
 }
 
 export function downloadCsv(rows: LedgerRow[], name: string): void {
-  const csv = ledgerToCsv(rows, name);
+  const csv = ledgerToCsv(rows);
   if (!csv) return;
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });

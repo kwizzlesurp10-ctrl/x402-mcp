@@ -36,7 +36,7 @@ HTTP has always had a status code nobody used: `402 Payment Required`. x402 fina
 
 ### MCP in one paragraph
 
-The Model Context Protocol is how an AI client (Cursor, Claude, a custom agent) discovers and calls tools on a server. Connect this server and the model gets 16 tools — the canonical list lives in `app/tools_registry.py`, which also generates the `/.well-known/mcp` manifest. That means "pay this endpoint" becomes something the model can decide to do mid-task, not something you hand-code into a client.
+The Model Context Protocol is how an AI client (Cursor, Claude, a custom agent) discovers and calls tools on a server. Connect this server and the model gets the tools declared in `app/tools_registry.py`, which also generates the `/.well-known/mcp` manifest. That means "pay this endpoint" becomes something the model can decide to do mid-task, not something you hand-code into a client.
 
 ### The buyer side
 
@@ -73,7 +73,7 @@ Goal: a locally running x402 storefront in under ten minutes, ending with a real
 
 ### What you're starting
 
-One FastAPI process (`app/main.py`) that is simultaneously an MCP server (16 tools, see `app/tools_registry.py`) and an HTTP storefront with x402-gated endpoints. There is also a React "Mission Control" dashboard in `dashboard/` — **skip it for now**. See [The light path vs. the heavy path](#the-light-path-vs-the-heavy-path) below.
+One FastAPI process (`app/main.py`) that is simultaneously an MCP server (tools from `app/tools_registry.py`) and an HTTP storefront with x402-gated endpoints. There is also a React "Mission Control" dashboard in `dashboard/` — **skip it for now**. See [The light path vs. the heavy path](#the-light-path-vs-the-heavy-path) below.
 
 ### 1. Clone and create the venv
 
@@ -162,7 +162,7 @@ curl http://127.0.0.1:8402/health
 curl http://127.0.0.1:8402/.well-known/mcp
 ```
 
-You get the manifest built from `app/tools_registry.py`, listing all 16 tools and the `stdio` / `streamable-http` / `sse` transports.
+You get the manifest built from `app/tools_registry.py`, listing every registered tool and the `stdio` / `streamable-http` / `sse` transports.
 
 **The one that actually proves x402 works** — hit a paid endpoint with no payment attached:
 
@@ -508,7 +508,7 @@ One caveat worth knowing before you debug it yourself: POSTing to `/mcp/mcp` on 
 
 ### The tools
 
-All 16 tools are declared in `app/tools_registry.py`, which is the single source of truth feeding the manifest, the README, and the guard tests. Every tool is `tier: "free"` — meaning it is included in the metered free tier rather than gated behind Pro. Some need environment variables to do anything useful; those are listed as `requires_env` in the manifest.
+All tools are declared in `app/tools_registry.py`, which is the single source of truth feeding the manifest, the README, and the guard tests. Every tool is `tier: "free"` — meaning it is included in the metered free tier rather than gated behind Pro. Some need environment variables to do anything useful; those are listed as `requires_env` in the manifest.
 
 Every tool also accepts an optional `agent_id` argument. Pass a stable one — if you omit it, `resolve_agent_id` mints a fresh UUID per call, so your quota, tier and purchased credits will not accumulate against a single identity.
 
@@ -530,8 +530,13 @@ Every tool also accepts an optional `agent_id` argument. Pass a stable one — i
 | `swarm_revenue_report` | Portfolio revenue intelligence: spend, revenue, LTV:CAC, margins, per-source profit scores | free | — |
 | `get_base_pulse` | Live Base Network Pulse — base fee, utilization, USD settlement cost, settle-now/hold verdict from real RPC data | free | — |
 | `get_os_metrics` | Host OS telemetry: CPU, memory, swap, disk, network, process signals with an ok/warn/critical verdict | free | — |
+| `list_us_cities` | US City Open-Data Compliance Network catalog (codes, paid_url, sample_url, golden path) | free | — |
+| `get_us_city_property_sample` | Free fixed-address property compliance sample for one city code | free | — |
+| `check_us_city_property` | Paid city property compliance via x402 (same HTTP resource external buyers use) | free | `EVM_PRIVATE_KEY` |
 
-Useful non-obvious arguments (from `app/mcp_server.py`): `discover_services` takes `query`, `limit`, `max_price_usdc`; `pay_and_fetch` takes `preferred_network` and `max_price_usdc` as a spend ceiling; `build_seller_requirements` takes `resource_url` plus `discovery_method` / `discovery_input_example` / `discovery_output_example` to embed the Bazaar discovery extension; `get_base_pulse` takes `depth`; `get_os_metrics` takes `include_processes`.
+Useful non-obvious arguments (from `app/mcp_server.py`): `discover_services` takes `query`, `limit`, `max_price_usdc`; `pay_and_fetch` takes `preferred_network` and `max_price_usdc` as a spend ceiling; `build_seller_requirements` takes `resource_url` plus `discovery_method` / `discovery_input_example` / `discovery_output_example` to embed the Bazaar discovery extension; `get_base_pulse` takes `depth`; `get_os_metrics` takes `include_processes`; city tools take `city_code` (`mn`, `sea`, …) and paid check takes `address` plus optional `max_price_usdc`.
+
+**City golden path:** `list_us_cities` → `get_us_city_property_sample` → `check_us_city_property` (or `pay_and_fetch` on `paid_url`). See [CITY-NETWORK.md](CITY-NETWORK.md).
 
 ### What comes back
 

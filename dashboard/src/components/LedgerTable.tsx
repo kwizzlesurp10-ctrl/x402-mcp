@@ -1,5 +1,5 @@
 import type { LedgerRow } from "../types/api";
-import { baseScanUrl, formatUsdcHuman, networkColor, networkLabel, relativeTime, truncateHash } from "../lib/format";
+import { baseScanUrl, formatUsdcHuman, networkLabel, relativeTime, truncateHash } from "../lib/format";
 
 interface LedgerTableProps {
   title: string;

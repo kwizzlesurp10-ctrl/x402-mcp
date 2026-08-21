@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     # Mission-control dashboard: gate POST /seller/requirements (default read-only)
     dashboard_actions: bool = False
 
+    # Honour X-Forwarded-Host / X-Forwarded-Proto when building signed resource
+    # URLs for 402 challenges. Off by default: those headers land in a catalog
+    # once, so a caller must not choose them unless a trusted proxy is in front.
+    trust_forwarded_host: bool = False
+
     # Swarm Agency: buy cheap upstream x402 services, compose, resell the composite.
     swarm_enabled: bool = False
     swarm_markup: float = 3.0  # composite price = cost basis * markup
@@ -167,6 +172,14 @@ class Settings(BaseSettings):
     # Includes Minneapolis (mn) as a network path; canonical MN product remains
     # /mn/property-check. Price shared across network cities unless overridden.
     city_network_price: str = "$0.01"
+
+    # Multi-city rental diligence pack (POST /tasks/us-rental-diligence).
+    # Access-barrier composite: reuses city open-data joins, priced above the
+    # $0.01 single-address tier. Hard clamp [min, max] rejects misconfig at build.
+    diligence_pack_price: str = "$1.50"
+    diligence_pack_min_usdc: float = 0.75
+    diligence_pack_max_usdc: float = 2.50
+    diligence_pack_max_properties: int = 5
 
     # Middleware pilot (app/x402_middleware_pilot.py): a standalone route gated
     # via the x402 SDK's own FastAPI middleware (x402.http.middleware.fastapi)

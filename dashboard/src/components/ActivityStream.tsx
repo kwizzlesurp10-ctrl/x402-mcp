@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ToolEvent } from "../types/api";
-import { relativeTime } from "../lib/format";
+
 
 interface ActivityStreamProps {
   events: ToolEvent[];

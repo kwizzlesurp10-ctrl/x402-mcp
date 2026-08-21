@@ -72,14 +72,21 @@ def purchase_discovery_metadata(
     """
     base = public_base_url.rstrip("/")
     report_preview = product.report.splitlines()[0] if product.report else ""
+    if not report_preview:
+        report_preview = "## Base Network Pulse"
     return {
         "resource_url": f"{base}/swarm/products/{product.product_id}/purchase",
         "discovery_method": "GET",
+        # Empty object: GET purchase takes no query/body — still emit input so
+        # Bazaar schemas stay precise (agents see "no required params").
+        "discovery_input_example": {},
         "discovery_output_example": {
             "product_id": product.product_id,
             "topic": product.topic,
-            "report": report_preview,
             "payment_settled": True,
+            "report": report_preview,
+            "price_usdc": product.price_usdc,
+            "network": product.network,
         },
     }
 

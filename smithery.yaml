@@ -1,0 +1,21 @@
+# Smithery Configuration (https://smithery.ai)
+name: kwizzlesurp10/x402-mcp
+version: 0.1.0
+description: "Pay-per-call HTTP APIs and MCP tools over x402 on Base mainnet (US Rental Diligence, Tx Optimizer, City Compliance)."
+remote:
+  url: "https://x402-mcp.onrender.com/mcp/mcp"
+  transport: "streamable-http"
+  capabilities:
+    tools: true
+startCommand:
+  type: stdio
+  config:
+    command: python
+    args: ["run_stdio.py"]
+    env:
+      X402_PAY_TO_ADDRESS:
+        description: "Your Base wallet address to receive x402 payments (0xAB745e5F576667037696e78ba7dA28E193E4423D)"
+        required: false
+      EVM_PRIVATE_KEY:
+        description: "Optional buyer private key to sign x402 micropayments automatically"
+        required: false

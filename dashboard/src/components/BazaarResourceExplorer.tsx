@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 interface ResourceProduct {
   id: string;
@@ -189,7 +189,7 @@ export function BazaarResourceExplorer({ density }: { density: string }) {
                   ? "1px solid rgba(0, 240, 255, 0.4)"
                   : "1px solid rgba(255, 255, 255, 0.05)",
                 display: "flex",
-                justify: "space-between",
+                justifyContent: "space-between",
                 alignItems: "center",
                 transition: "all 0.15s ease-in-out",
               }}

@@ -71,6 +71,19 @@ def test_paid_blank_address_rejected_before_settle(
     assert response.json()["error"] == "invalid_address"
 
 
+def test_malformed_signature_on_city_path_is_402_not_500(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
+    response = client.get(
+        "/us/sea/property-check",
+        params={"address": "1531 BELMONT AVE"},
+        headers={"PAYMENT-SIGNATURE": "e30="},
+    )
+    assert response.status_code == 402
+    assert response.json()["error"] == "payment_invalid"
+
+
 @pytest.mark.parametrize("code", list(registry.known_codes()))
 def test_sample_does_not_require_payment(
     code: str, monkeypatch: pytest.MonkeyPatch

@@ -1,4 +1,4 @@
-import React from "react";
+
 
 interface ChainData {
   id: string;
@@ -117,7 +117,7 @@ export function ChainDistributionBar({ density }: { density: string }) {
             <div
               style={{
                 display: "flex",
-                justify: "space-between",
+                justifyContent: "space-between",
                 alignItems: "baseline",
                 marginTop: "2px",
               }}

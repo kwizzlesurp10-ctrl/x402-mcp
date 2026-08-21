@@ -57,7 +57,7 @@ async def paid_resource():
       role="dialog"
       aria-label="Sell something wizard"
     >
-      <div className="panel" style={{ width: 520, maxHeight: "85vh", overflow: "auto" }}>
+      <div className="panel mc-modal-panel" style={{ width: 520, maxHeight: "85vh", overflow: "auto" }}>
         <h2>Sell something</h2>
         <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
           Build seller payment requirements. This does not move funds.

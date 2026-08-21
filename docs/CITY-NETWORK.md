@@ -63,6 +63,54 @@ Network path `/us/mn/property-check` is a uniform-envelope alias for catalog age
 Same as MN: unpaid → HTTP 402 + `PAYMENT-REQUIRED` **before** address validation;
 paid path validates address then verify+settle; `PAYMENT-RESPONSE` on success.
 
+## MCP golden path (A2A packaging)
+
+The network is **HTTP-first** and also exposed as three thin MCP tools on the
+same host (`/.well-known/mcp`). Tools wrap the existing URLs — they are not a
+second product.
+
+| Step | MCP tool | HTTP equivalent | Payment |
+|------|----------|-----------------|---------|
+| 1 | `list_us_cities` | `GET /us/cities` | free |
+| 2 | `get_us_city_property_sample(city_code)` | `GET /us/{code}/property-check/sample` | free |
+| 3 | `check_us_city_property(city_code, address)` | `GET /us/{code}/property-check?address=` | `$0.01` USDC |
+
+Paid step requires `EVM_PRIVATE_KEY` on the **MCP client host** (buyer wallet).
+Seller-only Render deploys omit that key; agents still get a 402 probe +
+`how_to_pay` handoff from `check_us_city_property`, or call `pay_and_fetch` from
+a wallet-enabled client against `paid_url`.
+
+```text
+list_us_cities
+  → pick code (e.g. mn)
+get_us_city_property_sample(city_code="mn")
+  → validate JSON shape
+check_us_city_property(city_code="mn", address="1700 Penn Ave N")
+  → settle + report  (or pay_and_fetch url=<paid_url>?address=…)
+```
+
+A2A Agent Card skills under `/.well-known/agent.json` (see `app/agent_surface.py`)
+advertise the same HTTP interfaces; MCP tool names are the Cursor/stdio entry.
+
+**Agent cheat sheet:** [examples/us-city-agent-path.md](examples/us-city-agent-path.md)
+
+### Operator: sample health + keepalive
+
+```bash
+# Free reliability probe (catalog + every /sample)
+.venv/bin/python scripts/probe_city_samples.py
+
+# Keepalive plan (dry-run). City/MN only — never Pulse or /base/tx-decision.
+# Skips resources with 0 external sales once challenges ≥ 600 (override: --force).
+.venv/bin/python scripts/city_keepalive.py
+
+# Local buyer only (never put EVM_PRIVATE_KEY on Render):
+BUYER_ENV=/home/keef/secrets/x402-buyer.env \
+  .venv/bin/python scripts/city_keepalive.py --execute
+```
+
+Read `GET /demand` → `sales_external` before paying keepalive. Operator settles are not demand.
+
 ## Config
 
 - `CITY_NETWORK_PRICE` / `city_network_price` (default `$0.01`)

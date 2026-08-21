@@ -10,7 +10,7 @@ export const LEVEL_COLOR: Record<OsLevel, string> = {
 const THRESHOLDS = {
   cpu: [75, 90],
   memory: [80, 92],
-  disk: [85, 95],
+  disk: [70, 85],
 } as const;
 
 export function metricLevel(metric: keyof typeof THRESHOLDS, pct: number): OsLevel {

@@ -39,8 +39,6 @@ export function useStats(demo: boolean) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 10_000);
-    return () => clearInterval(id);
   }, [refresh]);
 
   return { data, error, refresh };
@@ -67,8 +65,6 @@ export function useLedger(name: "spend" | "revenue", demo: boolean) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 15_000);
-    return () => clearInterval(id);
   }, [refresh]);
 
   return { rows, error, refresh };

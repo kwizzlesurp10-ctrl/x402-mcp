@@ -4,7 +4,7 @@ import type { LedgerRow } from "../types/api";
 
 describe("ledgerToCsv", () => {
   it("returns empty string for no rows", () => {
-    expect(ledgerToCsv([], "spend")).toBe("");
+    expect(ledgerToCsv([])).toBe("");
   });
 
   it("generates CSV with headers", () => {
@@ -19,7 +19,7 @@ describe("ledgerToCsv", () => {
         status: "settled",
       },
     ];
-    const csv = ledgerToCsv(rows, "spend");
+    const csv = ledgerToCsv(rows);
     const lines = csv.split("\n");
     expect(lines[0]).toBe("ts,amount_usdc,amount_atomic,network,tx_hash,agent_id,status");
     expect(lines[1]).toContain("2026-01-01");
@@ -34,7 +34,7 @@ describe("ledgerToCsv", () => {
         agent_id: "agent,with,commas",
       },
     ];
-    const csv = ledgerToCsv(rows, "test");
+    const csv = ledgerToCsv(rows);
     expect(csv).toContain('"agent,with,commas"');
   });
 });

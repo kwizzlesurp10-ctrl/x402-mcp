@@ -1,4 +1,84 @@
-import type { DoctorCheck, LedgerRow, OsSnapshot, StatsResponse } from "../api/client";
+import type { CityCatalogItem, DemandReport, DoctorCheck, LedgerRow, OsSnapshot, StatsResponse } from "../api/client";
+
+export const demoCities: CityCatalogItem[] = [
+  {
+    code: "mn",
+    name: "Minneapolis",
+    state: "MN",
+    service_name: "MN Rental Compliance",
+    price: "$0.01",
+    network: "eip155:84532",
+    paid_url: "https://demo.local/us/mn/property-check",
+    sample_url: "https://demo.local/us/mn/property-check/sample",
+    sample_address: "1700 Penn Ave N",
+    sources_label: "City of Minneapolis Open Data",
+    tags: ["minneapolis", "rental"],
+    canonical_alias: "/mn/property-check",
+  },
+  {
+    code: "sea",
+    name: "Seattle",
+    state: "WA",
+    service_name: "Seattle Rental Compliance",
+    price: "$0.01",
+    network: "eip155:84532",
+    paid_url: "https://demo.local/us/sea/property-check",
+    sample_url: "https://demo.local/us/sea/property-check/sample",
+    sample_address: "1531 BELMONT AVE",
+    sources_label: "Seattle Open Data",
+    tags: ["seattle", "rental"],
+    canonical_alias: null,
+  },
+  {
+    code: "chi",
+    name: "Chicago",
+    state: "IL",
+    service_name: "Chicago Building Violations",
+    price: "$0.01",
+    network: "eip155:84532",
+    paid_url: "https://demo.local/us/chi/property-check",
+    sample_url: "https://demo.local/us/chi/property-check/sample",
+    sample_address: "7840 S WESTERN AVE",
+    sources_label: "Chicago Open Data",
+    tags: ["chicago", "building"],
+    canonical_alias: null,
+  },
+];
+
+export const demoDemand: DemandReport = {
+  resources: [
+    {
+      resource: "mn-property-check",
+      challenges_served: 42,
+      qualified_views: 18,
+      sales_settled: 3,
+      sales_in_window: 3,
+      sales_external: 1,
+      sales_operator: 2,
+      sales_unknown: 0,
+    },
+    {
+      resource: "us-city-sea-property-check",
+      challenges_served: 21,
+      qualified_views: 9,
+      sales_settled: 2,
+      sales_in_window: 2,
+      sales_external: 0,
+      sales_operator: 2,
+      sales_unknown: 0,
+    },
+    {
+      resource: "us-city-chi-property-check",
+      challenges_served: 17,
+      qualified_views: 8,
+      sales_settled: 2,
+      sales_in_window: 2,
+      sales_external: 0,
+      sales_operator: 2,
+      sales_unknown: 0,
+    },
+  ],
+};
 
 export const demoStats: StatsResponse = {
   agents: [

@@ -1,20 +1,24 @@
-import { describe, expect, it } from "vitest";
-import { backoffMs, shouldReconnect, STATS_POLL_MS } from "./sseReconnect";
+import { describe, it, expect } from "vitest";
+import { shouldReconnect, backoffMs, STATS_POLL_MS } from "./sseReconnect";
 
-describe("shouldReconnect", () => {
-  it("reconnects only when enabled and polling", () => {
-    expect(shouldReconnect("polling", true)).toBe(true);
-    expect(shouldReconnect("polling", false)).toBe(false);
-    expect(shouldReconnect("live", true)).toBe(false);
-    expect(shouldReconnect("dead", true)).toBe(false);
+describe("sseReconnect", () => {
+  describe("shouldReconnect", () => {
+    it("returns true only when degraded and enabled", () => {
+      expect(shouldReconnect("degraded", true)).toBe(true);
+      expect(shouldReconnect("degraded", false)).toBe(false);
+      expect(shouldReconnect("connected", true)).toBe(false);
+      expect(shouldReconnect("checking", true)).toBe(false);
+      expect(shouldReconnect("disconnected", true)).toBe(false);
+    });
   });
-});
 
-describe("backoffMs", () => {
-  it("grows exponentially and caps", () => {
-    expect(backoffMs(0)).toBe(2_000);
-    expect(backoffMs(1)).toBe(4_000);
-    expect(backoffMs(10)).toBe(30_000);
+  describe("backoffMs", () => {
+    it("exponentially backs off", () => {
+      expect(backoffMs(0)).toBe(2000);
+      expect(backoffMs(1)).toBe(4000);
+      expect(backoffMs(2)).toBe(8000);
+      expect(backoffMs(10)).toBe(30000); // capped at 30s
+    });
   });
 });
 

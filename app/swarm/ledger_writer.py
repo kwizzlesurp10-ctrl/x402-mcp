@@ -28,14 +28,24 @@ def _append(name: str, row: dict[str, Any]) -> dict[str, Any]:
     from app import ledger_store as store_module
 
     if store_module.ledger_store is not None:
-        return store_module.ledger_store.append(name, row)
+        written = store_module.ledger_store.append(name, row)
+    else:
+        ledger_dir = ledger_io.LEDGER
+        ledger_dir.mkdir(parents=True, exist_ok=True)
+        path = ledger_dir / f"{name}.jsonl"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+        written = row
 
-    ledger_dir = ledger_io.LEDGER
-    ledger_dir.mkdir(parents=True, exist_ok=True)
-    path = ledger_dir / f"{name}.jsonl"
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row) + "\n")
-    return row
+    # Drop the 10s /ledger cache entry so the next dashboard poll sees the sale.
+    # Steady-state polling still hits memory; only post-write traffic refreshes.
+    try:
+        from app.main import invalidate_ledger_cache
+
+        invalidate_ledger_cache(name)
+    except Exception:  # never let cache bookkeeping break a settled write
+        pass
+    return written
 
 
 def record_spend(

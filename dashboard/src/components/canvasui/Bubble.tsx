@@ -13,8 +13,7 @@ export interface BubbleProps {
   rim?: number;
   iridescence?: number;
   intensity?: number;
-  tintStrength?: number;
-  tint?: [number, number, number];
+
   colorA?: [number, number, number];
   colorB?: [number, number, number];
   children?: React.ReactNode;
@@ -35,8 +34,7 @@ export function Bubble({
   rim = 0.5,
   iridescence = 1,
   intensity = 0.9,
-  tintStrength = 0,
-  tint = [1, 1, 1],
+
   colorA = [0.2902, 0.4549, 0.7216],
   colorB = [0.4118, 0.4118, 0.4157],
   children,

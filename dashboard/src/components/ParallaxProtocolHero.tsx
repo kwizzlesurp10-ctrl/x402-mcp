@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { LiquidCanvasEffect } from "./LiquidCanvasEffect";
 
 export function ParallaxProtocolHero() {
@@ -220,7 +220,7 @@ export function ParallaxProtocolHero() {
               <div
                 style={{
                   display: "flex",
-                  justify: "space-between",
+                  justifyContent: "space-between",
                   fontSize: "11px",
                   color: "#6B7280",
                   fontFamily: "var(--font-mono, monospace)",

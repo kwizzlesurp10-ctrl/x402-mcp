@@ -9,9 +9,9 @@ describe("metricLevel", () => {
     expect(metricLevel("memory", 79.9)).toBe("ok");
     expect(metricLevel("memory", 86.4)).toBe("warn");
     expect(metricLevel("memory", 92)).toBe("critical");
-    expect(metricLevel("disk", 84.9)).toBe("ok");
-    expect(metricLevel("disk", 88.9)).toBe("warn");
-    expect(metricLevel("disk", 95.1)).toBe("critical");
+    expect(metricLevel("disk", 69.9)).toBe("ok");
+    expect(metricLevel("disk", 81)).toBe("warn");
+    expect(metricLevel("disk", 85.1)).toBe("critical");
   });
 
   it("has a color for every level", () => {

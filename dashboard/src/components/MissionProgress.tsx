@@ -13,8 +13,8 @@ export function MissionProgress({
   const pct = Math.round((done / (steps.length || 1)) * 100);
 
   return (
-    <div className="panel" style={{ margin: "0 16px 16px", padding: "14px 20px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div className="panel mc-mission" style={{ margin: "0 16px 16px", padding: "14px 20px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button
           type="button"
           onClick={onToggle}
@@ -38,7 +38,7 @@ export function MissionProgress({
             {done}/{steps.length} ({pct}%)
           </span>
         </button>
-        <div style={{ width: 140, height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
+        <div className="mc-mission-bar" style={{ width: 140, height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
           <div
             style={{
               width: `${pct}%`,
@@ -50,7 +50,7 @@ export function MissionProgress({
         </div>
       </div>
       {open && (
-        <ol style={{ margin: "14px 0 0", paddingLeft: 24, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "8px 16px" }}>
+        <ol style={{ margin: "14px 0 0", paddingLeft: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: "8px 16px" }}>
           {steps.map((s) => (
             <li
               key={s.id}
@@ -73,6 +73,7 @@ export function MissionProgress({
                   height: 18,
                   borderRadius: "50%",
                   fontSize: 11,
+                  flexShrink: 0,
                   background: s.done ? "rgba(16, 185, 129, 0.15)" : "rgba(255,255,255,0.05)",
                   color: s.done ? "var(--green)" : "var(--text-muted)",
                   border: `1px solid ${s.done ? "var(--green)" : "rgba(255,255,255,0.1)"}`,

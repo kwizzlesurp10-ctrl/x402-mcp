@@ -1,4 +1,4 @@
-import React from "react";
+
 
 const MEMBERS = [
   { name: "Coinbase", role: "Premier Founder", badge: "Base Facilitator" },

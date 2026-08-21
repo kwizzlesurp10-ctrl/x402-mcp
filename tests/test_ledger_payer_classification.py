@@ -21,6 +21,7 @@ from app.swarm import ledger_writer
 client = TestClient(app)
 
 OPERATOR = "0x67ffc9B439aE24B0f7C7cA837C4AdfAFA06F9d38"
+HOT_BUYER = "0x9138fEA6e13a701694D4d598000Fc3c1dE3d594C"
 STRANGER = "0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09"
 
 
@@ -28,6 +29,10 @@ STRANGER = "0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09"
 def redis_ledger(monkeypatch):
     store = RedisLedgerStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(ledger_store, "ledger_store", store)
+    # Drop any prior 10s /ledger response cache so each test sees this store.
+    from app.main import invalidate_ledger_cache
+
+    invalidate_ledger_cache()
     return store
 
 
@@ -74,6 +79,31 @@ def test_operator_payer_is_flagged_not_external(
     )
     rows = client.get("/ledger/revenue").json()
     assert rows[0]["is_operator_settle"] is True
+
+
+def test_comma_separated_operator_wallets_flag_each_payer(
+    redis_ledger, monkeypatch
+) -> None:
+    """render.yaml lists every operator spend address, comma-separated.
+
+    The 2026-08-20 MN pay_and_fetch used buyer-hot 0x9138… which was missing
+    from OPERATOR_WALLETS, so a seed settle counted as external demand.
+    Classification is at read time — adding the address reclassifies old rows.
+    """
+    monkeypatch.setattr(
+        settings, "operator_wallets", f"{OPERATOR},{HOT_BUYER}"
+    )
+    ledger_writer.record_revenue(
+        agent_id="mn-property-check",
+        amount_usdc=0.01,
+        network="eip155:8453",
+        product_id="mn-property-check",
+        tx="0x60f1",
+        payer=HOT_BUYER,
+    )
+    rows = client.get("/ledger/revenue").json()
+    assert rows[0]["is_operator_settle"] is True
+    assert rows[0]["payer"] == HOT_BUYER.lower()
 
 
 def test_stranger_payer_is_flagged_external(

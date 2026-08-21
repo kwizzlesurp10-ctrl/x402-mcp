@@ -39,7 +39,7 @@ export function CommandPalette({
       aria-label="Command palette"
     >
       <div
-        className="panel"
+        className="panel mc-palette-panel"
         style={{ margin: "10% auto", width: 440 }}
         onClick={(e) => e.stopPropagation()}
       >

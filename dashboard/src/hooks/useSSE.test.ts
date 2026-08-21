@@ -37,7 +37,7 @@ describe("useSSE", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reconnects after onerror and returns live on second onopen", () => {
+  it("reconnects after onerror and returns connected on second onopen", () => {
     const onEvent = vi.fn();
     const { result } = renderHook(() => useSSE(true, onEvent));
 
@@ -47,7 +47,7 @@ describe("useSSE", () => {
     act(() => {
       first.onerror?.();
     });
-    expect(result.current.status).toBe("polling");
+    expect(result.current.status).toBe("degraded");
     expect(first.closed).toBe(true);
 
     act(() => {
@@ -58,10 +58,10 @@ describe("useSSE", () => {
     act(() => {
       MockEventSource.instances[1].onopen?.();
     });
-    expect(result.current.status).toBe("live");
+    expect(result.current.status).toBe("connected");
   });
 
-  it("sets live on heartbeat without emitting tool events", () => {
+  it("sets connected on heartbeat without emitting tool events", () => {
     const onEvent = vi.fn();
     const { result } = renderHook(() => useSSE(true, onEvent));
 
@@ -73,6 +73,6 @@ describe("useSSE", () => {
     });
 
     expect(onEvent).not.toHaveBeenCalled();
-    expect(result.current.status).toBe("live");
+    expect(result.current.status).toBe("connected");
   });
 });

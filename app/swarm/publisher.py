@@ -192,16 +192,19 @@ async def publish_pulse_product(
             # publish and is what the buyer actually receives.
             # Written as the queries an agent would type — the catalog ranks on
             # full-text + semantic match over this string, and nobody searches
-            # for a brand name they have never heard of.
+            # for a brand name they have never heard of. No block height here:
+            # catalogs index description once at first settle.
             description=(
-                "Base gas price now, base fee and priority fee in gwei, block "
-                "time, congestion and utilization trend, ETH price USD, and the "
-                "USD cost to settle an ETH transfer, USDC ERC-20 transfer, or "
-                "x402 payment on Base mainnet — one settle-now-or-wait verdict "
-                "with rationale. Full market briefing; for the per-transaction "
-                "submit/fee call see /base/tx-decision. GET, no inputs, no API "
-                "key; computed live from Base RPC blocks."
+                "Should I settle on Base mainnet now? Live Base Network Pulse: "
+                "base fee + priority fee (gwei gas), block utilization/congestion "
+                "trend, ETH-USD, USD cost for ETH transfer / USDC ERC-20 / x402 "
+                "settle, and settle-now-or-wait verdict with rationale. GET, no "
+                "inputs. Computed from Base RPC + ETH spot. Not a tx simulator."
             ),
+            # Per-product Bazaar metadata — must NOT inherit housing tags or a
+            # generic storefront name (facilitator: name <=32, <=5 tags).
+            service_name="Base Network Pulse",
+            service_tags=["base", "gas", "fees", "settlement", "congestion"],
             **purchase_discovery_metadata(product, settings.public_base_url),
         ),
     )

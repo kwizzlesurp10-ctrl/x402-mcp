@@ -311,6 +311,9 @@ class InMemoryQuotaStore:
                 "x402_default_network": settings.x402_default_network,
                 "has_pay_to": bool(settings.x402_pay_to_address),
                 "has_buyer_key": bool(settings.evm_private_key),
+                "has_ownership_proofs": bool(settings.ownership_proofs),
+                "ownership_proofs_count": len([p for p in settings.ownership_proofs.split(",") if p.strip()]),
+                "pay_to_address": settings.x402_pay_to_address,
                 "redis_mode": self.mode,  # actual live store, not the env var
                 "network": settings.x402_default_network,
                 "stripe_configured": bool(settings.stripe_secret_key),

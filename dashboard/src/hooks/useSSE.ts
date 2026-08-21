@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { backoffMs, shouldReconnect, STATS_POLL_MS, type LiveStatus } from "./sseReconnect";
+import { API } from "../api/client";
+import { backoffMs, shouldReconnect, STATS_POLL_MS, type ServerStatus } from "./sseReconnect";
 
-export type { LiveStatus };
+export type { ServerStatus };
 export type StreamEvent = {
   type?: string;
   ts: string;
@@ -11,7 +12,7 @@ export type StreamEvent = {
 };
 
 export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
-  const [status, setStatus] = useState<LiveStatus>("dead");
+  const [status, setStatus] = useState<ServerStatus>("checking");
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const esRef = useRef<EventSource | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -19,30 +20,29 @@ export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
   const connect = useCallback(() => {
     if (!enabled) return;
     esRef.current?.close();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
-    const es = new EventSource(`${baseUrl}/events`);
+    const es = new EventSource(`${API}/events`);
     esRef.current = es;
     es.onopen = () => {
       reconnectAttemptRef.current = 0;
-      setStatus("live");
+      setStatus("connected");
     };
     es.onmessage = (msg) => {
       try {
         const data = JSON.parse(msg.data) as StreamEvent;
         if (data.type === "heartbeat") {
           reconnectAttemptRef.current = 0;
-          setStatus("live");
+          setStatus("connected");
           return;
         }
         onEvent(data);
         reconnectAttemptRef.current = 0;
-        setStatus("live");
+        setStatus("connected");
       } catch {
         /* ignore */
       }
     };
     es.onerror = () => {
-      setStatus("polling");
+      setStatus("degraded");
       es.close();
       setReconnectNonce((n) => n + 1);
     };
@@ -63,13 +63,13 @@ export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
   }, [status, enabled, reconnectNonce, connect]);
 
   useEffect(() => {
-    if (!enabled || status !== "polling") return;
+    if (!enabled || status !== "degraded") return;
     const id = setInterval(async () => {
       try {
-        await fetch("/api/stats");
-        setStatus("polling");
+        await fetch(`${API}/stats`);
+        setStatus("degraded"); // still polling
       } catch {
-        setStatus("dead");
+        setStatus("disconnected");
       }
     }, STATS_POLL_MS);
     return () => clearInterval(id);

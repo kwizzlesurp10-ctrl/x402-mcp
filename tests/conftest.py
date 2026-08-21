@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 LIVE_TESTS = os.environ.get("X402_LIVE_TESTS") == "1"
+os.environ.setdefault("X402_PAY_TO_ADDRESS", "0xAB745e5F576667037696e78ba7dA28E193E4423D")
 
 # Wire-format (camelCase) SupportedResponse the x402 SDK expects from
 # GET {facilitator}/supported — mirrors x402.org for Base + Base Sepolia.
@@ -108,19 +109,28 @@ def mock_x402_backend():
     old_env = {
         "X402_FACILITATOR_URL": os.environ.get("X402_FACILITATOR_URL"),
         "CDP_DISCOVERY_URL": os.environ.get("CDP_DISCOVERY_URL"),
+        "X402_PAY_TO_ADDRESS": os.environ.get("X402_PAY_TO_ADDRESS"),
     }
     os.environ["X402_FACILITATOR_URL"] = facilitator_url
     os.environ["CDP_DISCOVERY_URL"] = discovery_url
+    if not os.environ.get("X402_PAY_TO_ADDRESS"):
+        os.environ["X402_PAY_TO_ADDRESS"] = "0xAB745e5F576667037696e78ba7dA28E193E4423D"
 
     from app.config import settings
 
-    old_settings = (settings.x402_facilitator_url, settings.cdp_discovery_url)
+    old_settings = (
+        settings.x402_facilitator_url,
+        settings.cdp_discovery_url,
+        settings.x402_pay_to_address,
+    )
     settings.x402_facilitator_url = facilitator_url
     settings.cdp_discovery_url = discovery_url
+    if not settings.x402_pay_to_address:
+        settings.x402_pay_to_address = "0xAB745e5F576667037696e78ba7dA28E193E4423D"
 
     yield {"facilitator_url": facilitator_url, "discovery_url": discovery_url}
 
-    settings.x402_facilitator_url, settings.cdp_discovery_url = old_settings
+    settings.x402_facilitator_url, settings.cdp_discovery_url, settings.x402_pay_to_address = old_settings
     for key, value in old_env.items():
         if value is None:
             os.environ.pop(key, None)

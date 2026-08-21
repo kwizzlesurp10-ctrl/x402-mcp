@@ -35,8 +35,10 @@ def test_growth_functions_are_human_gated():
 
 
 def test_signals_are_real():
+    from app.tools_registry import TOOL_COUNT
+
     s = assessor.gather_signals()
-    assert s["mcp_tools"] == 16
+    assert s["mcp_tools"] == TOOL_COUNT
     assert s["app_modules"] > 0 and s["test_files"] > 0
 
 

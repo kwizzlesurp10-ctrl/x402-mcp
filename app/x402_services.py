@@ -379,9 +379,19 @@ def _build_x402_client(
         client.register_policy(prefer_network(network))
 
     if max_price_usdc is not None:
-        client.register_policy(max_amount(int(max_price_usdc * 1_000_000)))
+        client.register_policy(max_amount(usdc_cap_atomic(max_price_usdc)))
 
     return client
+
+
+def usdc_cap_atomic(max_price_usdc: float) -> int:
+    """Buyer max_amount cap in USDC atomic units (6 decimals).
+
+    Use round(), not truncating int(): ``int(0.01 * 1_000_000)`` is 9999 on
+    some IEEE-754 platforms, which silently refuses a $0.01 (10000) city
+    quote when the agent caps at list price.
+    """
+    return int(round(float(max_price_usdc) * 1_000_000))
 
 
 # USDC (the only asset this repo prices in) has 6 decimals, which both
@@ -795,14 +805,42 @@ async def verify_payment_payload(params: VerifyPaymentInput) -> dict[str, Any]:
     }
 
 
+def _invalid_payment_result(reason: str) -> dict[str, Any]:
+    """402-able failure dict — never raise into a paid HTTP handler."""
+    return {
+        "is_valid": False,
+        "invalid_reason": reason[:300],
+        "settlement": None,
+        "settlement_error": None,
+        "payment_settled": False,
+        "facilitator_url": None,
+        "sdk": "x402ResourceServer.verify_payment + settle_payment",
+    }
+
+
 async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, Any]:
-    """Seller revenue path: verify then settle via x402ResourceServer + facilitator."""
-    payload, requirements = _decode_payment_inputs(
-        params.payment_signature, params.payment_required
-    )
-    network = _network_of(requirements)
-    server = _resource_server(network)
-    verify_result = await server.verify_payment(payload, requirements)
+    """Seller revenue path: verify then settle via x402ResourceServer + facilitator.
+
+    Decode/verify failures must return ``is_valid=False``, not raise. A paying
+    agent retries with PAYMENT-SIGNATURE; an uncaught ValidationError used to
+    become HTTP 500 ``internal_error`` (generic handler) instead of a 402
+    ``payment_invalid`` the client can retry.
+    """
+    try:
+        payload, requirements = _decode_payment_inputs(
+            params.payment_signature, params.payment_required
+        )
+    except Exception as exc:  # noqa: BLE001 — malformed wire must 402, not 500
+        logger.warning("payment decode failed: %s", exc)
+        return _invalid_payment_result(f"malformed_payment: {exc}")
+
+    try:
+        network = _network_of(requirements)
+        server = _resource_server(network)
+        verify_result = await server.verify_payment(payload, requirements)
+    except Exception as exc:  # noqa: BLE001 — facilitator/SDK faults
+        logger.warning("payment verify failed: %s", exc)
+        return _invalid_payment_result(f"verify_failed: {exc}")
 
     settlement = None
     settlement_error = None
@@ -822,6 +860,92 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
         "facilitator_url": _facilitator_url_for(network),
         "sdk": "x402ResourceServer.verify_payment + settle_payment",
     }
+
+
+async def build_payment_required_for_resource(
+    *,
+    resource_url: str,
+    description: str | None = None,
+    price: str | None = None,
+    network: str | None = None,
+    pay_to: str | None = None,
+    scheme: str = "exact",
+    include_bazaar: bool = True,
+) -> dict[str, Any]:
+    """Build PaymentRequired body + base64 PAYMENT-REQUIRED for a protected URL.
+
+    Used by GET /demo/paid (seller demo). Thin async wrapper over
+    build_seller_requirements so tests can monkeypatch this symbol.
+    """
+    from app.models import BuildSellerRequirementsInput
+
+    pay = pay_to or settings.x402_pay_to_address
+    if not pay:
+        raise ValueError("X402_PAY_TO_ADDRESS required for seller demo resource")
+
+    net = network or settings.x402_default_network
+    prc = price or settings.x402_default_price
+    desc = description or "Paid demo resource"
+
+    result = build_seller_requirements(
+        BuildSellerRequirementsInput(
+            network=net,
+            pay_to=pay,
+            price=prc,
+            scheme=scheme,
+            description=desc,
+            resource_url=resource_url,
+            mime_type="application/json",
+            discoverable=include_bazaar,
+            discovery_method="GET",
+            discovery_input_example={},
+            discovery_output_example={
+                "ok": True,
+                "secret": "x402-seller-demo-ok",
+                "payment_settled": True,
+            },
+            service_name="x402-seller-demo",
+            service_tags=["demo", "testnet", "x402"],
+        )
+    )
+    # Decode header back to a JSON-serialisable body for the 402 response payload.
+    payment_required_body: dict[str, Any]
+    try:
+        from x402.http import decode_payment_required_header
+
+        pr = decode_payment_required_header(result["payment_required_header"])
+        payment_required_body = (
+            pr.model_dump(by_alias=True, exclude_none=True)
+            if hasattr(pr, "model_dump")
+            else dict(pr)
+        )
+    except Exception:
+        payment_required_body = {
+            "error": "Payment required",
+            "x402Version": 2,
+        }
+
+    return {
+        "payment_required": payment_required_body,
+        "payment_required_header": result["payment_required_header"],
+        "requirements": result.get("requirements") or [],
+        "pay_to": pay,
+        "price": prc,
+        "network": net,
+    }
+
+
+async def verify_and_settle_from_headers(
+    payment_signature: str,
+    payment_required_header: str,
+) -> dict[str, Any]:
+    """Verify + settle a buyer PAYMENT-SIGNATURE against PAYMENT-REQUIRED."""
+    return await _verify_and_settle_payment(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required_header,
+        )
+    )
 
 
 def build_tool_credits_requirements(agent_id: str, credits: int) -> dict[str, Any]:
