@@ -18,9 +18,80 @@ from typing import Any
 from app.config import settings
 from app.tools_registry import TOOL_COUNT
 
+# Base mainnet native USDC (canonical cashier asset for this storefront).
+BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+DEFAULT_PAY_TO = "0xAB745e5F576667037696e78ba7dA28E193E4423D"
+# A2A × x402 extension URI (x402 foundation transport + google-a2a a2a-x402).
+A2A_X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
+REPO_URL = "https://github.com/kwizzlesurp10-ctrl/x402-mcp"
+BOUNTIES_DOC_URL = f"{REPO_URL}/blob/master/docs/BOUNTIES.md"
+FUNDING_LEGAL = (
+    "Payment for delivered products, documentation/audit artifacts, or a "
+    "voluntary tip. Not a token, not equity, not a raise."
+)
+
 
 def _base() -> str:
     return settings.public_base_url.rstrip("/")
+
+
+def _pay_to() -> str:
+    return settings.x402_pay_to_address or DEFAULT_PAY_TO
+
+
+def funding() -> dict[str, Any]:
+    """Machine-readable how-to-fund this operator (USDC on Base + public rails).
+
+    Agents and humans both need an unambiguous payTo. Product purchases use the
+    live x402 storefront; bounties/tips send USDC directly to payTo and paste a
+    BaseScan hash on a GitHub issue. Fiat Sponsors do not credit payTo.
+    """
+    base = _base()
+    pay_to = _pay_to()
+    network = settings.x402_default_network
+    return {
+        "schema_version": "1.0.0",
+        "legal": FUNDING_LEGAL,
+        "network": network,
+        "chainId": 8453,
+        "asset": BASE_USDC,
+        "assetSymbol": "USDC",
+        "payTo": pay_to,
+        "explorer": f"https://basescan.org/address/{pay_to}",
+        "tokenExplorer": f"https://basescan.org/token/{BASE_USDC}?a={pay_to}",
+        "machineCashier": {
+            "catalog": f"{base}/us/cities",
+            "examplePaid": f"{base}/us/mn/property-check?address=1700+Penn+Ave+N",
+            "exampleFreeSample": f"{base}/mn/property-check/sample",
+            "protocol": "x402-v2",
+            "note": "Unpaid GET → 402 PAYMENT-REQUIRED; paid retry settles USDC to payTo.",
+        },
+        "bounties": {
+            "protocol": BOUNTIES_DOC_URL,
+            "issues": f"{REPO_URL}/issues?q=is%3Aissue+is%3Aopen+label%3A+bounty%3A",
+            "issueQuery": f"{REPO_URL}/issues?q=is%3Aopen+bounty%3A",
+            "template": f"{REPO_URL}/issues/new?template=paid-bounty.md",
+            "parentIndex": f"{REPO_URL}/issues/493",
+        },
+        "github": {
+            "repository": REPO_URL,
+            "fundingYml": f"{REPO_URL}/blob/master/.github/FUNDING.yml",
+            "sponsorsNote": (
+                "GitHub Sponsors / Polar / thanks.dev settle fiat and do not "
+                "credit payTo on-chain. Operator may later sweep USD→USDC separately."
+            ),
+        },
+        "discovery": {
+            "agentCard": f"{base}/.well-known/agent-card.json",
+            "agentsJson": f"{base}/.well-known/agents.json",
+            "x402": f"{base}/.well-known/x402",
+            "mcp": f"{base}/.well-known/mcp",
+            "mcpServerCard": f"{base}/.well-known/mcp/server-card.json",
+            "llmsTxt": f"{base}/llms.txt",
+            "openapi": f"{base}/openapi.json",
+            "funding": f"{base}/.well-known/funding.json",
+        },
+    }
 
 
 def ownership_proofs() -> list[str]:
@@ -189,12 +260,15 @@ def well_known_x402() -> dict[str, Any]:
     parses is worth more than a bespoke one that doesn't, and `/openapi.json`
     (which crawlers read first) carries the same prices either way.
     """
+    fund = funding()
     return {
         "version": 1,
         "x402_version": 2,
         "service": "x402-micropayments-mcp",
         "base_url": _base(),
         "networks": [settings.x402_default_network],
+        "asset": BASE_USDC,
+        "payTo": fund["payTo"],
         "payment_header": "PAYMENT-SIGNATURE",
         "challenge_header": "PAYMENT-REQUIRED",
         "receipt_header": "PAYMENT-RESPONSE",
@@ -206,8 +280,14 @@ def well_known_x402() -> dict[str, Any]:
         "mcp": {
             "manifest": f"{_base()}/.well-known/mcp",
             "streamable_http": f"{_base()}/mcp/mcp",
+            "server_card": f"{_base()}/.well-known/mcp/server-card.json",
         },
         "docs": f"{_base()}/llms.txt",
+        "agent_card": f"{_base()}/.well-known/agent-card.json",
+        "agents": f"{_base()}/.well-known/agents.json",
+        "funding": f"{_base()}/.well-known/funding.json",
+        "payToExplorer": fund["explorer"],
+        "legal": FUNDING_LEGAL,
     }
 
 
@@ -259,16 +339,32 @@ def llms_txt() -> str:
         "  this repo's ledger/dashboard on the same terms as every other product",
         "  -- recorded only after settlement actually succeeds.",
         "",
-        "## Machine surfaces",
+        "## Machine surfaces (A2A / discovery)",
         "",
         f"- x402 manifest: {base}/.well-known/x402",
         f"- MCP manifest:  {base}/.well-known/mcp ({TOOL_COUNT} tools, Streamable HTTP at /mcp/mcp)",
-        f"- A2A Agent Card: {base}/.well-known/agent-card.json",
+        f"- MCP server card: {base}/.well-known/mcp/server-card.json",
+        f"- A2A Agent Card: {base}/.well-known/agent-card.json (legacy: {base}/.well-known/agent.json)",
+        f"- Agents registry: {base}/.well-known/agents.json",
+        f"- Funding (payTo): {base}/.well-known/funding.json",
+        f"- OpenAPI: {base}/openapi.json",
         f"- Health: {base}/health · Checks: {base}/doctor · Ops: {base}/dashboard",
+        "",
+        "## Fund this operator (USDC on Base)",
+        "",
+        f"- Network: `{settings.x402_default_network}` (Base mainnet, chainId 8453)",
+        f"- Asset: USDC `{BASE_USDC}`",
+        f"- payTo (settlement): `{_pay_to()}`",
+        f"- Explorer: https://basescan.org/address/{_pay_to()}",
+        f"- Machine cashier: buy any paid endpoint above (e.g. property-check $0.01) — USDC settles to payTo",
+        f"- Public bounties protocol: {BOUNTIES_DOC_URL}",
+        f"- Open a funded bounty: {REPO_URL}/issues/new?template=paid-bounty.md",
+        f"- GitHub FUNDING.yml: {REPO_URL}/blob/master/.github/FUNDING.yml",
+        f"- {FUNDING_LEGAL}",
         "",
         "## Operator",
         "",
-        "- Repository: https://github.com/kwizzlesurp10-ctrl/x402-mcp",
+        f"- Repository: {REPO_URL}",
         "- Seller-only deployment: this host holds no spend key (verify:",
         f"  {base}/health shows wallet_configured:false).",
         "",
@@ -486,6 +582,8 @@ def agent_card() -> dict[str, Any]:
             }
         )
 
+    pay_to = _pay_to()
+    fund = funding()
     return {
         "name": "US City Open-Data Compliance (x402)",
         "description": (
@@ -494,13 +592,15 @@ def agent_card() -> dict[str, Any]:
             f"{base}/us/cities; returns address-level rental/license/violation "
             f"reports at {price} USDC on Base ({network}) using HTTP 402 "
             "micropayments (x402 v2). No API key, no signup. Free samples at "
-            "/us/{city_code}/property-check/sample."
+            "/us/{city_code}/property-check/sample. Fund operator: USDC on Base "
+            f"to payTo {pay_to} (see {base}/.well-known/funding.json)."
         ),
         "version": "0.1.0",
         "protocolVersion": "1.0",
+        "url": f"{base}/.well-known/x402",
         "provider": {
             "organization": "x402-mcp",
-            "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
+            "url": REPO_URL,
         },
         "documentationUrl": f"{base}/llms.txt",
         "supportedInterfaces": [
@@ -544,11 +644,31 @@ def agent_card() -> dict[str, Any]:
                 "protocolBinding": "HTTP+JSON",
                 "protocolVersion": "1.0",
             },
+            {
+                "url": f"{base}/.well-known/funding.json",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+            },
+            {
+                "url": f"{base}/.well-known/agents.json",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+            },
         ],
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
+            "extensions": [
+                {
+                    "uri": A2A_X402_EXTENSION_URI,
+                    "description": (
+                        "Supports x402 HTTP 402 micropayments with on-chain "
+                        f"USDC settlement on {network} to payTo {pay_to}."
+                    ),
+                    "required": False,
+                }
+            ],
         },
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["application/json"],
@@ -561,12 +681,12 @@ def agent_card() -> dict[str, Any]:
                 "description": (
                     f"x402 v2 micropayment on {network}. Unauthenticated GET "
                     "returns HTTP 402 with PAYMENT-REQUIRED challenge (base64 "
-                    "JSON: amount, payTo, asset USDC, network). Client signs "
-                    "EIP-3009 transferWithAuthorization and retries with "
-                    "PAYMENT-SIGNATURE. Settlement is gasless for the buyer "
-                    f"(USDC required, not ETH). Catalog {base}/us/cities and "
-                    "all /sample endpoints require no payment. Authoritative "
-                    f"payment metadata: {base}/.well-known/x402"
+                    f"JSON: amount, payTo {pay_to}, asset USDC {BASE_USDC}, "
+                    "network). Client signs EIP-3009 transferWithAuthorization "
+                    "and retries with PAYMENT-SIGNATURE. Settlement is gasless "
+                    f"for the buyer (USDC required, not ETH). Catalog "
+                    f"{base}/us/cities and all /sample endpoints require no "
+                    f"payment. Authoritative payment metadata: {base}/.well-known/x402"
                 ),
             }
         },
@@ -574,4 +694,228 @@ def agent_card() -> dict[str, Any]:
             {},
             {"x402": []},
         ],
+        # AP2-style payments block + explicit funding (extra fields; A2A clients ignore unknowns).
+        "payments": {
+            "version": "2025.0",
+            "rails": [
+                {
+                    "id": "x402",
+                    "currencies": ["USDC"],
+                    "networks": [network],
+                    "asset": BASE_USDC,
+                    "payTo": pay_to,
+                    "policy": BOUNTIES_DOC_URL,
+                    "captureTypes": ["immediate"],
+                }
+            ],
+            "pricing": {
+                "model": "catalog",
+                "catalogUrl": f"{base}/.well-known/x402",
+            },
+        },
+        "funding": fund,
+    }
+
+
+def _price_to_atomic_usdc(price: str) -> int:
+    """Parse '$0.01' / '0.01' style prices to USDC atomic (6 decimals)."""
+    raw = str(price).strip().replace("$", "").replace(",", "")
+    try:
+        return int(round(float(raw) * 1_000_000))
+    except ValueError:
+        return 0
+
+
+def agents_json() -> dict[str, Any]:
+    """Standard Agents Registry Schema (Agentic.Market / Open Agent Registry)."""
+    base = _base()
+    network = settings.x402_default_network
+    pay_to = _pay_to()
+
+    try:
+        from app.city_compliance import registry
+
+        cities = registry.list_cities()
+    except Exception:
+        cities = []
+
+    city_price = getattr(settings, "city_network_price", None) or settings.mn_property_check_price
+
+    agents = [
+        {
+            "id": "us-rental-diligence",
+            "name": "US Multi-City Rental Diligence Pack",
+            "description": (
+                "Screen up to 5 US rental addresses across the open-data city network in one "
+                "paid composite call. Returns per-property compliance verdicts + pack risk summary."
+            ),
+            "url": f"{base}/tasks/us-rental-diligence",
+            "method": "POST",
+            "pricing": {
+                "amount": settings.diligence_pack_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": _price_to_atomic_usdc(settings.diligence_pack_price),
+            },
+            "protocols": ["x402-v2", "http-json", "a2a"],
+            "tags": ["rental", "compliance", "multicity", "housing", "due-diligence", "x402", "usdc"],
+            "input_schema": {
+                "type": "object",
+                "required": ["properties"],
+                "properties": {
+                    "properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["city_code", "address"],
+                            "properties": {
+                                "city_code": {
+                                    "type": "string",
+                                    "description": "City code (e.g. mn, sea, nyc, chi)",
+                                },
+                                "address": {"type": "string", "description": "Street address"},
+                            },
+                        },
+                    },
+                    "include_base_pulse_context": {"type": "boolean", "default": False},
+                },
+            },
+        },
+        {
+            "id": "base-tx-decision",
+            "name": "Base Transaction Decision & Gas Optimizer",
+            "description": "Live Base RPC congestion, fee math (EIP-1559), and submit-or-wait execution guidance.",
+            "url": f"{base}/base/tx-decision",
+            "method": "GET",
+            "pricing": {
+                "amount": settings.tx_decision_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": _price_to_atomic_usdc(settings.tx_decision_price),
+            },
+            "protocols": ["x402-v2", "http-json", "a2a"],
+            "tags": ["base", "crypto", "gas", "tx-optimizer", "x402", "usdc"],
+            "params": {
+                "gas": "eth|usdc|erc20|x402 or integer gas units",
+                "urgency": "now|soon|flexible",
+            },
+        },
+        {
+            "id": "base-finality-check",
+            "name": "Base Transaction Finality Check",
+            "description": "L1/L2 safe and finalized block tag verification for Base mainnet transactions.",
+            "url": f"{base}/base/finality-check",
+            "method": "GET",
+            "pricing": {
+                "amount": settings.finality_check_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": _price_to_atomic_usdc(settings.finality_check_price),
+            },
+            "protocols": ["x402-v2", "http-json", "a2a"],
+            "tags": ["base", "finality", "verification", "x402", "usdc"],
+            "params": {
+                "tx": "0x-prefixed 32-byte transaction hash",
+            },
+        },
+        {
+            "id": "us-city-compliance-network",
+            "name": "US City Open-Data Property Compliance Network",
+            "description": (
+                f"Address-level housing license, building violation, and code compliance "
+                f"checks across {len(cities)} US jurisdictions."
+            ),
+            "catalog_url": f"{base}/us/cities",
+            "method": "GET",
+            "pricing": {
+                "amount": city_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "model": "per_request",
+                "atomic_units": _price_to_atomic_usdc(city_price),
+            },
+            "protocols": ["x402-v2", "http-json", "a2a"],
+            "tags": ["property", "compliance", "rental", "housing", "violations", "open-data", "x402"],
+            "jurisdictions": [c["code"] for c in cities],
+        },
+    ]
+
+    return {
+        "schema_version": "1.0.0",
+        "name": "x402 Micropayments & Agent Services",
+        "description": "Autonomous pay-per-call data services and MCP tool suite on Base mainnet.",
+        "homepage": base,
+        "documentation": f"{base}/llms.txt",
+        "provider": {
+            "name": "SEVTECH",
+            "url": REPO_URL,
+            "receive_address": pay_to,
+        },
+        "payment_networks": [network],
+        "settlement_address": pay_to,
+        "asset": BASE_USDC,
+        "funding": f"{base}/.well-known/funding.json",
+        "agents": agents,
+        "mcp": {
+            "manifest": f"{base}/.well-known/mcp",
+            "server_card": f"{base}/.well-known/mcp/server-card.json",
+            "streamable_http": f"{base}/mcp/mcp",
+            "sse": f"{base}/mcp/sse",
+        },
+        "agent_card": f"{base}/.well-known/agent-card.json",
+        "x402_manifest": f"{base}/.well-known/x402",
+        "legal": FUNDING_LEGAL,
+        **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
+    }
+
+
+def mcp_server_card() -> dict[str, Any]:
+    """Remote MCP Server Card for Smithery.ai, Glama.ai, and MCP client indexing."""
+    base = _base()
+    from app.manifest import build_mcp_manifest
+
+    mcp_manifest = build_mcp_manifest()
+
+    return {
+        "serverInfo": {
+            "name": "io.github.kwizzlesurp10-ctrl/x402-mcp",
+            "title": "x402 Micropayments MCP",
+            "version": "0.1.0",
+            "description": (
+                "Pay-per-call HTTP APIs and MCP tools over x402: USDC on Base, "
+                "gasless settlement, US multi-city rental compliance diligence, "
+                "and Base gas/finality intelligence."
+            ),
+        },
+        "transport": {
+            "type": "streamable-http",
+            "url": f"{base}/mcp/mcp",
+            "sse_url": f"{base}/mcp/sse",
+        },
+        "authentication": {
+            "type": "x402",
+            "scheme": "EIP-3009",
+            "network": settings.x402_default_network,
+            "asset": "USDC",
+            "assetAddress": BASE_USDC,
+            "pay_to": _pay_to(),
+        },
+        "capabilities": {
+            "tools": True,
+            "resources": False,
+            "prompts": False,
+        },
+        "tools": mcp_manifest["tools"],
+        "homepage": base,
+        "repository": {
+            "type": "git",
+            "url": f"{REPO_URL}.git",
+        },
+        "documentation": f"{base}/llms.txt",
+        "funding": f"{base}/.well-known/funding.json",
+        "agent_card": f"{base}/.well-known/agent-card.json",
+        "legal": FUNDING_LEGAL,
     }

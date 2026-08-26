@@ -1,6 +1,45 @@
 # x402 Micropayments MCP
 
+[![smithery badge](https://smithery.ai/badge/kwizzlesurp10/x402-mcp)](https://smithery.ai/server/kwizzlesurp10/x402-mcp)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Base Mainnet](https://img.shields.io/badge/Network-Base%20Mainnet%20(8453)-0052FF.svg)](https://base.org)
+[![A2A Protocol](https://img.shields.io/badge/Identity-A2A%20v1.0%20Agent%20Card-green.svg)](https://x402-mcp.onrender.com/.well-known/agent-card.json)
+
 Production MCP server for the [x402](https://x402.org) HTTP micropayment protocol — **live on Base mainnet, selling real data products to AI agents for USDC today**. Agents discover paid services, probe `402 Payment Required` responses, pay with stablecoins, and build/verify seller payment configs; the server runs both sides of that market.
+
+## Discover (public + A2A)
+
+Machine surfaces agents and directories crawl first:
+
+| Surface | URL |
+|---------|-----|
+| A2A Agent Card | https://x402-mcp.onrender.com/.well-known/agent-card.json |
+| Agents registry | https://x402-mcp.onrender.com/.well-known/agents.json |
+| x402 catalog | https://x402-mcp.onrender.com/.well-known/x402 |
+| Funding / payTo | https://x402-mcp.onrender.com/.well-known/funding.json |
+| MCP manifest | https://x402-mcp.onrender.com/.well-known/mcp |
+| MCP server card | https://x402-mcp.onrender.com/.well-known/mcp/server-card.json |
+| LLM docs | https://x402-mcp.onrender.com/llms.txt |
+| OpenAPI | https://x402-mcp.onrender.com/openapi.json |
+| Free city catalog | https://x402-mcp.onrender.com/us/cities |
+
+Agent Card declares the [a2a-x402](https://github.com/google-a2a/a2a-x402) extension, AP2-style `payments.rails[]` (USDC on Base), and explicit `funding.payTo`.
+
+## Fund (USDC on Base)
+
+Payment for delivered products / documentation artifacts, or a voluntary tip. **Not a token, not equity, not a raise.**
+
+| Field | Value |
+|-------|-------|
+| Network | Base `eip155:8453` |
+| Asset | USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+| payTo | `0xAB745e5F576667037696e78ba7dA28E193E4423D` |
+| Explorer | https://basescan.org/address/0xAB745e5F576667037696e78ba7dA28E193E4423D |
+| Machine cashier | buy any live paid endpoint (e.g. $0.01 property-check) |
+| Bounties protocol | [docs/BOUNTIES.md](docs/BOUNTIES.md) · [open a bounty](https://github.com/kwizzlesurp10-ctrl/x402-mcp/issues/new?template=paid-bounty.md) |
+| GitHub FUNDING.yml | [.github/FUNDING.yml](.github/FUNDING.yml) |
+
+Fiat Sponsors (GitHub Sponsors / Polar / thanks.dev) do **not** credit `payTo` on-chain.
 
 ## Live on Base mainnet
 
@@ -17,6 +56,9 @@ The public seller host holds **no spend key** — it only verifies and settles i
 ## Features
 
 - **19 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, US city compliance, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **4 MCP prompts** (`onboarding_flow`, `x402_tool_selector`, `generate_quote`, `troubleshoot_payment`) for LLM orchestrators
+- **4 MCP resources** (`x402://agent-card`, `x402://server-card`, `x402://tools-manifest`, `x402://pricing-table`) exposing live machine descriptors
+- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `get_agent_card` / `x402://agent-card` with per-`agent_id` quota isolation
 - **x402/Coinbase rail** (primary): x402 v2 wire format end to end — challenge generation, verify + settle via the CDP facilitator on Base mainnet, Bazaar discoverability on listings
 - **Stripe payment rail** (fiat alternative): `commerce.stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
@@ -25,6 +67,21 @@ The public seller host holds **no spend key** — it only verifies and settles i
 - **Redis-ready** quota store (in-memory default)
 - **Operator dashboard** at `/dashboard` — live health, per-agent quota burn-down meters, tool matrix, and revenue paths (single-file, zero build step)
 - **Hermetic test suite** — a local mock facilitator/discovery backend spins up automatically; no internet required. Set `X402_LIVE_TESTS=1` to run against x402.org
+
+## Quickstart & 1-Click Installation
+
+Install `kwizzlesurp10/x402-mcp` into your favorite MCP client using the [Smithery CLI](https://smithery.ai/server/kwizzlesurp10/x402-mcp):
+
+```bash
+# Claude Desktop
+npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client claude
+
+# Cursor
+npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client cursor
+
+# Windsurf
+npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client windsurf
+```
 
 ## Quick Start (Mission Control)
 
@@ -188,6 +245,54 @@ API surface: `GET /stats`, `GET /events` (SSE with 15s heartbeat), `GET /ledger/
 ## Agent Ops
 
 Cost-effective multi-agent operating group (scout, warden, treasurer, archivist, merchant) with budget policy and ledger. See [docs/agent-ops.md](docs/agent-ops.md).
+
+## Agent ID Cards & Machine Identity
+
+`x402-mcp` implements the **Agent-to-Agent (A2A) Protocol v1.0** and MCP machine identity for autonomous discovery.
+
+1. **HTTP:** `GET https://x402-mcp.onrender.com/.well-known/agent-card.json` (legacy: `/.well-known/agent.json`)
+2. **MCP tool:** `get_agent_card` (optional `target_id` for a skill)
+3. **MCP resource:** `x402://agent-card`
+4. **Registry:** `/.well-known/agents.json` · **payTo:** `/.well-known/funding.json`
+
+Every tool accepts optional `agent_id` for per-caller quota isolation (free tier 500 calls/mo, 10/min).
+
+## MCP Prompts Reference (4 Prompts)
+
+Structured prompts for LLM orchestrators:
+
+- `onboarding_flow` — first-run path: doctor → free sample → paid check
+- `x402_tool_selector` — pick buyer/seller/commerce tools for a goal
+- `generate_quote` — build seller payment requirements / price quote
+- `troubleshoot_payment` — diagnose 402 / facilitator / signature failures
+
+## MCP Resources Reference (4 Resources)
+
+- `x402://agent-card` — full A2A Agent Card JSON
+- `x402://server-card` — MCP server card (transport + x402 auth)
+- `x402://tools-manifest` — live tool inventory
+- `x402://pricing-table` — paid HTTP resources and prices
+
+## Sample AI Agent Queries & Interactions
+
+### Real Estate Compliance Workflow
+
+1. `city.list` → pick a city code  
+2. `city.sample` free sample for quality  
+3. `city.check` or `GET /us/{code}/property-check?address=…` with x402 payment  
+
+### Base Network Gas & Settlement Timing
+
+- `pulse.base` free briefing  
+- Paid `GET /base/tx-decision?urgency=flexible` before submit  
+
+### Service Discovery & Protected API Consumption
+
+- `x402.discover` → `x402.probe` → `x402.pay_and_fetch`  
+
+### Seller API Monetization
+
+- `x402.build_seller` with Bazaar discovery metadata → settle inbound via facilitator  
 
 ## Docker
 

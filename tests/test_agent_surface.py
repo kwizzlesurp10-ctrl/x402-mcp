@@ -152,6 +152,9 @@ def test_agent_card_skills_track_live_city_prices() -> None:
 def test_llms_txt_advertises_a2a_agent_card() -> None:
     text = client.get("/llms.txt").text
     assert "/.well-known/agent-card.json" in text
+    assert "/.well-known/funding.json" in text
+    assert "/.well-known/agents.json" in text
+    assert "payTo" in text or "payTo (settlement)" in text
 
 
 def test_agents_json_served_at_well_known() -> None:
@@ -167,6 +170,7 @@ def test_agents_json_served_at_well_known() -> None:
     assert "us-city-compliance-network" in ids
     assert body["payment_networks"] == [settings.x402_default_network]
     assert body["settlement_address"]
+    assert body["settlement_address"].lower().startswith("0x")
 
 
 def test_mcp_server_card_served_at_well_known() -> None:
@@ -178,4 +182,34 @@ def test_mcp_server_card_served_at_well_known() -> None:
     assert body["authentication"]["type"] == "x402"
     assert "tools" in body
     assert len(body["tools"]) >= 10
+    assert body["authentication"]["pay_to"]
+
+
+def test_funding_json_exposes_payto_and_bounties() -> None:
+    response = client.get("/.well-known/funding.json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["assetSymbol"] == "USDC"
+    assert body["asset"].lower() == "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+    assert body["payTo"].lower().startswith("0x")
+    assert body["chainId"] == 8453
+    assert "BOUNTIES.md" in body["bounties"]["protocol"]
+    assert "not a token" in body["legal"].lower()
+    assert body["discovery"]["agentCard"].endswith("/.well-known/agent-card.json")
+
+
+def test_agent_card_declares_x402_extension_and_funding() -> None:
+    body = client.get("/.well-known/agent-card.json").json()
+    exts = body["capabilities"].get("extensions") or []
+    assert any("a2a-x402" in (e.get("uri") or "") for e in exts)
+    assert body["payments"]["rails"][0]["id"] == "x402"
+    assert body["funding"]["payTo"]
+    assert body["funding"]["assetSymbol"] == "USDC"
+
+
+def test_well_known_x402_includes_payto() -> None:
+    body = client.get("/.well-known/x402").json()
+    assert body["payTo"].lower().startswith("0x")
+    assert body["asset"].lower().endswith("2913")
+    assert body["funding"].endswith("/.well-known/funding.json")
 

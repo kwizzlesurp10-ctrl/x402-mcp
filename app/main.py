@@ -619,87 +619,28 @@ async def well_known_agent_card() -> dict:
     return agent_surface.agent_card()
 
 
+@app.get("/.well-known/agents.json")
+async def well_known_agents_json() -> dict:
+    """Agents registry manifest (Agentic.Market / open agent directories)."""
+    from app import agent_surface
+
+    return agent_surface.agents_json()
+
+
+@app.get("/.well-known/funding.json")
+async def well_known_funding_json() -> dict:
+    """Canonical payTo + bounty/tip rails for humans and A2A funders."""
+    from app import agent_surface
+
+    return agent_surface.funding()
+
+
 @app.get("/.well-known/mcp/server-card.json")
 async def well_known_mcp_server_card() -> dict:
-    """Smithery-compatible MCP Server Card for static scanning bypass."""
-    from app.mcp_server import mcp, _simplify_schema
-    import pathlib
-    import json
+    """Remote MCP Server Card for Smithery / Glama / static scanners."""
+    from app import agent_surface
 
-    try:
-        server_json_path = pathlib.Path(__file__).resolve().parents[1] / "server.json"
-        if server_json_path.exists():
-            server_json = json.loads(server_json_path.read_text(encoding="utf-8"))
-            server_name = server_json.get("name", mcp.name)
-            server_version = server_json.get("version", "0.1.0")
-        else:
-            server_name = mcp.name
-            server_version = "0.1.0"
-    except Exception:
-        server_name = mcp.name
-        server_version = "0.1.0"
-
-    tools = await mcp.list_tools()
-    return {
-        "serverInfo": {
-            "name": server_name,
-            "version": server_version,
-        },
-        "configSchema": {
-            "type": "object",
-            "properties": {
-                "X402_PAY_TO_ADDRESS": {
-                    "type": "string",
-                    "description": "USDC seller settlement address on Base.",
-                    "x-from": {
-                        "env": "X402_PAY_TO_ADDRESS"
-                    }
-                },
-                "EVM_PRIVATE_KEY": {
-                    "type": "string",
-                    "description": "EVM private key to pay for x402 services.",
-                    "x-from": {
-                        "env": "EVM_PRIVATE_KEY"
-                    }
-                }
-            }
-        },
-        "remotes": [
-            {
-                "type": "streamable-http",
-                "url": f"{settings.public_base_url.rstrip('/')}/mcp/mcp",
-            }
-        ],
-        "tools": [
-            {
-                "name": t.name,
-                "description": t.description,
-                "inputSchema": _simplify_schema(t.inputSchema),
-                **(
-                    {"annotations": t.annotations.model_dump(exclude_none=True)}
-                    if getattr(t, "annotations", None)
-                    else {}
-                ),
-            }
-            for t in tools
-        ],
-        "resources": [
-            {
-                "uri": str(r.uri),
-                "name": r.name,
-                "description": r.description,
-                "mimeType": r.mimeType,
-            }
-            for r in await mcp.list_resources()
-        ],
-        "prompts": [
-            {
-                "name": p.name,
-                "description": p.description,
-            }
-            for p in await mcp.list_prompts()
-        ],
-    }
+    return agent_surface.mcp_server_card()
 
 
 @app.get("/.well-known/agent.json")
