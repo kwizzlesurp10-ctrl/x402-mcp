@@ -26,8 +26,10 @@ def test_mn_description_under_cdp_ceiling() -> None:
 
     assert len(mn_compliance.RESOURCE_DESCRIPTION) <= 500
     assert "compliance_verdict" in mn_compliance.RESOURCE_DESCRIPTION
-    assert "screening" in mn_compliance.SERVICE_TAGS
-    assert "property" not in mn_compliance.SERVICE_TAGS or "screening" in mn_compliance.SERVICE_TAGS
+    assert "diligence" in mn_compliance.SERVICE_TAGS
+    assert "rental-license" in mn_compliance.SERVICE_TAGS
+    assert len(mn_compliance.SERVICE_NAME) <= 32
+    assert "License Check" in mn_compliance.SERVICE_NAME
 
 
 def test_pulse_discovery_metadata_has_empty_input() -> None:

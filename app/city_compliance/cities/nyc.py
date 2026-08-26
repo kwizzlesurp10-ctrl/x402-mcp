@@ -17,15 +17,15 @@ SPEC = CitySpec(
     code="nyc",
     name="New York City",
     state="NY",
-    service_name="NYC HPD Rental Compliance",
-    tags=("nyc", "rental", "compliance", "housing", "hpd"),
+    service_name="NYC HPD Violations Address",
+    tags=("nyc", "hpd", "violations", "housing", "diligence"),
     description=(
-        "Is this NYC multi-dwelling registered with HPD, and are there open "
-        "Housing Maintenance Code violations? Query a house number + street "
-        "(optional borough) in New York City and get registration window, "
-        "BIN/block/lot, and recent HMC violations. For tenant screening and "
-        "landlord due diligence. Input: address string. Output: JSON, live "
-        "NYC Open Data."
+        "NYC HPD violations address check: is this property licensed / HPD-"
+        "registered, and are there open Housing Maintenance Code violations? "
+        "Property due diligence agent for New York City multi-dwelling housing "
+        "compliance open data. GET ?address= (house + street, optional borough) "
+        "→ registration window, BIN/block/lot, recent HMC violations JSON. "
+        "Tenant screening, landlord DD."
     ),
     sample_address="787 EAST 56 STREET BROOKLYN",
     sample_note=(

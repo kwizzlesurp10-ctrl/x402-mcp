@@ -67,20 +67,21 @@ CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 #
 # 500 chars is the CDP ceiling (_clamp_description); this sits under it.
 RESOURCE_DESCRIPTION = (
-    "Is this Minneapolis Minnesota (Hennepin) rental licensed and code-compliant? "
-    "GET ?address= (street 1-120 chars). Returns compliance_verdict "
+    "Minneapolis rental license check — is this property licensed? Property due "
+    "diligence agent for Minneapolis Minnesota (Hennepin) housing compliance open "
+    "data. GET ?address= (street 1-120 chars) → compliance_verdict "
     "(licensed_clean|licensed_with_violations|unlicensed|condemned_or_boarded), "
-    "active rental license status/tier/units/expiration, violation cases, condemned/"
-    "boarded flag. Live City open data JSON. Jobs: tenant screening, landlord DD, "
-    "lending. Free sample: /mn/property-check/sample."
+    "rental license status/tier/units/expiration, violation cases, condemned/"
+    "boarded. Live City JSON. Tenant screening, landlord DD, lending. Sample: "
+    "/mn/property-check/sample."
 )
 
 # Per-resource Bazaar metadata (facilitator: name <=32, <=5 tags x <=32 chars).
 # Must NOT inherit the storefront defaults (base,intelligence) — those describe
 # Base L2 fee products, not Minneapolis rental compliance, and agents filter
 # catalogs by these tags. Fingerprinted into the challenge cache.
-SERVICE_NAME = "MN Rental Compliance"
-SERVICE_TAGS = ["minneapolis", "rental", "compliance", "housing", "screening"]
+SERVICE_NAME = "MN Rental License Check"
+SERVICE_TAGS = ["minneapolis", "rental-license", "compliance", "housing", "diligence"]
 
 
 def _escape(value: str) -> str:

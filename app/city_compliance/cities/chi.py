@@ -17,14 +17,14 @@ SPEC = CitySpec(
     name="Chicago",
     state="IL",
     service_name="Chicago Building Violations",
-    tags=("chicago", "building", "violations", "housing", "property"),
+    tags=("chicago", "building", "violations", "housing", "diligence"),
     description=(
-        "Does this Chicago address have open building code violations? Query "
-        "any street address in Chicago, Illinois and get recent DOB building "
-        "violations with codes, status, and inspector comments. For tenant "
-        "screening, landlord diligence, and lending checks. Input: address "
-        "string. Output: JSON, live City of Chicago open data. Note: citywide "
-        "rental-license registry is not published as a single open feed."
+        "Chicago building violations address check: open DOB code cases for a "
+        "street address. Property due diligence agent for Chicago Illinois "
+        "housing compliance open data. GET ?address= → recent building "
+        "violations with codes, status, inspector comments (JSON). Tenant "
+        "screening, landlord diligence, lending. Note: citywide rental-license "
+        "registry is not a single open feed."
     ),
     sample_address="7840 S WESTERN AVE",
     sample_note=(

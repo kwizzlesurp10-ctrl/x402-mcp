@@ -15,14 +15,14 @@ SPEC = CitySpec(
     code="sea",
     name="Seattle",
     state="WA",
-    service_name="Seattle Rental Compliance",
-    tags=("seattle", "rental", "compliance", "housing", "property"),
+    service_name="Seattle Rental Registration",
+    tags=("seattle", "rental", "registration", "housing", "diligence"),
     description=(
-        "Is this Seattle rental property registered under RRIO? Query any "
-        "street address in Seattle, Washington and get rental registration "
-        "status, unit count, expiration, and property contact. For tenant "
-        "screening, landlord due diligence, and real-estate checks. Input: "
-        "address string. Output: JSON, live City of Seattle open data."
+        "Seattle rental registration check (RRIO): is this property licensed / "
+        "registered? Property due diligence agent for Seattle housing compliance "
+        "open data. GET ?address= → rental registration status, unit count, "
+        "expiration, contact. Live City of Seattle JSON. Tenant screening, "
+        "landlord DD, real-estate checks."
     ),
     sample_address="1531 BELMONT AVE",
     sample_note=(

@@ -22,8 +22,8 @@ from app.config import settings
 log = logging.getLogger("x402")
 
 PRODUCT_ID = "us-rental-diligence-pack"
-SERVICE_NAME = "US Rental Diligence Pack"  # <=32
-SERVICE_TAGS = ["rental", "compliance", "multicity", "housing", "due-diligence"]
+SERVICE_NAME = "Property Due Diligence Pack"  # <=32
+SERVICE_TAGS = ["due-diligence", "housing", "compliance", "multicity", "agent"]
 
 CITY_CODES = tuple(sorted(CITIES.keys()))
 CityCode = Literal[
@@ -44,11 +44,11 @@ CityCode = Literal[
 ]
 
 RESOURCE_DESCRIPTION = (
-    "Screen up to 5 US rental addresses across our open-data city network in one "
-    "paid call. POST JSON {properties:[{city_code,address}]}. Returns per-property "
-    "compliance_verdict, license/violation/condemned fields where available, pack "
-    "risk_summary, and sources. Cities: mn sea nyc chi den sf lax bos phi orl nola "
-    "moco gain kc. Single-address $0.01 checks: /us/{code}/property-check."
+    "Property due diligence agent pack: multi-city batch housing compliance open "
+    "data. POST properties[{city_code,address}] (1-5) → per-address "
+    "compliance_verdict + pack risk_summary in one x402 settle ($1.50 USDC). "
+    "Portfolio screen across mn sea nyc chi den sf lax bos phi orl nola moco gain "
+    "kc. Not the single-address $0.01 tier — those stay at /us/{code}/property-check."
 )
 
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {

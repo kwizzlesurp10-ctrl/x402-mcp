@@ -16,13 +16,13 @@ SPEC = CitySpec(
     name="Denver",
     state="CO",
     service_name="Denver STR License Check",
-    tags=("denver", "str", "rental", "license", "housing"),
+    tags=("denver", "str", "rental-license", "housing", "diligence"),
     description=(
-        "Does this Denver address hold an active short-term rental license? "
-        "Query any street address in Denver, Colorado and get STR license "
-        "number, status, parcel, and expiration from state open data. For "
-        "host compliance, HOA/property manager checks, and agent workflows. "
-        "Input: address string. Output: JSON, live Colorado/Denver open data."
+        "Denver short term rental license check: is this property licensed for "
+        "STR? Property due diligence agent for Denver Colorado housing "
+        "compliance open data. GET ?address= → short-term rental license number, "
+        "status, parcel, expiration. Live Colorado/Denver JSON. Host compliance, "
+        "HOA/property manager, agent workflows."
     ),
     sample_address="1945 S GILPIN ST",
     sample_note=(

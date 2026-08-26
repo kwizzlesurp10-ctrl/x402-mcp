@@ -17,13 +17,12 @@ SPEC = CitySpec(
     name="Montgomery County",
     state="MD",
     service_name="MoCo Housing License Check",
-    tags=("montgomery", "maryland", "rental", "license", "housing"),
+    tags=("montgomery", "rental-license", "housing", "compliance", "diligence"),
     description=(
-        "Is this Montgomery County, Maryland residential rental licensed, and "
-        "are there active housing code violations? Query a street address and "
-        "get license status/type/units plus open code cases. For tenant "
-        "screening and landlord diligence in MoCo (not limited to one city). "
-        "Input: address string. Output: JSON, live Montgomery County open data."
+        "Is this property licensed in Montgomery County MD? Property due "
+        "diligence agent for MoCo housing compliance open data — rental license "
+        "status/type/units plus active housing code violations. GET ?address= → "
+        "JSON. Tenant screening, landlord diligence (county-wide, not one city)."
     ),
     sample_address="19515 FREDERICK RD",
     sample_note=(

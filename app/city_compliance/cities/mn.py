@@ -16,17 +16,15 @@ SPEC = CitySpec(
     code="mn",
     name="Minneapolis",
     state="MN",
-    service_name="MN Rental Compliance",
-    tags=("minneapolis", "rental", "compliance", "housing", "property"),
+    service_name="MN Rental License Check",
+    tags=("minneapolis", "rental-license", "compliance", "housing", "diligence"),
     description=(
-        "Is this Minneapolis rental property licensed and in compliance? Query "
-        "any street address in Minneapolis, Minnesota (Hennepin County) and get "
-        "the active rental license -- status, tier, licensed unit count, "
-        "expiration -- plus violation and code-enforcement case history, and "
-        "whether the property is condemned or boarded. For tenant screening, "
-        "landlord and property-manager due diligence, real-estate and lending "
-        "checks. Input: address string. Output: JSON, live City of Minneapolis "
-        "open data. (US network path; canonical product also at /mn/property-check.)"
+        "Minneapolis rental license check: is this property licensed? Property "
+        "due diligence agent path for Minneapolis Minnesota (Hennepin) housing "
+        "compliance open data. GET ?address= → rental license status/tier/units/"
+        "expiration, violation history, condemned/boarded, compliance_verdict. "
+        "Tenant screening, landlord DD, lending. Live City JSON. US network alias "
+        "of /mn/property-check."
     ),
     sample_address="1700 Penn Ave N",
     sample_note=(
