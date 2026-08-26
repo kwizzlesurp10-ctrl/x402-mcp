@@ -178,7 +178,13 @@ def output_examples() -> dict[str, dict[str, Any]]:
     Imported lazily: these modules pull in the RPC and compliance stacks, and
     the spec is built per request.
     """
-    from app import diligence_pack, finality_check, mn_compliance, tx_decision
+    from app import (
+        diligence_pack,
+        finality_check,
+        mn_compliance,
+        property_due_diligence_agent,
+        tx_decision,
+    )
     from app.city_compliance import registry as city_registry
 
     examples: dict[str, dict[str, Any]] = {
@@ -186,6 +192,9 @@ def output_examples() -> dict[str, dict[str, Any]]:
         "/base/finality-check": finality_check.DISCOVERY_OUTPUT_EXAMPLE,
         "/mn/property-check": mn_compliance.DISCOVERY_OUTPUT_EXAMPLE,
         "/tasks/us-rental-diligence": diligence_pack.DISCOVERY_OUTPUT_EXAMPLE,
+        "/agent/property-due-diligence": (
+            property_due_diligence_agent.DISCOVERY_OUTPUT_EXAMPLE
+        ),
     }
     if settings.pinned_pulse_product_id:
         pid = settings.pinned_pulse_product_id
