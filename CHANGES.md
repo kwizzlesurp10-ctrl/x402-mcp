@@ -134,3 +134,17 @@ Found by looking at the deployed page rather than by a failing test:
   family, has earned nothing, and is still `listed` — so the cataloged listing,
   anything with revenue, any sold row, and any composite are all untouchable.
   `tests/test_registry_prune.py` pins each of those four guarantees.
+
+## 2026-08-27 — Fund-First Settle Ticket
+
+Additive SKU. Payment settles to `X402_PAY_TO_ADDRESS` before any paid payload.
+
+- `app/config.py` — `fund_first_ticket_price = "$0.05"` (only price source)
+- `app/fund_first.py` — free `GET /pay/ticket/sample`; paid handler is settle-after-only
+- `app/x402_middleware_pilot.py` — `PRODUCT_IDS["/pay/ticket"] = "fund-first-ticket"`; RouteConfig uses `resolve_revenue_network()`; `on_after_settle` records revenue then captures ctx
+- `app/main.py` — include sample router only
+- `app/diligence_routes.py` — optional `X-FUND-FIRST-TICKET` (one-use grant; 422 does not consume)
+- `docs/FUND-FIRST-TICKET.md` — unpaid 402 / sample / operator-only live settle
+- `tests/test_fund_first.py` — hermetic; no live USDC
+
+Join key for `/demand` and ledger: `fund-first-ticket`. Pulse, `/base/tx-decision`, `PINNED_PULSE_PRODUCT_ID`, `render.yaml` untouched. No MCP tool.

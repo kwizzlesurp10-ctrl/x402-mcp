@@ -60,6 +60,7 @@ router = APIRouter()
 PRODUCT_IDS = {
     "/base/finality-check": "base-finality-check",
     "/pilot/ping": "pilot-ping",
+    "/pay/ticket": "fund-first-ticket",
 }
 
 
@@ -69,6 +70,8 @@ def _configured_price(product_id: str) -> str | None:
         return settings.finality_check_price
     if product_id == "pilot-ping":
         return settings.middleware_pilot_price
+    if product_id == "fund-first-ticket":
+        return settings.fund_first_ticket_price
     return None
 
 
@@ -140,18 +143,30 @@ def _record_settled_revenue(ctx: Any) -> None:
         tx = getattr(result, "transaction", None)
         from app.swarm import ledger_writer
 
+        network = str(
+            getattr(result, "network", None)
+            or getattr(requirements, "network", None)
+            or settings.x402_default_network
+        )
+        payer = getattr(result, "payer", None)
         ledger_writer.record_revenue(
             agent_id=product_id,
             amount_usdc=amount,
-            network=str(
-                getattr(result, "network", None)
-                or getattr(requirements, "network", None)
-                or settings.x402_default_network
-            ),
+            network=network,
             product_id=product_id,
             tx=str(tx) if tx else None,
-            payer=getattr(result, "payer", None),
+            payer=payer,
         )
+        if product_id == "fund-first-ticket":
+            from app import fund_first
+
+            fund_first.capture_settlement(
+                tx=str(tx) if tx else None,
+                payer=payer,
+                network=network,
+                amount_usdc=amount,
+                asset=getattr(requirements, "asset", None),
+            )
     except Exception:  # noqa: BLE001 — a ledger row is never worth a lost sale
         log.warning("middleware pilot: revenue ledger write failed", exc_info=True)
 
@@ -246,8 +261,12 @@ def register(app: Starlette) -> None:
 
     from x402.http.types import PaymentOption, RouteConfig
 
-    from app import finality_check
-    from app.x402_services import _build_discovery_extension, _resource_server
+    from app import finality_check, fund_first
+    from app.x402_services import (
+        _build_discovery_extension,
+        _resource_server,
+        resolve_revenue_network,
+    )
 
     # This server instance is exclusive to the two routes below, so the hook
     # cannot fire for any other product's settlement.
@@ -263,6 +282,16 @@ def register(app: Starlette) -> None:
         )
 
     tags = [t.strip()[:32] for t in settings.bazaar_service_tags.split(",") if t.strip()][:5]
+
+    fund_first_extensions = None
+    if settings.bazaar_discoverable:
+        fund_first_extensions = _build_discovery_extension(
+            "GET",
+            fund_first.DISCOVERY_INPUT_EXAMPLE,
+            fund_first.DISCOVERY_OUTPUT_EXAMPLE,
+        )
+
+    ticket_network = resolve_revenue_network()
 
     routes = {
         "GET /pilot/ping": RouteConfig(
@@ -293,9 +322,24 @@ def register(app: Starlette) -> None:
             tags=tags or None,
             extensions=finality_extensions,
         ),
+        "GET /pay/ticket": RouteConfig(
+            accepts=PaymentOption(
+                scheme="exact",
+                pay_to=settings.x402_pay_to_address,
+                price=settings.fund_first_ticket_price,
+                network=ticket_network,
+            ),
+            resource=fund_first.resource_url(),
+            description=fund_first.RESOURCE_DESCRIPTION,
+            mime_type="application/json",
+            service_name=fund_first.SERVICE_NAME,
+            tags=list(fund_first.SERVICE_TAGS),
+            extensions=fund_first_extensions,
+        ),
     }
 
     app.include_router(router)
+    app.include_router(fund_first.paid_router)
     app.add_middleware(
         instrumented_middleware_class(), routes=routes, server=server
     )

@@ -206,7 +206,7 @@ def _public_base_from_request(request: Request) -> str:
 from app import x402_middleware_pilot  # noqa: E402
 from app.city_compliance.routes import router as city_compliance_router  # noqa: E402
 from app.diligence_routes import router as diligence_router  # noqa: E402
-from app.fund_first_ticket import router as fund_first_ticket_router  # noqa: E402
+from app.fund_first import sample_router as fund_first_sample_router  # noqa: E402
 from app.property_due_diligence_routes import (  # noqa: E402
     router as property_due_diligence_router,
 )
@@ -215,7 +215,7 @@ x402_middleware_pilot.register(app)
 app.include_router(city_compliance_router)
 app.include_router(diligence_router)
 app.include_router(property_due_diligence_router)
-app.include_router(fund_first_ticket_router)
+app.include_router(fund_first_sample_router)
 
 
 def _public_openapi() -> dict:

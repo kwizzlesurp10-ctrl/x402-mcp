@@ -183,7 +183,7 @@ def output_examples() -> dict[str, dict[str, Any]]:
     from app import (
         diligence_pack,
         finality_check,
-        fund_first_ticket,
+        fund_first,
         mn_compliance,
         property_due_diligence_agent,
         tx_decision,
@@ -198,7 +198,7 @@ def output_examples() -> dict[str, dict[str, Any]]:
         "/agent/property-due-diligence": (
             property_due_diligence_agent.DISCOVERY_OUTPUT_EXAMPLE
         ),
-        "/pay/ticket": fund_first_ticket.DISCOVERY_OUTPUT_EXAMPLE,
+        "/pay/ticket": fund_first.DISCOVERY_OUTPUT_EXAMPLE,
     }
     if settings.pinned_pulse_product_id:
         pid = settings.pinned_pulse_product_id

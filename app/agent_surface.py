@@ -151,7 +151,10 @@ def _us_city_paid_resources(base: str) -> list[dict[str, Any]]:
 
 def paid_resources() -> list[dict[str, Any]]:
     """Every paid HTTP resource this deployment serves, priced from live config."""
+    from app.x402_services import resolve_revenue_network
+
     base = _base()
+    ticket_network = resolve_revenue_network()
     res = [
         {
             "url": f"{base}/base/tx-decision",
@@ -234,7 +237,7 @@ def paid_resources() -> list[dict[str, Any]]:
             "url": f"{base}/pay/ticket",
             "method": "GET",
             "price": settings.fund_first_ticket_price,
-            "network": settings.x402_default_network,
+            "network": ticket_network,
             "name": "Fund-First Settle Ticket",
             "product_id": "fund-first-ticket",
             "what": "Pay first: USDC settles to payTo before any paid payload. "

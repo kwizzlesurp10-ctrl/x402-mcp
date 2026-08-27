@@ -140,7 +140,7 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
     assert payment_required is not None
 
     signature = request.headers.get("PAYMENT-SIGNATURE")
-    from app.fund_first_ticket import GRANT_HEADER, consume_grant, peek_grant
+    from app.fund_first import GRANT_HEADER, consume_grant, peek_grant
 
     grant_hdr = request.headers.get(GRANT_HEADER)
     if not signature and not grant_hdr:
