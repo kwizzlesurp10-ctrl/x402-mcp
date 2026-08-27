@@ -219,6 +219,31 @@ def paid_resources() -> list[dict[str, Any]]:
             },
         },
         {
+            "url": f"{base}/pay/ticket/sample",
+            "method": "GET",
+            "price": "free",
+            "network": None,
+            "name": "Fund-First Settle Ticket (free sample)",
+            "what": "Free ticket shape and pointers. Unpaid GET /pay/ticket "
+            "returns 402; paid GET settles USDC to payTo then returns a "
+            "one-use grant for POST /tasks/us-rental-diligence. No pack "
+            "compute on the sample.",
+            "params": {},
+        },
+        {
+            "url": f"{base}/pay/ticket",
+            "method": "GET",
+            "price": settings.fund_first_ticket_price,
+            "network": settings.x402_default_network,
+            "name": "Fund-First Settle Ticket",
+            "product_id": "fund-first-ticket",
+            "what": "Pay first: USDC settles to payTo before any paid payload. "
+            "Returns a signed one-use grant that unlocks POST "
+            "/tasks/us-rental-diligence. Not a free-RPC synthesis. "
+            f"Free sample: {base}/pay/ticket/sample.",
+            "params": {},
+        },
+        {
             "url": f"{base}/us/cities",
             "method": "GET",
             "price": "free",
@@ -545,6 +570,24 @@ def agent_card() -> dict[str, Any]:
                 "Screen MN + SEA rental addresses in one paid pack",
             ],
             "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "fund-first-ticket",
+            "name": "Fund-First Settle Ticket",
+            "description": (
+                "Paid fund-first cashier: USDC settles to payTo before any paid "
+                f"payload. GET {base}/pay/ticket at "
+                f"{settings.fund_first_ticket_price} USDC on {network} (x402 exact). "
+                "Returns a one-use grant for POST /tasks/us-rental-diligence. "
+                f"Free sample: {base}/pay/ticket/sample."
+            ),
+            "tags": ["fund-first", "ticket", "usdc", "diligence", "x402"],
+            "examples": [
+                f"GET {base}/pay/ticket",
+                f"GET {base}/pay/ticket/sample",
+            ],
+            "inputModes": ["text/plain", "application/json"],
             "outputModes": ["application/json"],
         },
     ])

@@ -189,6 +189,11 @@ class Settings(BaseSettings):
     diligence_pack_max_usdc: float = 2.50
     diligence_pack_max_properties: int = 5
 
+    # Fund-First Settle Ticket (GET /pay/ticket). Dense Bazaar band: above the
+    # $0.01 city check, below the $1.50 diligence pack. Payment settles before
+    # any paid payload; the ticket grant unlocks one existing access-barrier job.
+    fund_first_ticket_price: str = "$0.05"
+
     # Middleware pilot (app/x402_middleware_pilot.py): a standalone route gated
     # via the x402 SDK's own FastAPI middleware (x402.http.middleware.fastapi)
     # instead of this repo's hand-rolled challenge/verify/settle path. Purely

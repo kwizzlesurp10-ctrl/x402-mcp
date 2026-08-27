@@ -140,7 +140,10 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
     assert payment_required is not None
 
     signature = request.headers.get("PAYMENT-SIGNATURE")
-    if not signature:
+    from app.fund_first_ticket import GRANT_HEADER, consume_grant, peek_grant
+
+    grant_hdr = request.headers.get(GRANT_HEADER)
+    if not signature and not grant_hdr:
         log.info(
             "diligence-pack 402 (no signature)",
             extra={"status_code": 402},
@@ -151,7 +154,8 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
             )
         return _402_body(payment_required)
 
-    # Paid path: parse/validate body BEFORE settle so we never charge bad input.
+    # Paid path: parse/validate body BEFORE settle/consume so we never charge
+    # (or burn a fund-first grant) on bad input.
     try:
         raw = await request.json()
     except Exception:  # noqa: BLE001
@@ -177,6 +181,40 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
                 "details": exc.errors(include_url=False),
             },
         )
+
+    if grant_hdr:
+        peeked = peek_grant(grant_hdr)
+        if peeked is None and not signature:
+            return JSONResponse(
+                status_code=402,
+                headers={"PAYMENT-REQUIRED": payment_required},
+                content={
+                    "error": "payment_rejected",
+                    "invalid_reason": "fund_first_grant_invalid_or_used",
+                },
+            )
+        if peeked is not None:
+            consumed = consume_grant(grant_hdr)
+            if consumed:
+                pack = await diligence_pack.build_pack(
+                    body,
+                    payment_settled=True,
+                    settlement={"grant": consumed["ticket_id"]},
+                )
+                latency = round((time.monotonic() - t0) * 1000)
+                log.info(
+                    "diligence-pack unlocked by fund-first grant",
+                    extra={
+                        "status_code": 200,
+                        "latency_ms": latency,
+                        "ok_count": pack.get("ok_count"),
+                        "property_count": pack.get("property_count"),
+                    },
+                )
+                return JSONResponse(content=pack)
+
+    if not signature:
+        return _402_body(payment_required)
 
     result = await diligence_pack.verify_and_settle(signature, payment_required)
     if not result.get("is_valid") or not result.get("payment_settled"):
