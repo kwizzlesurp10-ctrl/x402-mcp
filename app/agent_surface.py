@@ -353,18 +353,12 @@ def llms_txt() -> str:
         "",
         f"- x402 manifest: {base}/.well-known/x402",
         f"- MCP manifest:  {base}/.well-known/mcp ({TOOL_COUNT} tools, Streamable HTTP at /mcp/mcp)",
-<<<<<<< HEAD
         f"- MCP server card: {base}/.well-known/mcp/server-card.json",
         f"- A2A Agent Card: {base}/.well-known/agent-card.json (legacy: {base}/.well-known/agent.json)",
         f"- Agents registry: {base}/.well-known/agents.json",
+        f"- AI Plugin Spec:  {base}/.well-known/ai-plugin.json",
         f"- Funding (payTo): {base}/.well-known/funding.json",
         f"- OpenAPI: {base}/openapi.json",
-=======
-        f"- A2A Agent Card: {base}/.well-known/agent-card.json",
-        f"- Agents Registry: {base}/.well-known/agents.json",
-        f"- AI Plugin Spec:  {base}/.well-known/ai-plugin.json",
-        f"- MCP Server Card: {base}/.well-known/mcp/server-card.json",
->>>>>>> 1ceeae6 (feat(a2a): enhance A2A agent cards, ROI value propositions, and ai-plugin manifest)
         f"- Health: {base}/health · Checks: {base}/doctor · Ops: {base}/dashboard",
         "",
         "## Fund this operator (USDC on Base)",
@@ -381,12 +375,8 @@ def llms_txt() -> str:
         "",
         "## Operator",
         "",
-<<<<<<< HEAD
-        f"- Repository: {REPO_URL}",
-=======
         "- Provider: SEVTECH (EIN verified, Coinbase KYB verified)",
-        "- Repository: https://github.com/kwizzlesurp10-ctrl/x402-mcp",
->>>>>>> 1ceeae6 (feat(a2a): enhance A2A agent cards, ROI value propositions, and ai-plugin manifest)
+        f"- Repository: {REPO_URL}",
         "- Seller-only deployment: this host holds no spend key (verify:",
         f"  {base}/health shows wallet_configured:false).",
         "",

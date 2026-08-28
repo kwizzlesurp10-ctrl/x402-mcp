@@ -12,7 +12,10 @@ from typing import AsyncIterator, Literal
 from datetime import datetime
 
 import httpx
-from upstash_redis import Redis
+try:
+    from upstash_redis import Redis
+except ImportError:
+    Redis = None
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
