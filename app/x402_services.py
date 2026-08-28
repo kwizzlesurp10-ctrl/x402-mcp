@@ -148,6 +148,13 @@ def _decode_payment_inputs(
     )
     from x402.schemas import PaymentPayload, PaymentRequirements
 
+    # Buyer's signed payload (PAYMENT-SIGNATURE header value).
+    try:
+        payload = decode_payment_signature_header(payment_signature)
+    except Exception:  # noqa: BLE001 — fall back to raw base64 json
+        raw = json.loads(base64.b64decode(payment_signature).decode("utf-8"))
+        payload = PaymentPayload.model_validate(raw)
+
     # Payment requirements: prefer the full PAYMENT-REQUIRED header (has accepts),
     # else treat the payload as a single bare requirement object.
     try:
@@ -155,18 +162,21 @@ def _decode_payment_inputs(
         accepts = list(getattr(pr, "accepts", []) or [])
         if not accepts:
             raise ValueError("no accepts")
-        requirements = accepts[0]
+        
+        # Match the requirement the buyer actually accepted
+        accepted_net = getattr(payload.accepted, "network", None)
+        accepted_asset = getattr(payload.accepted, "asset", None)
+        matched = None
+        for req in accepts:
+            if getattr(req, "network", None) == accepted_net and getattr(req, "asset", None) == accepted_asset:
+                matched = req
+                break
+        
+        requirements = matched if matched else accepts[0]
     except Exception:  # noqa: BLE001 — fall back to bare requirement dict
         raw = json.loads(base64.b64decode(payment_required).decode("utf-8"))
         bare = (raw.get("accepts") or [raw])[0]
         requirements = PaymentRequirements.model_validate(bare)
-
-    # Buyer's signed payload (PAYMENT-SIGNATURE header value).
-    try:
-        payload = decode_payment_signature_header(payment_signature)
-    except Exception:  # noqa: BLE001 — fall back to raw base64 json
-        raw = json.loads(base64.b64decode(payment_signature).decode("utf-8"))
-        payload = PaymentPayload.model_validate(raw)
 
     return payload, requirements
 
@@ -670,39 +680,54 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     from x402.http import encode_payment_required_header
     from x402.schemas import PaymentRequired
 
-    config = ResourceConfig(
-        scheme=params.scheme,
-        network=params.network,
-        pay_to=pay_to,
-        price=params.price,
-        description=description,
-    )
-    facilitator = _facilitator_client(params.network)
-    server = x402ResourceServer(facilitator)
-    _register_server_schemes(server)
-    try:
-        server.initialize()
-        requirements = server.build_payment_requirements(config)
-    except Exception as exc:
-        logger.warning("Facilitator initialize skipped (unauthenticated/offline): %s", exc)
-        from x402.schemas import PaymentRequirements
-        price_str = str(params.price or "$0.01").lstrip("$")
+    networks = [n.strip() for n in params.network.split(",") if n.strip()]
+    if not networks:
+        networks = ["eip155:84532"]
+
+    requirements = []
+    
+    for net in networks:
+        config = ResourceConfig(
+            scheme=params.scheme,
+            network=net,
+            pay_to=pay_to,
+            price=params.price,
+            description=description,
+        )
+        facilitator = _facilitator_client(net)
+        server = x402ResourceServer(facilitator)
+        _register_server_schemes(server)
         try:
-            atomic = float(price_str) * 1_000_000
-        except ValueError:
-            atomic = 10000.0
-        atomic_str = str(int(round(atomic)))
-        requirements = [
-            PaymentRequirements(
-                scheme=params.scheme,
-                network=params.network,
-                pay_to=pay_to,
-                amount=atomic_str,
-                asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                max_timeout_seconds=300,
-                extra={},
+            server.initialize()
+            requirements.extend(server.build_payment_requirements(config))
+        except Exception as exc:
+            logger.warning("Facilitator initialize skipped for %s (offline): %s", net, exc)
+            from x402.schemas import PaymentRequirements
+            price_str = str(params.price or "$0.01").lstrip("$")
+            try:
+                atomic = float(price_str) * 1_000_000
+            except ValueError:
+                atomic = 10000.0
+            atomic_str = str(int(round(atomic)))
+            
+            if "solana" in net.lower():
+                asset = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+            elif "42161" in net:
+                asset = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+            else:
+                asset = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
+            requirements.append(
+                PaymentRequirements(
+                    scheme=params.scheme,
+                    network=net,
+                    pay_to=pay_to,
+                    amount=atomic_str,
+                    asset=asset,
+                    max_timeout_seconds=300,
+                    extra={},
+                )
             )
-        ]
 
     # Bazaar discoverability: with a resource_url the challenge carries
     # ResourceInfo, and (unless opted out) the bazaar discovery extension —
@@ -745,7 +770,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
         "scheme": params.scheme,
         "resource": resource_info.model_dump() if resource_info else None,
         "discoverable": extensions is not None,
-        "facilitator_url": _facilitator_url_for(params.network),
+        "facilitator_url": _facilitator_url_for(networks[0] if networks else params.network),
         "sdk": "x402ResourceServer.build_payment_requirements",
     }
 
