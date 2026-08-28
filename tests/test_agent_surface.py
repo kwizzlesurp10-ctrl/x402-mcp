@@ -213,3 +213,16 @@ def test_well_known_x402_includes_payto() -> None:
     assert body["asset"].lower().endswith("2913")
     assert body["funding"].endswith("/.well-known/funding.json")
 
+
+def test_ai_plugin_json_served_at_well_known() -> None:
+    response = client.get("/.well-known/ai-plugin.json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema_version"] == "v1"
+    assert "name_for_model" in body
+    assert "description_for_model" in body
+    assert body["auth"]["type"] == "none"
+    assert body["api"]["type"] == "openapi"
+    assert body["contact_email"] == "kwizzlesurp10@gmail.com"
+
+

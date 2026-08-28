@@ -651,6 +651,14 @@ async def well_known_agent_json() -> dict:
     return agent_surface.agent_card()
 
 
+@app.get("/.well-known/ai-plugin.json")
+async def well_known_ai_plugin_json() -> dict:
+    """Standard OpenAI / LangChain / AutoGPT / Cursor AI Plugin Discovery Manifest."""
+    from app import agent_surface
+
+    return agent_surface.ai_plugin_json()
+
+
 @app.get("/llms.txt", response_class=PlainTextResponse)
 async def llms_txt() -> str:
     """Agent-facing docs: endpoints, prices, and the failure modes that matter."""

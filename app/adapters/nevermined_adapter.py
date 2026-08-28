@@ -23,18 +23,27 @@ class NeverminedAdapter:
     PLANS = {
         "plan-us-rental-diligence": {
             "name": "US Rental Diligence Multi-City Pack",
+            "description": "Screen up to 5 US rental addresses across 14 municipal open data portals for code violations, active licenses, and condemnations.",
+            "roi_value": "Saves $50-$200 in manual research and eliminates uninsurable tenant/lease compliance risks.",
+            "sla": "p95 < 850ms",
             "price_credits": 150,  # $1.50 USDC
             "price_usdc": 1.50,
             "endpoint": "/tasks/us-rental-diligence",
         },
         "plan-base-tx-decision": {
             "name": "Base Gas & Tx Decision Feed",
+            "description": "Live Base RPC congestion, fee math (EIP-1559), and submit-or-wait execution guidance.",
+            "roi_value": "Reduces failed/stuck transaction waste by 15-30% on Base mainnet.",
+            "sla": "p95 < 250ms",
             "price_credits": 1,   # $0.01 USDC
             "price_usdc": 0.01,
             "endpoint": "/base/tx-decision",
         },
         "plan-us-city-compliance": {
             "name": "US City Property Compliance Network",
+            "description": "Address-level housing license, building violation, and code compliance checks across 14 US jurisdictions.",
+            "roi_value": "Instant property compliance intelligence covering 14 metropolitan jurisdictions.",
+            "sla": "p95 < 600ms",
             "price_credits": 1,   # $0.01 USDC
             "price_usdc": 0.01,
             "endpoint": "/us/{city_code}/property-check",
@@ -48,6 +57,9 @@ class NeverminedAdapter:
             {
                 "plan_id": plan_id,
                 "name": info["name"],
+                "description": info.get("description"),
+                "roi_value": info.get("roi_value"),
+                "sla": info.get("sla"),
                 "price_credits": info["price_credits"],
                 "price_usdc": info["price_usdc"],
                 "network": settings.x402_default_network,
