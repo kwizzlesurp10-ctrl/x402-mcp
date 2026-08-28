@@ -116,7 +116,7 @@ class UpstashAnalyticsMiddleware(BaseHTTPMiddleware):
             redis.incr("analytics:total_hits")
             redis.hincrby("analytics:endpoints", path, 1)
             redis.hincrby("analytics:status_codes", str(status_code), 1)
-            redis.xadd("x402:stream:logs", {
+            redis.xadd("x402:stream:logs", "*", {
                 "endpoint": path,
                 "status": status_code,
                 "timestamp": datetime.now().isoformat()
