@@ -26,7 +26,7 @@ const PRODUCTS: ResourceProduct[] = [
     endpoint: "/us/cities",
     description:
       "Free machine catalog of 14-jurisdiction property compliance endpoints. Canonical Visit URL for Gold402/24K.",
-    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+    seller: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e",
   },
   {
     id: "sea-property-check-sample",
@@ -36,7 +36,7 @@ const PRODUCTS: ResourceProduct[] = [
     network: "Base Mainnet (8453)",
     endpoint: "/us/sea/property-check/sample",
     description: "Canonical free-sample Resource URL for the US city network",
-    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+    seller: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e",
   },
   {
     id: "sea-property-check-01",
@@ -47,7 +47,7 @@ const PRODUCTS: ResourceProduct[] = [
     endpoint: "/us/sea/property-check",
     description:
       "Canonical paid Resource URL — Seattle RRIO rental registration via City of Seattle open data",
-    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+    seller: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e",
   },
   {
     id: "4cc95d8e0d7b4c628d3afcab0edf32ae",
@@ -57,7 +57,7 @@ const PRODUCTS: ResourceProduct[] = [
     network: "Base Mainnet (8453)",
     endpoint: "/swarm/products/4cc95d8e0d7b4c628d3afcab0edf32ae/purchase",
     description: "Live settlement-conditions intelligence (EIP-1559 gas math + block utilization + ETH spot price)",
-    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+    seller: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e",
   },
   {
     id: "mn-property-check-01",
@@ -67,7 +67,7 @@ const PRODUCTS: ResourceProduct[] = [
     network: "Base Mainnet (8453)",
     endpoint: "/mn/property-check?address=3500+Nicollet+Ave",
     description: "Rental compliance snapshot composed from live city open data and license records",
-    seller: "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+    seller: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e",
   },
   {
     id: "ai-llm-inference-01",

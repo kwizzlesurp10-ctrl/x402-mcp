@@ -18,7 +18,7 @@ from app.main import app
 
 client = TestClient(app)
 
-PAY_TO = "0xAB745e5F576667037696e78ba7dA28E193E4423D"
+PAY_TO = "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e"
 
 
 @pytest.fixture(autouse=True)

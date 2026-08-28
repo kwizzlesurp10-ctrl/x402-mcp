@@ -132,7 +132,7 @@ cd C:\Users\Keith\x402-mcp; .venv\Scripts\python.exe -m app.doctor          # fa
 cd C:\Users\Keith\x402-mcp; .venv\Scripts\python.exe -m pytest --collect-only -q   # import smoke; catches a lifted mcp/solana pin
 ```
 
-Reproduce CI exactly with `$env:X402_PAY_TO_ADDRESS='0xAB745e5F576667037696e78ba7dA28E193E4423D'` — six middleware-gated tests 404 without it.
+Reproduce CI exactly with `$env:X402_PAY_TO_ADDRESS='0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e'` — six middleware-gated tests 404 without it.
 
 After **any** edit to a `RESOURCE_DESCRIPTION` or `DISCOVERY_*_EXAMPLE`, run:
 ```

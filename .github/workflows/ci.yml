@@ -26,7 +26,7 @@ jobs:
           # fail that pass on any configured box. Public receive address, not a
           # secret — the same value is committed in sale-watch.yml. No spend
           # key is ever set in CI, so nothing here can move money.
-          X402_PAY_TO_ADDRESS: '0xAB745e5F576667037696e78ba7dA28E193E4423D'
+          X402_PAY_TO_ADDRESS: '0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e'
         run: python -m pytest -v
       - name: Dashboard deps
         working-directory: dashboard

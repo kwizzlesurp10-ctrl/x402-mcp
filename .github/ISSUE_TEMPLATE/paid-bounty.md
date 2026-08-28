@@ -9,7 +9,7 @@ labels: []
 
 - Network: Base (`eip155:8453`)
 - Asset: USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
-- payTo: `0xAB745e5F576667037696e78ba7dA28E193E4423D`
+- payTo: `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e`
 - Amount: $______ USDC (atomic = amount * 1e6)
 - This is payment for a delivered artifact or a voluntary tip. Not a token, not equity, not a raise.
 

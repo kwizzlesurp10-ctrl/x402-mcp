@@ -29,7 +29,7 @@ jobs:
     env:
       RPC: https://mainnet.base.org
       USDC: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
-      PAY_TO: '0xAB745e5F576667037696e78ba7dA28E193E4423D'
+      PAY_TO: '0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e'
       # Comma-separated, lowercase. Every wallet WE settle from. Anything else
       # paying PAY_TO is a stranger.
       OUR_WALLETS: '0x67ffc9b439ae24b0f7c7ca837c4adfafa06f9d38'

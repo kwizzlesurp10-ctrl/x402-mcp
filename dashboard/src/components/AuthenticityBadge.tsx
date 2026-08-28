@@ -14,7 +14,7 @@ export function AuthenticityBadge({
   const payToAddress =
     stats?.config?.pay_to_address ||
     wallet?.receive_address ||
-    "0xAB745e5F576667037696e78ba7dA28E193E4423D";
+    "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e";
   const baseAppId = "6a7018e2a8c4f2b6db3b3e71";
   const hasOwnershipProof = stats?.config?.has_ownership_proofs ?? false;
   const proofsCount = stats?.config?.ownership_proofs_count ?? 0;
