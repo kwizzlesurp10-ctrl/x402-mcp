@@ -11,7 +11,7 @@ services:
   - type: web
     name: x402-mcp
     runtime: docker
-    plan: free
+    plan: starter
     region: oregon
     envVars:
       # --- secrets: set in the Render dashboard, never synced from git ---
