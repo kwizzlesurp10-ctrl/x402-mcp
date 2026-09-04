@@ -1,6 +1,6 @@
 # x402 Micropayments MCP
 
-[![smithery badge](https://smithery.ai/badge/kwizzlesurp10/x402-mcp)](https://smithery.ai/server/kwizzlesurp10/x402-mcp)
+[![LightNow capabilities](https://lightnow.ai/badge/io.github.kwizzlesurp10-ctrl/x402-mcp)](https://lightnow.ai/servers/io.github.kwizzlesurp10-ctrl/x402-mcp)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Mainnet](https://img.shields.io/badge/Network-Base%20Mainnet%20(8453)-0052FF.svg)](https://base.org)
 [![A2A Protocol](https://img.shields.io/badge/Identity-A2A%20v1.0%20Agent%20Card-green.svg)](https://x402-mcp.onrender.com/.well-known/agent-card.json)
