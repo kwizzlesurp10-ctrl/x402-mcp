@@ -141,6 +141,7 @@ app.add_middleware(UpstashAnalyticsMiddleware)
 def _cors_origins() -> list[str]:
     origins = [
         "https://x402-mission-control.vercel.app",
+        "https://kwizzle-landing-page.onrender.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
