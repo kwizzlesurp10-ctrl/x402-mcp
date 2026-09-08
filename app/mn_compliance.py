@@ -136,20 +136,23 @@ async def check_property(address: str) -> dict[str, Any]:
         violations: list[dict] = []
         condemned: list[dict] = []
         if apns:
+            import asyncio
             apn_list = ", ".join(f"'{_escape(a)}'" for a in apns)
-            violations = await _query(
-                client,
-                "CaseViolations",
-                f"APN IN ({apn_list})",
-                VIOLATION_FIELDS,
-                200,
-            )
-            condemned = await _query(
-                client,
-                "Condemned_by_Boarding",
-                f"APN IN ({apn_list})",
-                CONDEMNED_FIELDS,
-                10,
+            violations, condemned = await asyncio.gather(
+                _query(
+                    client,
+                    "CaseViolations",
+                    f"APN IN ({apn_list})",
+                    VIOLATION_FIELDS,
+                    200,
+                ),
+                _query(
+                    client,
+                    "Condemned_by_Boarding",
+                    f"APN IN ({apn_list})",
+                    CONDEMNED_FIELDS,
+                    10,
+                )
             )
         else:
             # No license found — still check condemned/boarded by address so a

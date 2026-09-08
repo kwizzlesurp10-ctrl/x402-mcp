@@ -42,18 +42,21 @@ async def check_property(address: str) -> dict[str, Any]:
     if hit and time.monotonic() - hit[0] <= _CACHE_TTL:
         return hit[1]
 
-    lic_rows = await soda_get(
-        PORTAL,
-        LIC_ID,
-        where=address_like_clause("streetaddress", address),
-        limit=25,
-    )
-    viol_rows = await soda_get(
-        PORTAL,
-        VIOL_ID,
-        where=address_like_clause("street_address", address),
-        order="date_filed DESC",
-        limit=40,
+    import asyncio
+    lic_rows, viol_rows = await asyncio.gather(
+        soda_get(
+            PORTAL,
+            LIC_ID,
+            where=address_like_clause("streetaddress", address),
+            limit=25,
+        ),
+        soda_get(
+            PORTAL,
+            VIOL_ID,
+            where=address_like_clause("street_address", address),
+            order="date_filed DESC",
+            limit=40,
+        )
     )
     registrations = [
         {
