@@ -92,21 +92,29 @@ async def check_property(address: str) -> dict[str, Any]:
         )
         return report
 
+    import asyncio
+
     where_parts = [f"upper(streetname)='{escape_soda(street)}'"]
     if house:
         where_parts.append(f"housenumber='{escape_soda(house.split()[0])}'")
-    if boro:
-        where_parts.append(f"upper(boro)='{escape_soda(boro)}'")
-    where = " AND ".join(where_parts)
+    where_base = " AND ".join(where_parts)
+    where_with_boro = where_base + (f" AND upper(boro)='{escape_soda(boro)}'" if boro else "")
 
-    regs = await soda_get(PORTAL, REG_ID, where=where, limit=20)
-    # Broader street+house if exact miss and we had boro
-    if not regs and boro and house:
-        where2 = (
-            f"upper(streetname)='{escape_soda(street)}' AND "
-            f"housenumber='{escape_soda(house.split()[0])}'"
-        )
-        regs = await soda_get(PORTAL, REG_ID, where=where2, limit=20)
+    regs_task = asyncio.create_task(soda_get(PORTAL, REG_ID, where=where_with_boro, limit=20))
+    regs2_task = None
+    if boro and house:
+        regs2_task = asyncio.create_task(soda_get(PORTAL, REG_ID, where=where_base, limit=20))
+
+    vwhere = f"upper(streetname)='{escape_soda(street)}'"
+    if house:
+        vwhere += f" AND housenumber like '{escape_soda(house.split()[0])}%'"
+    if boro:
+        vwhere += f" AND upper(boro)='{escape_soda(boro)}'"
+    viol_fallback_task = asyncio.create_task(soda_get(PORTAL, VIOL_ID, where=vwhere, order="inspectiondate DESC", limit=25))
+
+    regs = await regs_task
+    if not regs and regs2_task:
+        regs = await regs2_task
 
     building_ids = sorted({str(r["buildingid"]) for r in regs if r.get("buildingid")})
     viol_rows: list[dict[str, Any]] = []
@@ -122,14 +130,7 @@ async def check_property(address: str) -> dict[str, Any]:
         )
     else:
         # Address-only violation probe when unregistered
-        vwhere = f"upper(streetname)='{escape_soda(street)}'"
-        if house:
-            vwhere += f" AND housenumber like '{escape_soda(house.split()[0])}%'"
-        if boro:
-            vwhere += f" AND upper(boro)='{escape_soda(boro)}'"
-        viol_rows = await soda_get(
-            PORTAL, VIOL_ID, where=vwhere, order="inspectiondate DESC", limit=25
-        )
+        viol_rows = await viol_fallback_task
 
     registrations = [
         {
