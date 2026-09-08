@@ -42,19 +42,23 @@ async def check_property(address: str) -> dict[str, Any]:
     if hit and time.monotonic() - hit[0] <= _CACHE_TTL:
         return hit[1]
 
-    rows = await soda_get(
+    import asyncio
+    task_strict = asyncio.create_task(soda_get(
         PORTAL,
         RESOURCE,
         where=address_like_clause("street_address", address),
         limit=40,
-    )
+    ))
+    task_fallback = asyncio.create_task(soda_get(
+        PORTAL,
+        RESOURCE,
+        where=address_like_clause("full_address", address),
+        limit=40,
+    ))
+
+    rows = await task_strict
     if not rows:
-        rows = await soda_get(
-            PORTAL,
-            RESOURCE,
-            where=address_like_clause("full_address", address),
-            limit=40,
-        )
+        rows = await task_fallback
     recent = [
         {
             "violation_id": r.get("violationid"),

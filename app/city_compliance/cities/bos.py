@@ -95,20 +95,24 @@ async def check_property(address: str) -> dict[str, Any]:
             extra={"parse_error": "need number + street, e.g. 302 Sumner ST"},
         )
 
-    rows = await datastore_search(
+    import asyncio
+    task_strict = asyncio.create_task(datastore_search(
         PORTAL,
         RESOURCE_ID,
         filters={"violation_stno": num, "violation_street": street},
         limit=40,
-    )
+    ))
+    task_fallback = asyncio.create_task(datastore_search(
+        PORTAL, RESOURCE_ID, q=f"{num} {street}", limit=40
+    ))
+
+    rows = await task_strict
     if not rows:
         # Case-insensitive-ish fallback via free text
-        rows = await datastore_search(
-            PORTAL, RESOURCE_ID, q=f"{num} {street}", limit=40
-        )
+        fallback_rows = await task_fallback
         rows = [
             r
-            for r in rows
+            for r in fallback_rows
             if str(r.get("violation_stno") or "") == num
             and street.upper() in str(r.get("violation_street") or "").upper()
         ]

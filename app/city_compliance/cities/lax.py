@@ -71,14 +71,18 @@ async def check_property(address: str) -> dict[str, Any]:
             extra={"parse_error": "need number + street, e.g. 1015 S LA BREA AVE"},
         )
 
+    import asyncio
+
     where = f"stno='{escape_soda(num)}' AND upper(stname)='{escape_soda(street)}'"
     if predir:
-        where += f" AND upper(predir)='{escape_soda(predir)}'"
-    rows = await soda_get(PORTAL, OPEN_ID, where=where, limit=40)
-    if not rows and predir:
-        # Retry without direction
-        where2 = f"stno='{escape_soda(num)}' AND upper(stname)='{escape_soda(street)}'"
-        rows = await soda_get(PORTAL, OPEN_ID, where=where2, limit=40)
+        where_with_dir = where + f" AND upper(predir)='{escape_soda(predir)}'"
+        task_strict = asyncio.create_task(soda_get(PORTAL, OPEN_ID, where=where_with_dir, limit=40))
+        task_fallback = asyncio.create_task(soda_get(PORTAL, OPEN_ID, where=where, limit=40))
+        rows = await task_strict
+        if not rows:
+            rows = await task_fallback
+    else:
+        rows = await soda_get(PORTAL, OPEN_ID, where=where, limit=40)
 
     recent = [
         {

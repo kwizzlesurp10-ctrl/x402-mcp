@@ -45,22 +45,26 @@ async def check_property(address: str) -> dict[str, Any]:
         return hit[1]
 
     # Chicago building violations: primary address column is `address`
-    rows = await soda_get(
+    import asyncio
+    task_strict = asyncio.create_task(soda_get(
         PORTAL,
         VIOL_ID,
         where=address_like_clause("address", address),
         order="violation_date DESC",
         limit=40,
-    )
+    ))
+    task_fallback = asyncio.create_task(soda_get(
+        PORTAL,
+        VIOL_ID,
+        where=address_like_clause("violation_location", address),
+        order="violation_date DESC",
+        limit=40,
+    ))
+
+    rows = await task_strict
     if not rows:
         # Some rows only put address in violation_location
-        rows = await soda_get(
-            PORTAL,
-            VIOL_ID,
-            where=address_like_clause("violation_location", address),
-            order="violation_date DESC",
-            limit=40,
-        )
+        rows = await task_fallback
 
     recent = [
         {
