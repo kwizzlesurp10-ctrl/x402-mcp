@@ -47,8 +47,11 @@ def test_tracked_tree_does_not_advertise_retired_pay_to() -> None:
         text=True,
         encoding="utf-8",
     ).splitlines()
+    self_rel = Path(__file__).resolve().relative_to(ROOT).as_posix()
     offenders: list[str] = []
     for rel in listed:
+        if Path(rel).as_posix() == self_rel:
+            continue
         path = ROOT / rel
         if not path.is_file():
             continue
