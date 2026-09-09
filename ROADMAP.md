@@ -10,9 +10,8 @@ settled sale (#501) — it is not a roadmap item. This file covers remaining
 
 ## Now → 30 days: catalog and first revenue
 
-- [ ] Seed settlement: first settled mainnet sale, which catalogs the
-      listings in the x402 Bazaar / CDP discovery (cataloging is
-      settlement-triggered).
+- [x] First settled mainnet sales already landed (Pulse 2026-07-22; diligence
+      pack sale #501 at $1.50). Cataloging is settlement-triggered and live.
 - [ ] Index products on [Agentic.Market](https://www.agentic.market) — CDP's
       discovery surface for the x402 ecosystem.
 - [ ] Persist the product registry (listings currently in-memory; a restart
@@ -22,10 +21,12 @@ settled sale (#501) — it is not a roadmap item. This file covers remaining
 
 ## 30 → 60 days: repeat the civic-data wedge
 
-- [ ] Generalize the Minneapolis compliance pipeline into a city-portal
-      adapter (ArcGIS + Socrata) with per-dataset schema mapping.
-- [ ] Ship 3–5 more city compliance products (St. Paul, Chicago candidates)
-      at $0.01–$0.05 per call, each x402-gated and Bazaar-discoverable.
+- [x] US city compliance network is live (14 jurisdictions including Chicago,
+      NYC, Seattle, Denver, SF, LA, Boston, Philly, Orlando, NOLA, MoCo,
+      Gainesville, KC, Minneapolis) at catalog `$0.01` per
+      `GET /us/{code}/property-check`.
+- [ ] Generalize remaining city-portal adapters (ArcGIS + Socrata) for
+      *additional* cities beyond the 14 already shipping.
 - [ ] Publish the seller-storefront pattern (no spend key on the public
       host) as a standalone guide other CDP builders can copy.
 

@@ -19,12 +19,32 @@
 - **Mission Control SPA:** Same URL as seller endpoint (React SPA served at root)
 - **API Port:** 8402 (localhost), Render assigns dynamic port in production
 
-### 💰 Pricing Structure
-| Product | Price | Description |
-|---------|-------|-------------|
-| City Property Check | $0.01 USDC | Minneapolis + 14 other jurisdictions |
-| Network Pulse API | $0.25 USDC | Base Network settlement intelligence |
-| Sample Queries | FREE | Explore catalog before purchasing |
+### 💰 Pricing Structure (echoes `agent_surface.paid_resources()`)
+
+Live paid catalog — same price strings the machine catalog emits:
+
+| Product | Method / path | Price |
+|---------|---------------|-------|
+| Base tx decision | `GET /base/tx-decision` | `$0.01` |
+| Minneapolis rental compliance | `GET /mn/property-check` | `$0.01` |
+| US Multi-City Rental Diligence Pack | `POST /tasks/us-rental-diligence` | `$1.50` |
+| MN Rental License Check | `GET /us/mn/property-check` | `$0.01` |
+| Seattle Rental Registration | `GET /us/sea/property-check` | `$0.01` |
+| NYC HPD Violations Address | `GET /us/nyc/property-check` | `$0.01` |
+| Chicago Building Violations | `GET /us/chi/property-check` | `$0.01` |
+| Denver STR License Check | `GET /us/den/property-check` | `$0.01` |
+| SF Housing NOV Check | `GET /us/sf/property-check` | `$0.01` |
+| LA Code Enforcement Open | `GET /us/lax/property-check` | `$0.01` |
+| Boston Property Violations | `GET /us/bos/property-check` | `$0.01` |
+| Philly L&I Violations | `GET /us/phi/property-check` | `$0.01` |
+| Orlando STR License Check | `GET /us/orl/property-check` | `$0.01` |
+| NOLA STR License Check | `GET /us/nola/property-check` | `$0.01` |
+| MoCo Housing License Check | `GET /us/moco/property-check` | `$0.01` |
+| Gainesville Code Cases | `GET /us/gain/property-check` | `$0.01` |
+| KC Exterior Building Violations | `GET /us/kc/property-check` | `$0.01` |
+| Base transaction finality check | `GET /base/finality-check` | `$0.01` |
+
+Free samples: `GET /pulse` (Base Network Pulse preview), `GET /us/cities`, `GET /{mn,us/{code}}/property-check/sample`. Do not treat Pulse as a $0.25 unpaid-roadmap SKU — the paid doors are the rows above.
 
 ### 🛡️ Security Boundaries
 - ✅ Seller wallet holds **no spend key** — verification only
