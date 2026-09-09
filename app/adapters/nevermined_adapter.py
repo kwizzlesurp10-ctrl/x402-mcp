@@ -10,6 +10,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from app.agent_surface import DEFAULT_PAY_TO
 from app.config import settings
 from app.diligence_pack import DiligencePackRequest, PropertyQuery, build_pack
 from app.city_compliance import registry
@@ -63,7 +64,7 @@ class NeverminedAdapter:
                 "price_credits": info["price_credits"],
                 "price_usdc": info["price_usdc"],
                 "network": settings.x402_default_network,
-                "pay_to": settings.x402_pay_to_address or "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e",
+                "pay_to": settings.x402_pay_to_address or DEFAULT_PAY_TO,
                 "endpoint": info["endpoint"],
             }
             for plan_id, info in cls.PLANS.items()
