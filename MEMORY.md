@@ -48,6 +48,7 @@
 - [x] Hermetic test suite (mocked facilitator, no internet required)
 - [x] CDP Bazaar auto-discovery for paid resources
 - [x] Alpha Sentinel MCP integration (new! — market intelligence tool)
+- [x] US Multi-City Rental Diligence Pack — live `POST /tasks/us-rental-diligence` (catalog price $1.50 USDC; sale #501 settled)
 
 ### 🔄 In Progress / Recent
 - [x] Dashboard mobile responsiveness fix (≤768px layout)
@@ -58,7 +59,6 @@
 ### ⏳ Roadmap Items
 - [ ] Migrate to production Redis (Upstash recommended)
 - [ ] Add support for city_kyber.json indexing (future expansion)
-- [ ] Implement dilated diligence pack ($1.50 USDC product)
 - [ ] Support for additional networks beyond Base mainnet
 - [ ] Real-time analytics dashboard upgrade
 - [ ] Webhook subscription system for agent notifications

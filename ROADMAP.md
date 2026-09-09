@@ -1,8 +1,12 @@
 # Roadmap
 
-Status date: 2026-07-18. The server is live on Base mainnet at
-https://x402-mcp.onrender.com with two payable products and USDC settlement
-through the Coinbase CDP facilitator. This roadmap covers the next 90 days.
+Status date: 2026-09-09. The server is live on Base mainnet at
+https://x402-mcp.onrender.com with payable products (city property-check
+network, Base pulse, and the **US rental diligence pack** at
+`POST /tasks/us-rental-diligence`) and USDC settlement through the Coinbase
+CDP facilitator. The diligence pack is shipped, catalog-priced, and has a
+settled sale (#501) — it is not a roadmap item. This file covers remaining
+90-day work.
 
 ## Now → 30 days: catalog and first revenue
 
