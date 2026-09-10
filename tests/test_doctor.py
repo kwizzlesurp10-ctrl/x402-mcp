@@ -84,3 +84,29 @@ def test_spend_velocity_anomaly(monkeypatch) -> None:
     emit_swarm_step(run_id="1", role="treasurer", phase="buying", action="pay_and_fetch", detail={"amount_usdc": 1.5, "settled": True})
     assert len(alerts) == 1
     assert "Spend velocity anomaly" in alerts[0]
+
+
+def test_doctor_mailrail_checks(monkeypatch) -> None:
+    from app.config import settings
+    from app.doctor import run_checks
+
+    # Default disabled mock
+    monkeypatch.setattr(settings, "mailrail_enabled", False)
+    report = run_checks()
+    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    assert mail_check["status"] == "pass"
+
+    # Enabled with Resend valid
+    monkeypatch.setattr(settings, "mailrail_enabled", True)
+    monkeypatch.setattr(settings, "mailrail_provider", "resend")
+    monkeypatch.setattr(settings, "mailrail_api_key", "re_test_valid_key")
+    report = run_checks()
+    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    assert mail_check["status"] == "pass"
+
+    # Enabled with Resend missing key
+    monkeypatch.setattr(settings, "mailrail_api_key", None)
+    report = run_checks()
+    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    assert mail_check["status"] == "fail"
+

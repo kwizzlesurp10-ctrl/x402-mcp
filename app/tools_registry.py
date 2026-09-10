@@ -172,6 +172,22 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "tier": "free",
         "requires_env": ["EVM_PRIVATE_KEY"],
     },
+    {
+        "name": "mailrail.send",
+        "description": (
+            "Dispatch transactional receipts, alert notifications, or agent communication over MailRail. "
+            "Supports mock ledger, Resend API, SMTP, or Webhooks."
+        ),
+        "tier": "free",
+    },
+    {
+        "name": "mailrail.status",
+        "description": (
+            "Inspect MailRail provider status, active sender address, and dispatch capabilities. "
+            "Call to verify communication rail readiness before dispatching receipts or alerts."
+        ),
+        "tier": "free",
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)

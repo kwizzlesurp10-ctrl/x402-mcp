@@ -687,6 +687,37 @@ async def stats_snapshot() -> dict:
     _stats_cache["data"] = data
     return data
 
+
+@app.get("/mailrail/health")
+async def mailrail_health() -> dict:
+    """MailRail communication rail readiness check."""
+    return {
+        "ok": True,
+        "enabled": settings.mailrail_enabled,
+        "provider": settings.mailrail_provider,
+        "from_address": settings.mailrail_from_address,
+        "admin_recipient": settings.mailrail_admin_recipient,
+        "has_api_key": bool(settings.mailrail_api_key),
+        "has_webhook": bool(settings.mailrail_webhook_url),
+        "has_smtp": bool(settings.mailrail_smtp_url),
+    }
+
+
+@app.get("/mailrail/ledger")
+async def mailrail_ledger(limit: int = 50) -> dict:
+    """Read recent MailRail logged dispatches (newest first)."""
+    from app.mailrail import MAILRAIL_LEDGER_FILE
+
+    if not MAILRAIL_LEDGER_FILE.exists():
+        return {"events": [], "count": 0}
+    try:
+        lines = MAILRAIL_LEDGER_FILE.read_text(encoding="utf-8").strip().splitlines()
+        records = [json.loads(line) for line in reversed(lines[-limit:]) if line.strip()]
+        return {"events": records, "count": len(records)}
+    except Exception as exc:
+        return {"events": [], "count": 0, "error": str(exc)}
+
+
 @app.get("/analytics-dashboard", include_in_schema=False, response_class=HTMLResponse)
 async def analytics_dashboard() -> HTMLResponse:
     """Serve the Upstash Real-Time Analytics UI."""

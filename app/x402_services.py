@@ -873,6 +873,33 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
         try:
             settle_result = await server.settle_payment(payload, requirements)
             settlement = settle_result.model_dump()
+            if settlement.get("success") is True:
+                try:
+                    from app import mailrail
+                    tx_hash = (
+                        settlement.get("transaction")
+                        or settlement.get("tx_hash")
+                        or settlement.get("hash")
+                        or getattr(settle_result, "transaction", None)
+                    )
+                    try:
+                        amt = float(settlement.get("amount") or 0.0)
+                    except (ValueError, TypeError):
+                        amt = 0.0
+                    sub, body = mailrail.format_settlement_receipt(
+                        payer=str(settlement.get("payer") or getattr(payload, "address", "unknown")),
+                        amount_usdc=amt,
+                        resource=str(getattr(requirements, "description", None) or "x402-resource"),
+                        tx_hash=tx_hash,
+                    )
+                    mailrail.send_agent_mail(
+                        to=settings.mailrail_admin_recipient,
+                        subject=sub,
+                        body=body,
+                        event_id=tx_hash,
+                    )
+                except Exception as exc:
+                    logger.warning("MailRail auto-receipt dispatch failed: %s", exc)
         except Exception as exc:
             settlement_error = str(exc)
 

@@ -55,7 +55,7 @@ The public seller host holds **no spend key** — it only verifies and settles i
 
 ## Features
 
-- **19 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, US city compliance, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **21 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, US city compliance, MailRail messaging, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
 - **4 MCP prompts** (`onboarding_flow`, `x402_tool_selector`, `generate_quote`, `troubleshoot_payment`) for LLM orchestrators
 - **4 MCP resources** (`x402://agent-card`, `x402://server-card`, `x402://tools-manifest`, `x402://pricing-table`) exposing live machine descriptors
 - **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `get_agent_card` / `x402://agent-card` with per-`agent_id` quota isolation
@@ -156,6 +156,8 @@ Tool names use domain.action trees so clients can route `x402.*`, `commerce.*`, 
 | `city.list` | Free US City Open-Data Compliance catalog (codes, paid_url, sample_url, MCP golden path) |
 | `city.sample` | Free fixed-address property compliance sample for one city code |
 | `city.check` | Paid city property compliance via x402 (same HTTP resource external buyers use) |
+| `mailrail.send` | Dispatch transactional receipts, alert notifications, or agent communication over MailRail |
+| `mailrail.status` | Inspect MailRail provider status, active sender address, and dispatch capabilities |
 
 ## Installation
 

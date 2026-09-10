@@ -901,6 +901,90 @@ async def check_us_city_property(
     )
 
 
+@mcp.tool(
+    name="mailrail.send",
+    title="Send agent notification via MailRail",
+    description=(
+        "Dispatch transactional receipts, alert notifications, or agent communication over MailRail. "
+        "Supports mock ledger, Resend API, SMTP, or Webhooks."
+    ),
+    annotations=WRITE_IDEMPOTENT,
+)
+async def mailrail_send(
+    to: Desc[
+        str,
+        Field(description="Recipient email address, webhook identifier, or admin alias."),
+    ],
+    subject: Desc[
+        str,
+        Field(description="Notification subject line."),
+    ],
+    body: Desc[
+        str,
+        Field(description="Plain text or markdown content for the message."),
+    ],
+    event_id: Desc[
+        str | None,
+        Field(description="Optional deduplication key. Duplicate event IDs within a run window are silently dropped."),
+    ] = None,
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional agent identity for quota accounting."),
+    ] = None,
+) -> str:
+    from app import mailrail
+
+    return await _execute_tool(
+        "mailrail.send",
+        agent_id,
+        lambda _: _sync_result(
+            {
+                "status": "ok",
+                "mailrail": mailrail.send_agent_mail(
+                    to=to,
+                    subject=subject,
+                    body=body,
+                    event_id=event_id,
+                ),
+            }
+        ),
+    )
+
+
+@mcp.tool(
+    name="mailrail.status",
+    title="Check MailRail health and configuration",
+    description=(
+        "Inspect MailRail provider status, active sender address, and dispatch capabilities."
+    ),
+    annotations=READONLY,
+)
+async def mailrail_status(
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional agent identity for quota accounting."),
+    ] = None,
+) -> str:
+    from app.config import settings
+
+    return await _execute_tool(
+        "mailrail.status",
+        agent_id,
+        lambda _: _sync_result(
+            {
+                "status": "ok",
+                "enabled": settings.mailrail_enabled,
+                "provider": settings.mailrail_provider,
+                "from_address": settings.mailrail_from_address,
+                "admin_recipient": settings.mailrail_admin_recipient,
+                "has_api_key": bool(settings.mailrail_api_key),
+                "has_webhook": bool(settings.mailrail_webhook_url),
+                "has_smtp": bool(settings.mailrail_smtp_url),
+            }
+        ),
+    )
+
+
 @mcp.prompt(
     name="x402.buy_paid_api",
     title="Buy a paid x402 HTTP API",

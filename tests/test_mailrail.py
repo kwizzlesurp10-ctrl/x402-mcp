@@ -137,3 +137,60 @@ def test_live_webhook_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert len(calls) == 1
     assert "discord.test" in calls[0][0]
 
+
+@pytest.mark.asyncio
+async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.mcp_server import mailrail_send, mailrail_status
+
+    ledger_file = tmp_path / "mailrail.jsonl"
+    monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger_file)
+    _SEEN_KEYS.clear()
+
+    # Status check tool
+    status_raw = await mailrail_status()
+    status_data = json.loads(status_raw)
+    assert status_data["data"]["status"] == "ok"
+    assert "provider" in status_data["data"]
+
+    # Send tool
+    send_raw = await mailrail_send(
+        to="agent-smith@network.ai",
+        subject="Report ready",
+        body="Findings attached.",
+        event_id="mcp_test_01",
+    )
+    send_data = json.loads(send_raw)
+    assert send_data["data"]["status"] == "ok"
+    assert send_data["data"]["mailrail"]["delivered"] is True
+
+
+def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    ledger_file = tmp_path / "mailrail.jsonl"
+    monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger_file)
+    _SEEN_KEYS.clear()
+
+    client = TestClient(app)
+
+    # Health check
+    res_health = client.get("/mailrail/health")
+    assert res_health.status_code == 200
+    assert res_health.json()["ok"] is True
+
+    # Empty ledger
+    res_empty = client.get("/mailrail/ledger")
+    assert res_empty.status_code == 200
+    assert res_empty.json()["count"] == 0
+
+    # Dispatch mail and re-query ledger
+    send_agent_mail("auditor@market.org", "Audit receipt", "All green", event_id="http_ledger_01")
+    res_ledger = client.get("/mailrail/ledger")
+    assert res_ledger.status_code == 200
+    body = res_ledger.json()
+    assert body["count"] == 1
+    assert body["events"][0]["event_id"] == "http_ledger_01"
+    assert body["events"][0]["to"] == "auditor@market.org"
+
+

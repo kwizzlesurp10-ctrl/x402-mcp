@@ -398,7 +398,30 @@ def run_checks() -> dict[str, Any]:
                 settings.base_rpc_url = fallback_url
                 checks.append(_check("rpc", "Base RPC", "warn", f"RPC failover triggered ({old_url} failed). Swapped to {fallback_url}", "Investigate primary RPC outage"))
             else:
-                checks.append(_check("rpc", "Base RPC", "fail", f"Both primary and fallback RPC failed", "Check network connection"))
+                checks.append(_check("rpc", "Base RPC", "fail", "Both primary and fallback RPC failed", "Check network connection"))
+
+    # MailRail Messaging & Receipt Rail
+    if settings.mailrail_enabled:
+        provider = settings.mailrail_provider.lower()
+        if provider == "resend":
+            if settings.mailrail_api_key and settings.mailrail_api_key.startswith("re_"):
+                checks.append(_check("mailrail", "MailRail provider", "pass", f"Resend API active (from: {settings.mailrail_from_address})"))
+            else:
+                checks.append(_check("mailrail", "MailRail provider", "fail", "Resend selected but MAILRAIL_API_KEY missing or invalid", "Set MAILRAIL_API_KEY=re_..."))
+        elif provider == "webhook":
+            if settings.mailrail_webhook_url and settings.mailrail_webhook_url.startswith("http"):
+                checks.append(_check("mailrail", "MailRail provider", "pass", f"Webhook active (URL: {settings.mailrail_webhook_url[:30]}...)"))
+            else:
+                checks.append(_check("mailrail", "MailRail provider", "fail", "Webhook selected but MAILRAIL_WEBHOOK_URL missing or invalid", "Set MAILRAIL_WEBHOOK_URL=https://..."))
+        elif provider == "smtp":
+            if settings.mailrail_smtp_url and settings.mailrail_smtp_url.startswith(("smtp://", "smtps://")):
+                checks.append(_check("mailrail", "MailRail provider", "pass", f"SMTP active (from: {settings.mailrail_from_address})"))
+            else:
+                checks.append(_check("mailrail", "MailRail provider", "fail", "SMTP selected but MAILRAIL_SMTP_URL missing or invalid", "Set MAILRAIL_SMTP_URL=smtps://..."))
+        else:
+            checks.append(_check("mailrail", "MailRail provider", "pass", "Hermetic file ledger active (ledger/mailrail.jsonl)"))
+    else:
+        checks.append(_check("mailrail", "MailRail provider", "pass", "MailRail disabled (offline mock fallback active)"))
 
     failed = sum(1 for c in checks if c["status"] == "fail")
     warned = sum(1 for c in checks if c["status"] == "warn")
