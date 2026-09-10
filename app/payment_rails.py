@@ -40,4 +40,10 @@ def build_payment_rails() -> dict:
             "requires_env": ["X402_PAY_TO_ADDRESS"],
             "configured": bool(settings.x402_pay_to_address),
         },
+        "mailrail": {
+            "primary": False,
+            "description": "Transactional agent communication, alert dispatch, and receipt messaging rail",
+            "provider": settings.mailrail_provider,
+            "configured": bool(settings.mailrail_enabled or settings.mailrail_provider == "mock"),
+        },
     }

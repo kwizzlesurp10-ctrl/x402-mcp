@@ -223,6 +223,39 @@ def test_ai_plugin_json_served_at_well_known() -> None:
     assert "description_for_model" in body
     assert body["auth"]["type"] == "none"
     assert body["api"]["type"] == "openapi"
-    assert body["contact_email"] == "kwizzlesurp10@gmail.com"
+    assert body["contact_email"] == settings.contact_email
+
+
+def test_agent_cards_dynamic_email_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    custom_email = "custom-agent-ops@x402.org"
+    monkeypatch.setattr(settings, "contact_email", custom_email)
+    monkeypatch.setattr(settings, "mailrail_enabled", True)
+    monkeypatch.setattr(settings, "mailrail_from_address", "custom-mailrail@x402.org")
+
+    # 1. A2A Agent Card
+    card_resp = client.get("/.well-known/agent-card.json")
+    assert card_resp.status_code == 200
+    card = card_resp.json()
+    assert card["provider"]["contact"] == custom_email
+    assert card["provider"]["email"] == custom_email
+    assert card["provider"]["mailrail"] == "custom-mailrail@x402.org"
+
+    # 2. AI Plugin JSON
+    plugin_resp = client.get("/.well-known/ai-plugin.json")
+    assert plugin_resp.status_code == 200
+    assert plugin_resp.json()["contact_email"] == custom_email
+
+    # 3. Agents Registry JSON
+    agents_resp = client.get("/.well-known/agents.json")
+    assert agents_resp.status_code == 200
+    agents_body = agents_resp.json()
+    assert agents_body["provider"]["contact_email"] == custom_email
+    assert agents_body["provider"]["mailrail"] == "custom-mailrail@x402.org"
+
+    # 4. MCP Server Card
+    mcp_resp = client.get("/.well-known/mcp/server-card.json")
+    assert mcp_resp.status_code == 200
+    assert mcp_resp.json()["serverInfo"]["contact_email"] == custom_email
+
 
 

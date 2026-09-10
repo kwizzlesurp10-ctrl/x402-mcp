@@ -612,7 +612,9 @@ def agent_card() -> dict[str, Any]:
         "provider": {
             "organization": "SEVTECH",
             "url": REPO_URL,
-            "contact": "kwizzlesurp10@gmail.com",
+            "contact": settings.contact_email,
+            "email": settings.contact_email,
+            "mailrail": settings.mailrail_from_address if settings.mailrail_enabled else settings.contact_email,
             "receiveAddress": pay_to,
         },
         "documentationUrl": f"{base}/llms.txt",
@@ -898,6 +900,8 @@ def agents_json() -> dict[str, Any]:
         "provider": {
             "name": "SEVTECH",
             "url": REPO_URL,
+            "contact_email": settings.contact_email,
+            "mailrail": settings.mailrail_from_address if settings.mailrail_enabled else settings.contact_email,
             "receive_address": pay_to,
         },
         "payment_networks": [network],
@@ -945,7 +949,7 @@ def ai_plugin_json() -> dict[str, Any]:
             "is_user_authenticated": False,
         },
         "logo_url": f"{base}/favicon.svg",
-        "contact_email": "kwizzlesurp10@gmail.com",
+        "contact_email": settings.contact_email,
         "legal_info_url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp/blob/main/LICENSE",
     }
 
@@ -967,6 +971,7 @@ def mcp_server_card() -> dict[str, Any]:
                 "gasless settlement, US multi-city rental compliance diligence, "
                 "and Base gas/finality intelligence."
             ),
+            "contact_email": settings.contact_email,
         },
         "transport": {
             "type": "streamable-http",

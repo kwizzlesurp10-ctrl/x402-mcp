@@ -203,5 +203,14 @@ class Settings(BaseSettings):
     # before.
     finality_check_price: str = "$0.01"
 
+    # MailRail communication & alert dispatch rail
+    mailrail_enabled: bool = False
+    mailrail_provider: str = "mock"  # "mock", "file", "smtp", "resend", "webhook"
+    mailrail_api_key: str | None = None
+    mailrail_from_address: str = "agents@x402.org"
+    mailrail_admin_recipient: str | None = None
+    mailrail_smtp_url: str | None = None
+    mailrail_webhook_url: str | None = None
+
 
 settings = Settings()
