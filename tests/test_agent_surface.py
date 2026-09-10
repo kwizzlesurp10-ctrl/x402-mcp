@@ -168,7 +168,9 @@ def test_agents_json_served_at_well_known() -> None:
     assert "us-rental-diligence" in ids
     assert "base-tx-decision" in ids
     assert "us-city-compliance-network" in ids
+    assert "x402-mailrail-postmaster" in ids
     assert body["payment_networks"] == [settings.x402_default_network]
+
     assert body["settlement_address"]
     assert body["settlement_address"].lower().startswith("0x")
 

@@ -165,3 +165,15 @@ class SupportedNetworksOutput(BaseModel):
     protocol_version: str = "v2"
     headers: dict[str, str]
     facilitator_supported: dict[str, Any] | None = None
+
+
+class InboundMailInput(BaseModel):
+    """Payload for inbound agent communication and webhook ingestion."""
+
+    sender: str = Field(description="Sender address, agent ID, or system handle")
+    subject: str = Field(description="Subject line or topic")
+    body: str = Field(description="Message body text")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional metadata or payload context",
+    )

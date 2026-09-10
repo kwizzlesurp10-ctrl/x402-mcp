@@ -193,4 +193,57 @@ def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert body["events"][0]["event_id"] == "http_ledger_01"
     assert body["events"][0]["to"] == "auditor@market.org"
 
+    # Inbound message ingestion
+    inbox_file = tmp_path / "mailrail_inbox.jsonl"
+    monkeypatch.setattr("app.mailrail.MAILRAIL_INBOX_FILE", inbox_file)
+
+    res_inbound = client.post(
+        "/mailrail/inbound",
+        json={
+            "sender": "partner-bot@bazaar.xyz",
+            "subject": "Quote Request for MN Data @alice",
+            "body": "Need pricing for 100 queries for @bob.",
+            "metadata": {"origin": "bazaar"},
+        },
+    )
+    assert res_inbound.status_code == 200
+    inbound_data = res_inbound.json()
+    assert inbound_data["status"] == "received"
+    assert "`@alice`" in inbound_data["subject"]
+
+
+    # Inbound inbox query
+    res_inbox = client.get("/mailrail/inbox")
+    assert res_inbox.status_code == 200
+    inbox_body = res_inbox.json()
+    assert inbox_body["count"] == 1
+    assert inbox_body["inbox"][0]["from"] == "partner-bot@bazaar.xyz"
+
+    # Telemetry Stats
+    res_stats = client.get("/mailrail/stats")
+    assert res_stats.status_code == 200
+    stats = res_stats.json()
+    assert stats["outbound_total"] == 1
+    assert stats["inbound_total"] == 1
+    assert stats["dedup_keys_cached"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_mailrail_inbound_mcp_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.mcp_server import mailrail_inbound
+
+    inbox_file = tmp_path / "mailrail_inbox.jsonl"
+    monkeypatch.setattr("app.mailrail.MAILRAIL_INBOX_FILE", inbox_file)
+
+    res_raw = await mailrail_inbound(
+        sender="scout-agent@network.ai",
+        subject="Service alert",
+        body="Upstream pricing dropped.",
+    )
+    res_data = json.loads(res_raw)
+    assert res_data["data"]["status"] == "ok"
+    assert res_data["data"]["inbound"]["status"] == "received"
+    assert res_data["data"]["inbound"]["from"] == "scout-agent@network.ai"
+
+
 

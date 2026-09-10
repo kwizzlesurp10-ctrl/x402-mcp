@@ -559,7 +559,36 @@ def agent_card() -> dict[str, Any]:
             "inputModes": ["application/json"],
             "outputModes": ["application/json"],
         },
+        {
+            "id": "mailrail-postmaster",
+            "name": "MailRail Postmaster & In/Out Dispatcher",
+            "description": (
+                "Dedicated agent communications gateway for transactional notifications, "
+                "inbound webhook routing, settlement receipts, and mention defusing. "
+                f"HTTP: POST {base}/mailrail/inbound, GET {base}/mailrail/inbox, GET {base}/mailrail/stats. "
+                "MCP tools: mailrail.send, mailrail.status, mailrail.inbound."
+            ),
+            "tags": [
+                "mailrail",
+                "postmaster",
+                "messaging",
+                "receipts",
+                "inbox",
+                "outbox",
+                "agent-communication",
+                "x402",
+                "free",
+            ],
+            "examples": [
+                f"POST {base}/mailrail/inbound",
+                f"GET {base}/mailrail/stats",
+                "Check recent inbound agent correspondence",
+            ],
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
     ])
+
 
     for c in cities:
         code = c["code"]
@@ -889,7 +918,52 @@ def agents_json() -> dict[str, Any]:
             "tags": ["property", "compliance", "rental", "housing", "violations", "open-data", "x402", "a2a-commerce"],
             "jurisdictions": [c["code"] for c in cities],
         },
+        {
+            "id": "x402-mailrail-postmaster",
+            "name": "MailRail Postmaster & In/Out Dispatcher",
+            "description": (
+                "Dedicated gateway for inbound agent message/webhook ingestion, "
+                "outbound transactional receipt dispatching, mention defusing, and delivery telemetry."
+            ),
+            "roi_value_proposition": (
+                "Ensures guaranteed zero-spam deduplication and mention-safe routing for inter-agent workflows."
+            ),
+            "latency_sla": "p95 < 150ms",
+            "data_provenance": "Local append-only JSONL ledgers + verified outbound dispatch providers",
+            "free_preview_url": f"{base}/mailrail/health",
+            "url": f"{base}/mailrail/inbound",
+            "method": "POST",
+            "pricing": {
+                "amount": "0.00",
+                "currency": "USDC",
+                "network": network,
+                "model": "free_tier",
+                "atomic_units": 0,
+                "value_summary": "Free platform utility for swarm agents",
+            },
+            "protocols": ["x402-v2", "http-json", "a2a", "mailrail"],
+            "tags": [
+                "mailrail",
+                "postmaster",
+                "inbox",
+                "outbox",
+                "receipts",
+                "agent-communication",
+                "free",
+            ],
+            "input_schema": {
+                "type": "object",
+                "required": ["sender", "subject", "body"],
+                "properties": {
+                    "sender": {"type": "string", "description": "Sender address, agent ID, or system handle"},
+                    "subject": {"type": "string", "description": "Subject line or topic"},
+                    "body": {"type": "string", "description": "Message body text"},
+                    "metadata": {"type": "object", "description": "Optional payload metadata"},
+                },
+            },
+        },
     ]
+
 
     return {
         "schema_version": "1.0.0",

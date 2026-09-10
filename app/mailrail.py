@@ -20,6 +20,7 @@ from app.config import settings
 log = logging.getLogger("x402.mailrail")
 
 MAILRAIL_LEDGER_FILE = Path("ledger/mailrail.jsonl")
+MAILRAIL_INBOX_FILE = Path("ledger/mailrail_inbox.jsonl")
 _SEEN_KEYS: set[str] = set()
 _MENTION_RE = re.compile(r"(?<![\w.-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)")
 
@@ -43,6 +44,16 @@ def _record_mail_ledger(record: dict[str, Any]) -> None:
             f.write(json.dumps(record) + "\n")
     except Exception as e:
         log.warning("Failed to write to mailrail ledger: %s", e)
+
+
+def _record_inbound_ledger(record: dict[str, Any]) -> None:
+    """Append inbound mail record to ledger/mailrail_inbox.jsonl safely."""
+    try:
+        MAILRAIL_INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with MAILRAIL_INBOX_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:
+        log.warning("Failed to write to mailrail inbox ledger: %s", e)
 
 
 def _dispatch_resend(to: str, subject: str, body: str) -> bool:
@@ -170,3 +181,96 @@ def format_settlement_receipt(
         f"\nThank you for using the x402 autonomous agent marketplace."
     )
     return subject, body
+ 
+ 
+def process_inbound_mail(
+    sender: str,
+    subject: str,
+    body: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Ingest and record an inbound message from an external agent or webhook."""
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    clean_subject = defuse_mentions(subject)
+    clean_body = defuse_mentions(body)
+    inbound_id = event_key("inbound", sender, clean_subject, clean_body[:50])
+
+    record = {
+        "ts": now_iso,
+        "inbound_id": inbound_id,
+        "from": sender,
+        "to": settings.mailrail_from_address,
+        "subject": clean_subject,
+        "body": clean_body,
+        "metadata": metadata or {},
+        "status": "received",
+    }
+
+    _record_inbound_ledger(record)
+    log.info("MailRail ingested inbound mail from %s (inbound_id=%s)", sender, inbound_id)
+    return {
+        "status": "received",
+        "inbound_id": inbound_id,
+        "from": sender,
+        "to": settings.mailrail_from_address,
+        "subject": clean_subject,
+        "timestamp": now_iso,
+    }
+
+
+def get_inbox_messages(limit: int = 50) -> list[dict[str, Any]]:
+    """Read recent inbound messages from ledger/mailrail_inbox.jsonl (newest first)."""
+    if not MAILRAIL_INBOX_FILE.exists():
+        return []
+    try:
+        lines = MAILRAIL_INBOX_FILE.read_text(encoding="utf-8").strip().splitlines()
+        return [json.loads(line) for line in reversed(lines[-limit:]) if line.strip()]
+    except Exception as exc:
+        log.warning("Failed to read inbox messages: %s", exc)
+        return []
+
+
+def get_outbox_messages(limit: int = 50) -> list[dict[str, Any]]:
+    """Read recent outbound messages from ledger/mailrail.jsonl (newest first)."""
+    if not MAILRAIL_LEDGER_FILE.exists():
+        return []
+    try:
+        lines = MAILRAIL_LEDGER_FILE.read_text(encoding="utf-8").strip().splitlines()
+        return [json.loads(line) for line in reversed(lines[-limit:]) if line.strip()]
+    except Exception as exc:
+        log.warning("Failed to read outbox messages: %s", exc)
+        return []
+
+
+def get_mailrail_stats() -> dict[str, Any]:
+    """Return comprehensive MailRail in/out telemetry and queue status."""
+    outbox_count = 0
+    if MAILRAIL_LEDGER_FILE.exists():
+        try:
+            outbox_count = len([line for line in MAILRAIL_LEDGER_FILE.read_text(encoding="utf-8").splitlines() if line.strip()])
+        except Exception:
+            outbox_count = 0
+
+    inbox_count = 0
+    if MAILRAIL_INBOX_FILE.exists():
+        try:
+            inbox_count = len([line for line in MAILRAIL_INBOX_FILE.read_text(encoding="utf-8").splitlines() if line.strip()])
+        except Exception:
+            inbox_count = 0
+
+    return {
+        "enabled": settings.mailrail_enabled,
+        "provider": settings.mailrail_provider,
+        "from_address": settings.mailrail_from_address,
+        "admin_recipient": settings.mailrail_admin_recipient,
+        "outbound_total": outbox_count,
+        "inbound_total": inbox_count,
+        "dedup_keys_cached": len(_SEEN_KEYS),
+        "channels": {
+            "resend_active": bool(settings.mailrail_api_key),
+            "webhook_active": bool(settings.mailrail_webhook_url),
+            "smtp_active": bool(settings.mailrail_smtp_url),
+        },
+    }
+
+

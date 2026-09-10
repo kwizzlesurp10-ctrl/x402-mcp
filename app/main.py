@@ -37,12 +37,13 @@ from app.config import settings
 from app.dashboard import DASHBOARD_HTML
 from app.analytics_dashboard import _analytics_html
 from app.doctor import run_checks
-from app import ledger_io
+from app import ledger_io, models
 from app.ledger_io import read_ledger_rows
 from app.logging_config import setup_logging
 from app.manifest import build_mcp_manifest
 from app.mcp_server import mcp
-from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput
+from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput, InboundMailInput
+
 from app.ops_events import event_stream, format_sse
 from app.payment_rails import build_payment_rails
 from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
@@ -706,16 +707,42 @@ async def mailrail_health() -> dict:
 @app.get("/mailrail/ledger")
 async def mailrail_ledger(limit: int = 50) -> dict:
     """Read recent MailRail logged dispatches (newest first)."""
-    from app.mailrail import MAILRAIL_LEDGER_FILE
+    from app.mailrail import get_outbox_messages
 
-    if not MAILRAIL_LEDGER_FILE.exists():
-        return {"events": [], "count": 0}
-    try:
-        lines = MAILRAIL_LEDGER_FILE.read_text(encoding="utf-8").strip().splitlines()
-        records = [json.loads(line) for line in reversed(lines[-limit:]) if line.strip()]
-        return {"events": records, "count": len(records)}
-    except Exception as exc:
-        return {"events": [], "count": 0, "error": str(exc)}
+    events = get_outbox_messages(limit=limit)
+    return {"events": events, "count": len(events)}
+
+
+@app.post("/mailrail/inbound")
+async def mailrail_inbound(payload: models.InboundMailInput) -> dict:
+    """Ingest and route an incoming message to the MailRail Postmaster."""
+    from app.mailrail import process_inbound_mail
+
+    result = process_inbound_mail(
+        sender=payload.sender,
+        subject=payload.subject,
+        body=payload.body,
+        metadata=payload.metadata,
+    )
+    return result
+
+
+@app.get("/mailrail/inbox")
+async def mailrail_inbox(limit: int = 50) -> dict:
+    """Read recent MailRail inbound messages (newest first)."""
+    from app.mailrail import get_inbox_messages
+
+    events = get_inbox_messages(limit=limit)
+    return {"inbox": events, "count": len(events)}
+
+
+@app.get("/mailrail/stats")
+async def mailrail_stats() -> dict:
+    """Real-time telemetry and stats for MailRail In/Out Postmaster."""
+    from app.mailrail import get_mailrail_stats
+
+    return get_mailrail_stats()
+
 
 
 @app.get("/analytics-dashboard", include_in_schema=False, response_class=HTMLResponse)

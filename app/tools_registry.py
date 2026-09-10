@@ -188,7 +188,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ),
         "tier": "free",
     },
+    {
+        "name": "mailrail.inbound",
+        "description": (
+            "Ingest or route an inbound message to the MailRail Postmaster agent with mention defusing and inbox ledger recording."
+        ),
+        "tier": "free",
+    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)
 TOOL_COUNT = len(TOOL_SPECS)
+

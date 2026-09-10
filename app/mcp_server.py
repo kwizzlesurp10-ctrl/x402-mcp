@@ -985,6 +985,51 @@ async def mailrail_status(
     )
 
 
+@mcp.tool(
+    name="mailrail.inbound",
+    title="Ingest inbound agent message or webhook",
+    description=(
+        "Ingest an incoming message or webhook to the MailRail Postmaster agent with mention defusing and inbox ledger recording."
+    ),
+    annotations=WRITE_IDEMPOTENT,
+)
+async def mailrail_inbound(
+    sender: Desc[
+        str,
+        Field(description="Sender address, agent ID, or system handle."),
+    ],
+    subject: Desc[
+        str,
+        Field(description="Subject line or topic."),
+    ],
+    body: Desc[
+        str,
+        Field(description="Message body text."),
+    ],
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional agent identity for quota accounting."),
+    ] = None,
+) -> str:
+    from app import mailrail
+
+    return await _execute_tool(
+        "mailrail.inbound",
+        agent_id,
+        lambda _: _sync_result(
+            {
+                "status": "ok",
+                "inbound": mailrail.process_inbound_mail(
+                    sender=sender,
+                    subject=subject,
+                    body=body,
+                ),
+            }
+        ),
+    )
+
+
+
 @mcp.prompt(
     name="x402.buy_paid_api",
     title="Buy a paid x402 HTTP API",
