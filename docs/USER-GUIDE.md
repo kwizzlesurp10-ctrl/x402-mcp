@@ -293,7 +293,7 @@ Every settled purchase appends a row to the spend ledger, readable at `GET /ledg
  "amount_usdc":0.01,"amount_usdc_atomic":10000,"tx":"0x...","settled":true,"url":"https://..."}
 ```
 
-`amount_usdc_atomic` is the integer form (USDC has 6 decimals) and is what the aggregates net on. `GET /swarm/revenue` folds spend and revenue together into realized margin and LTV:CAC — and counts only rows where `settled` is truthy, so a failed attempt can never inflate your reported spend.
+`amount_usdc_atomic` is the integer form (USDC has 6 decimals) and is what the aggregates net on. `GET /swarm/revenue` folds **swarm** spend and **composite** sales together into realized margin and LTV:CAC — first-party HTTP SKUs (city checks, pulse-1, diligence, …) are under `storefront`, not `total_revenue_usdc`. Only rows where `settled` is truthy count, so a failed attempt can never inflate reported spend.
 
 ### Which networks actually work
 
@@ -527,7 +527,7 @@ Every tool also accepts an optional `agent_id` argument. Pass a stable one — i
 | `create_stripe_checkout` | Create a Stripe Checkout Session for Pro tier or tool credits (fiat rail) | free | `STRIPE_SECRET_KEY` |
 | `run_swarm_research` | Run the swarm Agency: buy cheap upstream x402 services, compose a composite report, list it for resale | free | `EVM_PRIVATE_KEY`, `X402_PAY_TO_ADDRESS` |
 | `settle_composite_sale` | Verify + settle a buyer's payment for a listed composite and record the revenue | free | — |
-| `swarm_revenue_report` | Portfolio revenue intelligence: spend, revenue, LTV:CAC, margins, per-source profit scores | free | — |
+| `swarm_revenue_report` | Swarm composite economics: spend, composite sales, LTV:CAC; `storefront` is the full settled ledger | free | — |
 | `get_base_pulse` | Live Base Network Pulse — base fee, utilization, USD settlement cost, settle-now/hold verdict from real RPC data | free | — |
 | `get_os_metrics` | Host OS telemetry: CPU, memory, swap, disk, network, process signals with an ok/warn/critical verdict | free | — |
 | `list_us_cities` | US City Open-Data Compliance Network catalog (codes, paid_url, sample_url, golden path) | free | — |
@@ -731,7 +731,7 @@ The three persistence checks are deliberately paranoid. They probe the **live st
 - **Agent quota** — reads `/quota/<agent_id>` without consuming a call. If `OPERATOR_TOKEN` is set, the page injects it so its own polls authenticate; a bare `curl` to `/quota/...` without `Authorization: Bearer <token>` gets **401**.
 - **Tool matrix** — the tool list straight from `/.well-known/mcp`, with each tool's `requires_env` tags painted green/red from the live `/health` config flags. A red `env` tag means that tool will error if called.
 - **Revenue paths** — pro tier, tool credits, free tier, read from the manifest and `/upgrade`.
-- **Storefront** — the money panel. It fans out to `/swarm/products`, `/swarm/revenue` and `/ledger/revenue`, and shows realized revenue, upstream spend, `N listed · M sold`, a listings table (topic / price / earned), and the last 8 settled sales with truncated tx hashes. Note the cadence: health and quota poll every 5s, the storefront every **30s**, and it is skipped entirely while the tab is hidden — those three endpoints read Redis, and a tab left open all day at 5s would eat a real share of a free plan's monthly command budget.
+- **Storefront** — the money panel. It fans out to `/swarm/products`, `/swarm/revenue` and `/ledger/revenue`, and shows **storefront** realized revenue (`storefront.revenue_usdc`, the full settled ledger), upstream swarm spend, `N listed · M sold` for composites, a listings table (topic / price / earned), and the last 8 settled sales with truncated tx hashes. `total_revenue_usdc` on the same JSON is swarm composites only — do not read it as storefront GMV. Note the cadence: health and quota poll every 5s, the storefront every **30s**, and it is skipped entirely while the tab is hidden — those three endpoints read Redis, and a tab left open all day at 5s would eat a real share of a free plan's monthly command budget.
 - **Event tape** — pauses while you hover it so you can read or copy a line, then flushes what it buffered.
 
 If the Storefront panel says `nothing listed` or `no settled sales yet` on a box you know has sold something, that is not a UI bug — go read the persistence section below.
@@ -745,7 +745,7 @@ curl -s https://x402-mcp.onrender.com/ledger/revenue | python -m json.tool
 curl -s https://x402-mcp.onrender.com/swarm/revenue  | python -m json.tool
 ```
 
-Rows carry `ts`, `kind`, `agent_id`, `network`, `amount_usdc`, `amount_usdc_atomic` (integer, 6 decimals), `tx` and `settled`. Only rows with `settled` truthy are counted by `/swarm/revenue`, so a failed payment attempt can never inflate reported spend, revenue or margin.
+Rows carry `ts`, `kind`, `agent_id`, `network`, `amount_usdc`, `amount_usdc_atomic` (integer, 6 decimals), `tx` and `settled`. Only rows with `settled` truthy are counted by `/swarm/revenue`. Swarm totals (`total_revenue_usdc`, `sold_count`) use composite rows; `storefront.revenue_usdc` is the full ledger. A failed payment attempt can never inflate reported spend, revenue or margin.
 
 Backing store is chosen once at import (`app/ledger_store.py`): `REDIS_URL` set and reachable → Redis lists (trimmed to 50,000 rows each); otherwise the git-ignored `ledger/spend.jsonl` and `ledger/revenue.jsonl`. Files are the local-dev default. Never commit or casually reset these — they are the only local record that a real sale happened.
 
@@ -770,7 +770,7 @@ curl -s https://x402-mcp.onrender.com/doctor  | python -c "import sys,json; d=js
 curl -s https://x402-mcp.onrender.com/swarm/revenue
 ```
 
-Green means: `summary.ready` true, `/health` showing `wallet_configured: false` on the seller box, and `/swarm/revenue` totals that match what you expect the ledgers to hold.
+Green means: `summary.ready` true, `/health` showing `wallet_configured: false` on the seller box, and `/swarm/revenue` `storefront.revenue_usdc` matching the settled ledger while `total_revenue_usdc` matches composite sales only.
 ---
 
 ## Where to get help
