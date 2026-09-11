@@ -195,17 +195,28 @@ export function SwarmActivity({
           }}
         >
           <span style={{ textTransform: "uppercase", color: "var(--neon-cyan)", fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--neon-cyan)" }} /> Revenue Intelligence
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--neon-cyan)" }} /> Swarm composites
           </span>
           <span>
-            Total Spend: <strong style={{ color: "var(--red)" }}>${revenue.total_spend_usdc.toFixed(4)}</strong>
+            Swarm spend: <strong style={{ color: "var(--red)" }}>${revenue.total_spend_usdc.toFixed(4)}</strong>
           </span>
           <span>
-            Gross Revenue: <strong style={{ color: "var(--green)" }}>${revenue.total_revenue_usdc.toFixed(4)}</strong>
+            Swarm revenue: <strong style={{ color: "var(--green)" }}>${revenue.total_revenue_usdc.toFixed(4)}</strong>
           </span>
           <span>
-            Net Margin: <strong style={{ color: "var(--neon-cyan)", fontSize: 14 }}>${revenue.realized_margin_usdc.toFixed(4)}</strong>
+            Swarm margin: <strong style={{ color: "var(--neon-cyan)", fontSize: 14 }}>${revenue.realized_margin_usdc.toFixed(4)}</strong>
           </span>
+          <span>
+            {revenue.listed_count} listed · {revenue.sold_count} sold
+          </span>
+          {revenue.storefront && (
+            <span title={revenue.note ?? "Full settled ledger, including first-party SKUs"}>
+              Storefront: <strong style={{ color: "var(--green)" }}>${revenue.storefront.revenue_usdc.toFixed(4)}</strong>
+              <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                {" "}({revenue.storefront.external_usdc.toFixed(4)} external)
+              </span>
+            </span>
+          )}
           <span>
             LTV:CAC Ratio:{" "}
             <strong

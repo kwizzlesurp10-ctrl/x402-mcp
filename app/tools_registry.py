@@ -134,7 +134,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     {
         "name": "swarm.revenue",
         "description": (
-            "Get swarm portfolio revenue intelligence: spend, revenue, LTV:CAC, margins, per-source scores. "
+            "Get swarm composite economics: spend, composite sales, LTV:CAC, margins, per-source scores. "
+            "total_revenue_usdc is swarm listings only; storefront.revenue_usdc is the full settled ledger. "
             "Call after swarm.research or swarm.settle to inspect realized economics."
         ),
         "tier": "free",

@@ -101,13 +101,33 @@ export type SwarmProduct = {
   revenue_usdc: number;
 };
 
+export type SwarmStorefrontRevenue = {
+  revenue_usdc: number;
+  settled_sales: number;
+  external_usdc: number;
+  operator_usdc: number;
+  unknown_usdc: number;
+  external_sales: number;
+  operator_sales: number;
+  unknown_sales: number;
+  first_party_revenue_usdc: number;
+  swarm_revenue_usdc: number;
+};
+
 export type SwarmRevenue = {
+  scope?: "swarm_composites";
+  note?: string;
   total_spend_usdc: number; total_revenue_usdc: number; realized_margin_usdc: number;
   ltv_cac: number | null; target_ltv_cac: number;
-  listed_count: number; sold_count: number;
-  products: Array<{ product_id: string; topic: string; cost_basis_usdc: number; price_usdc: number; margin_usdc: number; status: string; ltv_cac_projected: number }>;
+  listed_count: number; listed_unsold_count?: number; sold_count: number;
+  products: Array<{
+    product_id: string; topic: string; cost_basis_usdc: number; price_usdc: number;
+    margin_usdc: number; status: string; ltv_cac_projected: number;
+    revenue_usdc?: number; sales_settled?: number;
+  }>;
   source_scores: Array<{ source: string; buys: number; spend_usdc: number; revenue_usdc: number; profit_score: number }>;
   recommendations: string[];
+  storefront?: SwarmStorefrontRevenue;
 };
 
 export type PulseResponse = {

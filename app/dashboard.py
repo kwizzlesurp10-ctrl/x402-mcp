@@ -455,14 +455,22 @@ async function pollStore(){
       getJSON("/demand"),
     ]);
 
-    $("s-revenue").textContent = usd(report.total_revenue_usdc);
+    /* Storefront money is the full settled ledger. total_revenue_usdc is
+       swarm composites only — using it here made first-party city/Pulse
+       sales look like unsold swarm inventory (#527). */
+    const storefrontUsdc = (report.storefront && report.storefront.revenue_usdc != null)
+      ? report.storefront.revenue_usdc
+      : report.total_revenue_usdc;
+    $("s-revenue").textContent = usd(storefrontUsdc);
     /* is_operator_settle: true = the operator paying itself (cataloging,
        re-indexing) — not demand. false = a different wallet paid — a real
        sale. null/undefined = payer unknown (row predates this field, or no
        OPERATOR_WALLETS configured) — counted as neither, not assumed real. */
-    const externalUsdc = sales
-      .filter(s => s.is_operator_settle === false)
-      .reduce((sum, s) => sum + Number(s.amount_usdc || 0), 0);
+    const externalUsdc = (report.storefront && report.storefront.external_usdc != null)
+      ? report.storefront.external_usdc
+      : sales
+          .filter(s => s.is_operator_settle === false)
+          .reduce((sum, s) => sum + Number(s.amount_usdc || 0), 0);
     $("s-external").textContent = usd(externalUsdc);
     $("s-spend").textContent = usd(report.total_spend_usdc);
     $("s-listed").textContent = `${report.listed_count} listed · ${report.sold_count} sold`;

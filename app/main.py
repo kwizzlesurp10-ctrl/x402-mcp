@@ -1162,7 +1162,12 @@ async def demand_report() -> dict:
 
 @app.get("/swarm/revenue")
 async def swarm_revenue() -> dict:
-    """Swarm portfolio revenue intelligence (read-only)."""
+    """Swarm composite economics (read-only).
+
+    `total_revenue_usdc` / `sold_count` / `products` cover listed composites
+    only. The full settled ledger is under `storefront` so first-party SKUs
+    cannot look like unsold swarm inventory.
+    """
     from app.swarm import sovereign
 
     return sovereign.build_revenue_report()

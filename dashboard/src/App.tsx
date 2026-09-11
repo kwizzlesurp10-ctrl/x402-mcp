@@ -156,16 +156,30 @@ export default function App() {
         },
       ]);
       setSwarmRevenue({
+        scope: "swarm_composites",
         total_spend_usdc: 0.05,
         total_revenue_usdc: 0.09,
         realized_margin_usdc: 0.04,
         ltv_cac: 1.8,
         target_ltv_cac: 3,
         listed_count: 2,
+        listed_unsold_count: 1,
         sold_count: 1,
         products: [],
         source_scores: [],
-        recommendations: ["portfolio LTV:CAC 1.8 below target 3.0: raise markup or cut upstream spend"],
+        recommendations: ["swarm LTV:CAC 1.8 below target 3.0: raise markup or cut upstream spend"],
+        storefront: {
+          revenue_usdc: 0.11,
+          settled_sales: 3,
+          external_usdc: 0.09,
+          operator_usdc: 0.02,
+          unknown_usdc: 0,
+          external_sales: 1,
+          operator_sales: 2,
+          unknown_sales: 0,
+          first_party_revenue_usdc: 0.02,
+          swarm_revenue_usdc: 0.09,
+        },
       });
       setWallet({
         receive_address: "0xDemoReceive000000000000000000000001",
