@@ -9,7 +9,7 @@ from typing import Any
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import escape_soda, soda_get, source_url
 
-PORTAL = "https://data.sfgov.org"
+PORTAL = "https://data.sf.gov"
 NOV_ID = "nbtm-fbw5"  # Notices of Violation issued by DBI
 
 SPEC = CitySpec(

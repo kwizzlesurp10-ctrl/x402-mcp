@@ -15,6 +15,7 @@ Machine surfaces agents and directories crawl first:
 |---------|-----|
 | A2A Agent Card | https://x402-mcp.onrender.com/.well-known/agent-card.json |
 | Agents registry | https://x402-mcp.onrender.com/.well-known/agents.json |
+| Agentic.Market | https://x402-mcp.onrender.com/.well-known/agentic-market.json |
 | x402 catalog | https://x402-mcp.onrender.com/.well-known/x402 |
 | Funding / payTo | https://x402-mcp.onrender.com/.well-known/funding.json |
 | MCP manifest | https://x402-mcp.onrender.com/.well-known/mcp |
@@ -297,6 +298,14 @@ Structured prompts for LLM orchestrators:
 ### Seller API Monetization
 
 - `x402.build_seller` with Bazaar discovery metadata → settle inbound via facilitator  
+
+### Reference Autonomous Buyer Agent (End-to-End Discovery & Settlement)
+
+Run the autonomous buyer reference implementation (`examples/reference_buyer_agent.py`) demonstrating discovery, 402 challenge negotiation, EIP-3009 payment authorization, and settlement receipt ingestion into MailRail:
+
+```bash
+python examples/reference_buyer_agent.py --base-url http://localhost:8000 --service base-tx-decision --dry-run
+```
 
 ## Docker
 

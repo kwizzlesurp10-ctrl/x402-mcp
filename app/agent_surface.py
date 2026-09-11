@@ -285,6 +285,7 @@ def well_known_x402() -> dict[str, Any]:
         "docs": f"{_base()}/llms.txt",
         "agent_card": f"{_base()}/.well-known/agent-card.json",
         "agents": f"{_base()}/.well-known/agents.json",
+        "agentic_market": f"{_base()}/.well-known/agentic-market.json",
         "funding": f"{_base()}/.well-known/funding.json",
         "payToExplorer": fund["explorer"],
         "legal": FUNDING_LEGAL,
@@ -763,6 +764,7 @@ def agent_card() -> dict[str, Any]:
             },
         },
         "funding": fund,
+        "agenticMarket": f"{base}/.well-known/agentic-market.json",
     }
 
 
@@ -990,6 +992,7 @@ def agents_json() -> dict[str, Any]:
             "sse": f"{base}/mcp/sse",
         },
         "agent_card": f"{base}/.well-known/agent-card.json",
+        "agentic_market": f"{base}/.well-known/agentic-market.json",
         "ai_plugin": f"{base}/.well-known/ai-plugin.json",
         "x402_manifest": f"{base}/.well-known/x402",
         "legal": FUNDING_LEGAL,
@@ -1076,3 +1079,154 @@ def mcp_server_card() -> dict[str, Any]:
         "agent_card": f"{base}/.well-known/agent-card.json",
         "legal": FUNDING_LEGAL,
     }
+
+
+def agentic_market_json() -> dict[str, Any]:
+    """Agentic.Market discovery manifest (Coinbase CDP / Agentic.Market standard)."""
+    base = _base()
+    network = settings.x402_default_network
+    pay_to = _pay_to()
+
+    try:
+        from app.city_compliance import registry
+
+        cities = registry.list_cities()
+    except Exception:
+        cities = []
+
+    city_price = getattr(settings, "city_network_price", None) or settings.mn_property_check_price
+
+    services = [
+        {
+            "id": "us-rental-diligence",
+            "name": "US Multi-City Rental Diligence Pack",
+            "type": "batch-screening",
+            "description": "Multi-address rental compliance diligence screening across US municipal open data portals.",
+            "url": f"{base}/tasks/us-rental-diligence",
+            "method": "POST",
+            "pricing": {
+                "amount": settings.diligence_pack_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "atomic_units": _price_to_atomic_usdc(settings.diligence_pack_price),
+            },
+            "sample_url": f"{base}/us/mn/property-check/sample",
+            "tags": ["rental", "compliance", "batch", "housing", "risk-assessment"],
+        },
+        {
+            "id": "base-tx-decision",
+            "name": "Base Transaction Decision & Gas Optimizer",
+            "type": "decision-engine",
+            "description": "Live Base RPC congestion, fee math (EIP-1559), and submit-or-wait execution guidance.",
+            "url": f"{base}/base/tx-decision",
+            "method": "GET",
+            "pricing": {
+                "amount": settings.tx_decision_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "atomic_units": _price_to_atomic_usdc(settings.tx_decision_price),
+            },
+            "sample_url": f"{base}/pulse",
+            "tags": ["base", "gas", "tx-decision", "eip-1559", "optimizer"],
+        },
+        {
+            "id": "base-finality-check",
+            "name": "Base Transaction Finality Check",
+            "type": "verification",
+            "description": "L1/L2 safe and finalized block tag verification for Base mainnet transactions.",
+            "url": f"{base}/base/finality-check",
+            "method": "GET",
+            "pricing": {
+                "amount": settings.finality_check_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "atomic_units": _price_to_atomic_usdc(settings.finality_check_price),
+            },
+            "tags": ["base", "finality", "security", "verification"],
+        },
+        {
+            "id": "us-city-compliance-network",
+            "name": "US City Open-Data Property Compliance Network",
+            "type": "data-api",
+            "description": f"Real-time municipal property compliance records across {len(cities)} US jurisdictions.",
+            "url": f"{base}/us/cities",
+            "method": "GET",
+            "pricing": {
+                "amount": city_price.replace("$", ""),
+                "currency": "USDC",
+                "network": network,
+                "atomic_units": _price_to_atomic_usdc(city_price),
+            },
+            "sample_url": f"{base}/us/mn/property-check/sample",
+            "tags": ["property", "compliance", "rental", "violations", "open-data"],
+            "jurisdictions": [c["code"] for c in cities],
+        },
+        {
+            "id": "x402-mailrail-postmaster",
+            "name": "MailRail Postmaster & In/Out Dispatcher",
+            "type": "communication-rail",
+            "description": "Inbound agent message ingestion, receipt tracking, and mention-defused routing.",
+            "url": f"{base}/mailrail/inbound",
+            "method": "POST",
+            "pricing": {
+                "amount": "0.00",
+                "currency": "USDC",
+                "network": network,
+                "atomic_units": 0,
+            },
+            "sample_url": f"{base}/mailrail/health",
+            "tags": ["mailrail", "postmaster", "communication", "receipts", "free"],
+        },
+    ]
+
+    swarm_personas = [
+        {"role": "scout", "title": "Discovery & Ecosystem Indexer", "capabilities": ["catalog", "discovery", "bazaar"]},
+        {"role": "warden", "title": "Verification & Threat Guard", "capabilities": ["anti-spoofing", "proof-audit", "rate-limits"]},
+        {"role": "treasurer", "title": "Settlement & Ledger Officer", "capabilities": ["eip-3009", "receipts", "margin-accounting"]},
+        {"role": "archivist", "title": "Telemetry & Time-Series Archivist", "capabilities": ["audit-trail", "demand-logs", "event-streams"]},
+        {"role": "merchant", "title": "Catalog & Packaging Strategist", "capabilities": ["pricing", "composite-products", "slas"]},
+        {"role": "sovereign", "title": "Governance & Keyless Enforcement", "capabilities": ["policy-invariants", "zero-spend-audit", "kyb-anchor"]},
+        {"role": "postmaster", "title": "MailRail Postmaster & In/Out Dispatcher", "capabilities": ["inbox", "outbox", "mention-defusing", "settlement-receipts"]},
+    ]
+
+    return {
+        "schema_version": "1.0.0",
+        "market": "agentic.market",
+        "name": "x402 Micropayments & Compliance Network",
+        "description": "Autonomous pay-per-call data services and MCP tool suite on Base mainnet.",
+        "homepage": base,
+        "documentation": f"{base}/llms.txt",
+        "provider": {
+            "name": "SEVTECH",
+            "url": REPO_URL,
+            "contact_email": settings.contact_email,
+            "mailrail": settings.mailrail_from_address if settings.mailrail_enabled else settings.contact_email,
+            "receive_address": pay_to,
+        },
+        "settlement": {
+            "protocol": "x402",
+            "scheme": "EIP-3009",
+            "network": network,
+            "asset": "USDC",
+            "asset_address": BASE_USDC,
+            "pay_to": pay_to,
+            "facilitator_url": settings.cdp_facilitator_url if network == "eip155:8453" else settings.x402_facilitator_url,
+        },
+        "services": services,
+        "swarm": {
+            "agents": swarm_personas,
+            "model": "autonomous-cooperative",
+        },
+        "discovery": {
+            "agent_card": f"{base}/.well-known/agent-card.json",
+            "agents_json": f"{base}/.well-known/agents.json",
+            "agentic_market": f"{base}/.well-known/agentic-market.json",
+            "x402": f"{base}/.well-known/x402",
+            "mcp_server_card": f"{base}/.well-known/mcp/server-card.json",
+            "ai_plugin": f"{base}/.well-known/ai-plugin.json",
+            "funding": f"{base}/.well-known/funding.json",
+        },
+        "legal": FUNDING_LEGAL,
+        **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
+    }
+

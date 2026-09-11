@@ -212,5 +212,9 @@ class Settings(BaseSettings):
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
 
+    # Autonomous Cache Warmer & Pulse Auto-Freshness Engine
+    cache_warmer_enabled: bool = True
+    cache_warmer_interval_seconds: int = 60
+
 
 settings = Settings()

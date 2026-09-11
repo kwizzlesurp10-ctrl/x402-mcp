@@ -259,5 +259,45 @@ def test_agent_cards_dynamic_email_updates(monkeypatch: pytest.MonkeyPatch) -> N
     assert mcp_resp.status_code == 200
     assert mcp_resp.json()["serverInfo"]["contact_email"] == custom_email
 
+    # 5. Agentic.Market JSON
+    market_resp = client.get("/.well-known/agentic-market.json")
+    assert market_resp.status_code == 200
+    assert market_resp.json()["provider"]["contact_email"] == custom_email
+    assert market_resp.json()["provider"]["mailrail"] == "custom-mailrail@x402.org"
+
+
+def test_agentic_market_json_served_at_well_known() -> None:
+    response = client.get("/.well-known/agentic-market.json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema_version"] == "1.0.0"
+    assert body["market"] == "agentic.market"
+    assert "settlement" in body
+    assert body["settlement"]["protocol"] == "x402"
+    assert body["settlement"]["asset"] == "USDC"
+    assert len(body["services"]) >= 4
+    service_ids = {s["id"] for s in body["services"]}
+    assert "base-tx-decision" in service_ids
+    assert "us-rental-diligence" in service_ids
+    assert "us-city-compliance-network" in service_ids
+    assert "x402-mailrail-postmaster" in service_ids
+    assert "swarm" in body
+    assert len(body["swarm"]["agents"]) == 7
+
+
+def test_cross_linking_to_agentic_market() -> None:
+    # Check well_known_x402
+    x402_body = client.get("/.well-known/x402").json()
+    assert x402_body["agentic_market"].endswith("/.well-known/agentic-market.json")
+
+    # Check agents.json
+    agents_body = client.get("/.well-known/agents.json").json()
+    assert agents_body["agentic_market"].endswith("/.well-known/agentic-market.json")
+
+    # Check agent-card.json
+    card_body = client.get("/.well-known/agent-card.json").json()
+    assert card_body["agenticMarket"].endswith("/.well-known/agentic-market.json")
+
+
 
 

@@ -56,7 +56,7 @@ from app.stripe_payments import (
     create_checkout_session,
     handle_stripe_webhook,
 )
-from app import demand, os_monitor, wallet_read, x402_services
+from app import cache_warmer, demand, os_monitor, wallet_read, x402_services
 
 setup_logging()
 logger = logging.getLogger("x402")
@@ -83,6 +83,11 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.os_monitor_enabled
         else None
     )
+    warmer_task = (
+        asyncio.create_task(cache_warmer.cache_warmer.run_loop())
+        if (getattr(settings, "cache_warmer_enabled", True) and "PYTEST_CURRENT_TEST" not in os.environ)
+        else None
+    )
     # Rebuild the pinned listing BEFORE serving: the purchase URL is in the
     # Bazaar catalog, so the first request after a cold start may well be a
     # buyer. Bounded and non-fatal — a slow RPC must not stall the boot.
@@ -102,6 +107,10 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
             sampler.cancel()
             with suppress(asyncio.CancelledError):
                 await sampler
+        if warmer_task:
+            warmer_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await warmer_task
 
 
 class UpstashAnalyticsMiddleware(BaseHTTPMiddleware):
@@ -630,6 +639,14 @@ async def well_known_agents_json() -> dict:
     from app import agent_surface
 
     return agent_surface.agents_json()
+
+
+@app.get("/.well-known/agentic-market.json")
+async def well_known_agentic_market_json() -> dict:
+    """Agentic.Market ecosystem discovery manifest."""
+    from app import agent_surface
+
+    return agent_surface.agentic_market_json()
 
 
 @app.get("/.well-known/funding.json")
