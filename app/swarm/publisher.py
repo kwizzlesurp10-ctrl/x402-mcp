@@ -139,8 +139,11 @@ async def restore_pinned_listing() -> CompositeProduct | None:
 
     # Stale, broken, or gone (ephemeral restart) - force a rebuild.
     product = await rebuild_pinned_product()
+    if product is None:
+        # Rebuild failed and there was nothing sellable to keep. Boot anyway.
+        return None
     # If the rebuild failed, we keep the existing if it is sellable
-    if product is existing and existing is not None and not sellable:
+    if product is existing and not sellable:
         return None
 
     log.info(

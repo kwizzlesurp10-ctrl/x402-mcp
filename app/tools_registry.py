@@ -14,6 +14,14 @@ class ToolSpec(TypedDict, total=False):
 
 TOOL_SPECS: tuple[ToolSpec, ...] = (
     {
+        "name": "x402.agent_card",
+        "description": (
+            "Return the A2A Protocol v1.0 Agent ID Card and MCP server card. "
+            "Optional target_id filters to a skill id, name, or tag."
+        ),
+        "tier": "free",
+    },
+    {
         "name": "x402.discover",
         "description": (
             "Discover paid HTTP APIs in the x402 Bazaar via the facilitator catalog. "

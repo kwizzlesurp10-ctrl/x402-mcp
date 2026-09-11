@@ -163,6 +163,66 @@ async def _execute_tool(
 
 
 @mcp.tool(
+    name="x402.agent_card",
+    title="A2A Agent ID Card",
+    description=(
+        "Return the A2A Protocol v1.0 Agent ID Card and MCP server card. "
+        "Optional target_id filters to a skill id, name, or tag."
+    ),
+    annotations=READONLY,
+)
+async def get_agent_card(
+    target_id: Desc[
+        str | None,
+        Field(
+            description=(
+                "Optional skill ID, tool name, or tag to inspect. "
+                "Omit for the full server agent card."
+            ),
+        ),
+    ] = None,
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional calling agent identifier for quota tracking."),
+    ] = None,
+) -> str:
+    from app.agent_surface import agent_card, mcp_server_card
+
+    def _build_card(resolved_agent_id: str) -> dict[str, Any]:
+        card = agent_card()
+        server_meta = mcp_server_card()
+        if target_id:
+            matching_skills = [
+                s
+                for s in card.get("skills", [])
+                if s.get("id") == target_id
+                or target_id in s.get("tags", [])
+                or target_id == s.get("name")
+            ]
+            if matching_skills:
+                return {
+                    "agent_id": resolved_agent_id,
+                    "target_id": target_id,
+                    "skills": matching_skills,
+                    "provider": card.get("provider"),
+                    "securitySchemes": card.get("securitySchemes"),
+                    "serverInfo": server_meta.get("serverInfo"),
+                }
+        return {
+            "agent_id": resolved_agent_id,
+            "card": card,
+            "server_card": server_meta,
+            "tools_count": len(card.get("skills", [])),
+        }
+
+    return await _execute_tool(
+        "x402.agent_card",
+        agent_id,
+        lambda resolved: _sync_result(_build_card(resolved)),
+    )
+
+
+@mcp.tool(
     name="x402.discover",
     title="Discover x402 services",
     description=(
@@ -1101,6 +1161,80 @@ def resource_catalog() -> str:
     from app.tools_registry import TOOL_SPECS
 
     return json.dumps({"tools": list(TOOL_SPECS)}, indent=2)
+
+
+@mcp.resource(
+    "x402://agent-card",
+    name="x402.agent-card",
+    title="A2A Agent ID Card",
+    description="Full A2A Protocol v1.0 Agent ID Card and capability descriptor.",
+    mime_type="application/json",
+)
+def get_agent_card_resource() -> str:
+    from app.agent_surface import agent_card
+
+    return json.dumps(agent_card(), indent=2)
+
+
+@mcp.resource(
+    "x402://server-card",
+    name="x402.server-card",
+    title="MCP server card",
+    description="Remote MCP Server Card for Smithery, Glama, and client indexing.",
+    mime_type="application/json",
+)
+def get_server_card_resource() -> str:
+    from app.agent_surface import mcp_server_card
+
+    return json.dumps(mcp_server_card(), indent=2)
+
+
+@mcp.resource(
+    "x402://tools-manifest",
+    name="x402.tools-manifest",
+    title="MCP tools manifest",
+    description="Canonical MCP well-known manifest with tool specs, quotas, and endpoints.",
+    mime_type="application/json",
+)
+def get_tools_manifest_resource() -> str:
+    from app.manifest import build_mcp_manifest
+
+    return json.dumps(build_mcp_manifest(), indent=2)
+
+
+@mcp.resource(
+    "x402://pricing-table",
+    name="x402.pricing-table",
+    title="x402 pricing table",
+    description="Machine-readable pricing for micropayments, subscriptions, and credits.",
+    mime_type="application/json",
+)
+def get_pricing_table_resource() -> str:
+    from app.agent_surface import paid_resources
+    from app.payment_rails import build_payment_rails
+
+    return json.dumps(
+        {
+            "free_tier": {
+                "monthly_quota": settings.free_tier_monthly_quota,
+                "rate_limit_per_minute": settings.free_tier_rate_limit_per_min,
+                "price": "$0.00",
+            },
+            "pro_tier": {
+                "monthly_quota": settings.pro_tier_monthly_quota,
+                "rate_limit_per_minute": settings.pro_tier_rate_limit_per_min,
+                "price_usd": "$29.00",
+                "price_x402": settings.pro_tier_price,
+            },
+            "tool_credits": {
+                "pack_size": settings.tool_credit_pack_size,
+                "price_x402": settings.tool_credit_pack_price,
+            },
+            "paid_endpoints": paid_resources(),
+            "payment_rails": build_payment_rails(),
+        },
+        indent=2,
+    )
 
 
 async def _sync_result(data: dict[str, Any]) -> dict[str, Any]:

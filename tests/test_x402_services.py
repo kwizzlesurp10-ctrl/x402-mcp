@@ -60,6 +60,25 @@ async def test_malformed_signature_returns_invalid_not_raise() -> None:
     assert result["invalid_reason"].startswith("malformed_payment")
 
 
+def test_parse_caip2_networks_splits_and_strips() -> None:
+    assert x402_services.parse_caip2_networks(None) == []
+    assert x402_services.parse_caip2_networks("") == []
+    assert x402_services.parse_caip2_networks("eip155:8453") == ["eip155:8453"]
+    assert x402_services.parse_caip2_networks(
+        "eip155:8453, solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp,eip155:42161"
+    ) == [
+        "eip155:8453",
+        "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "eip155:42161",
+    ]
+    assert (
+        x402_services.primary_caip2_network(
+            "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+        )
+        == "eip155:8453"
+    )
+
+
 def test_buyer_cap_rounds_list_price_to_10000_atomic() -> None:
     """int(0.01 * 1e6) truncates to 9999 on some platforms and refuses $0.01."""
     assert x402_services.usdc_cap_atomic(0.01) == 10_000

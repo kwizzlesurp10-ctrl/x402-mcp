@@ -56,10 +56,10 @@ The public seller host holds **no spend key** — it only verifies and settles i
 
 ## Features
 
-- **22 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, US city compliance, MailRail messaging, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **23 MCP tools** for buyer, seller, Stripe fiat, x402 commerce, swarm-agency, US city compliance, MailRail messaging, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
 - **4 MCP prompts** (`onboarding_flow`, `x402_tool_selector`, `generate_quote`, `troubleshoot_payment`) for LLM orchestrators
 - **4 MCP resources** (`x402://agent-card`, `x402://server-card`, `x402://tools-manifest`, `x402://pricing-table`) exposing live machine descriptors
-- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `get_agent_card` / `x402://agent-card` with per-`agent_id` quota isolation
+- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `get_agent_card` (`x402.agent_card`) / `x402://agent-card` with per-`agent_id` quota isolation
 - **x402/Coinbase rail** (primary): x402 v2 wire format end to end — challenge generation, verify + settle via the CDP facilitator on Base mainnet, Bazaar discoverability on listings
 - **Stripe payment rail** (fiat alternative): `commerce.stripe_checkout` + `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response

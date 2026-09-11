@@ -409,6 +409,30 @@ def agent_card() -> dict[str, Any]:
 
     skills: list[dict[str, Any]] = [
         {
+            "id": "x402-agent-card",
+            "name": "A2A Agent Card & Capabilities Inspector",
+            "description": (
+                "Inspect this host's A2A Protocol v1.0 Agent ID Card, MCP server card, "
+                "skills, and payment rails. Free. MCP tool: get_agent_card. "
+                f"HTTP: GET {base}/.well-known/agent-card.json."
+            ),
+            "tags": [
+                "agent-card",
+                "identity",
+                "a2a",
+                "mcp",
+                "discovery",
+                "capabilities",
+                "catalog",
+            ],
+            "examples": [
+                "Get the full agent identity card and capability manifest",
+                f"GET {base}/.well-known/agent-card.json",
+            ],
+            "inputModes": ["text/plain", "application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
             "id": "base-tx-decision",
             "name": "Base Transaction Decision",
             "description": (
@@ -1035,8 +1059,26 @@ def mcp_server_card() -> dict[str, Any]:
     """Remote MCP Server Card for Smithery.ai, Glama.ai, and MCP client indexing."""
     base = _base()
     from app.manifest import build_mcp_manifest
+    from app.x402_services import primary_caip2_network
 
     mcp_manifest = build_mcp_manifest()
+    tools = list(mcp_manifest["tools"])
+    try:
+        from app.mcp_server import mcp as _mcp
+
+        live = []
+        for tool in _mcp._tool_manager._tools.values():
+            live.append(
+                {
+                    "name": getattr(tool, "name", None) or getattr(tool, "key", ""),
+                    "description": getattr(tool, "description", "") or "",
+                    "inputSchema": getattr(tool, "parameters", None) or {"type": "object"},
+                }
+            )
+        if live:
+            tools = live
+    except Exception:
+        pass
 
     return {
         "serverInfo": {
@@ -1058,17 +1100,38 @@ def mcp_server_card() -> dict[str, Any]:
         "authentication": {
             "type": "x402",
             "scheme": "EIP-3009",
-            "network": settings.x402_default_network,
+            "network": primary_caip2_network(settings.x402_default_network),
             "asset": "USDC",
             "assetAddress": BASE_USDC,
             "pay_to": _pay_to(),
         },
         "capabilities": {
             "tools": True,
-            "resources": False,
-            "prompts": False,
+            "resources": True,
+            "prompts": True,
         },
-        "tools": mcp_manifest["tools"],
+        "configSchema": {
+            "type": "object",
+            "properties": {
+                "X402_PAY_TO_ADDRESS": {
+                    "type": "string",
+                    "description": "Optional 0x USDC address on Base for inbound x402 sales.",
+                },
+                "EVM_PRIVATE_KEY": {
+                    "type": "string",
+                    "description": "Optional burner key for x402.pay_and_fetch and city.check.",
+                },
+            },
+        },
+        "remotes": [
+            {
+                "type": "streamable-http",
+                "url": f"{base}/mcp/mcp",
+            }
+        ],
+        "tools": tools,
+        "prompts": True,
+        "resources": True,
         "homepage": base,
         "repository": {
             "type": "git",

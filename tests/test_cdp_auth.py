@@ -86,6 +86,13 @@ def test_use_cdp_gating(monkeypatch):
     monkeypatch.setattr(settings, "cdp_networks", "eip155:8453")
     assert x402_services._use_cdp("eip155:8453") is True
     assert x402_services._use_cdp("eip155:84532") is False
+    # Joined production list still routes to CDP because Base mainnet is in it.
+    assert (
+        x402_services._use_cdp(
+            "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp,eip155:42161"
+        )
+        is True
+    )
     assert x402_services._facilitator_url_for("eip155:8453") == settings.cdp_facilitator_url
     assert (
         x402_services._facilitator_url_for("eip155:84532")

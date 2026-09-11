@@ -139,6 +139,7 @@ def _record_settled_revenue(ctx: Any) -> None:
 
         tx = getattr(result, "transaction", None)
         from app.swarm import ledger_writer
+        from app.x402_services import primary_caip2_network
 
         ledger_writer.record_revenue(
             agent_id=product_id,
@@ -146,7 +147,7 @@ def _record_settled_revenue(ctx: Any) -> None:
             network=str(
                 getattr(result, "network", None)
                 or getattr(requirements, "network", None)
-                or settings.x402_default_network
+                or primary_caip2_network(settings.x402_default_network)
             ),
             product_id=product_id,
             tx=str(tx) if tx else None,
@@ -227,6 +228,101 @@ def instrumented_middleware_class() -> type:
     return _InstrumentedPaymentMiddleware
 
 
+def _supported_exact_networks(server: Any) -> list[str]:
+    """CAIP-2 ids the resource server's facilitator advertised for ``exact``."""
+    found: list[str] = []
+    responses = getattr(server, "_supported_responses", None) or {}
+    for schemes in responses.values():
+        supported = schemes.get("exact") if isinstance(schemes, dict) else None
+        if supported is None:
+            continue
+        for kind in getattr(supported, "kinds", []) or []:
+            net = getattr(kind, "network", None)
+            if net and net not in found:
+                found.append(net)
+    return found
+
+
+def _atomic_payment_options(
+    *,
+    price: str,
+    networks: list[str],
+    server: Any,
+) -> list[Any]:
+    """One ``PaymentOption`` per atomic CAIP-2 id the facilitator actually supports.
+
+    The SDK's ``PaymentOption.network`` is a single id. A comma-joined
+    ``X402_DEFAULT_NETWORK`` makes ``initialize()`` raise
+    ``RouteConfigurationError`` ("Facilitator does not support scheme exact on
+    network eip155:8453,solana:…") and 500 the gated routes. Drop rails the
+    configured facilitator has no ``exact`` kind for — this middleware uses one
+    facilitator, unlike the hand-rolled path which builds per-network.
+    """
+    from x402.http.types import PaymentOption
+
+    pay_to = settings.x402_pay_to_address
+    options: list[Any] = []
+    queried = False
+    for net in networks:
+        if "," in net:
+            continue
+        try:
+            queried = True
+            if not server.has_registered_scheme(net, "exact"):
+                continue
+            if not server.get_supported_kind(2, net, "exact"):
+                log.info(
+                    "x402_middleware_pilot: skipping %s — facilitator has no exact kind",
+                    net,
+                )
+                continue
+        except Exception:
+            log.warning(
+                "x402_middleware_pilot: could not query facilitator support for %s",
+                net,
+                exc_info=True,
+            )
+            continue
+        options.append(
+            PaymentOption(
+                scheme="exact",
+                pay_to=pay_to,
+                price=price,
+                network=net,
+            )
+        )
+    if options:
+        return options
+
+    from app.x402_services import primary_caip2_network
+
+    fallback = networks[0] if networks else primary_caip2_network(None)
+    if queried:
+        family = fallback.split(":")[0] + ":"
+        for net in _supported_exact_networks(server):
+            if net.startswith(family) and "," not in net:
+                log.warning(
+                    "x402_middleware_pilot: listed %s unsupported; advertising facilitator kind %s",
+                    networks,
+                    net,
+                )
+                fallback = net
+                break
+    else:
+        log.warning(
+            "x402_middleware_pilot: facilitator support unknown; advertising %s",
+            fallback,
+        )
+    return [
+        PaymentOption(
+            scheme="exact",
+            pay_to=pay_to,
+            price=price,
+            network=fallback,
+        )
+    ]
+
+
 def register(app: Starlette) -> None:
     """Wire the pilot middleware onto `app`, additively.
 
@@ -244,14 +340,23 @@ def register(app: Starlette) -> None:
         )
         return
 
-    from x402.http.types import PaymentOption, RouteConfig
+    from x402.http.types import RouteConfig
 
     from app import finality_check
-    from app.x402_services import _build_discovery_extension, _resource_server
+    from app.x402_services import (
+        _build_discovery_extension,
+        _resource_server,
+        parse_caip2_networks,
+        primary_caip2_network,
+    )
 
     # This server instance is exclusive to the two routes below, so the hook
-    # cannot fire for any other product's settlement.
-    server = _resource_server(settings.x402_default_network)
+    # cannot fire for any other product's settlement. Pass the primary CAIP-2
+    # id so CDP routing (_use_cdp) sees eip155:8453, not the joined string.
+    networks = parse_caip2_networks(settings.x402_default_network)
+    if not networks:
+        networks = [primary_caip2_network(None)]
+    server = _resource_server(networks[0])
     server.on_after_settle(_record_settled_revenue)
 
     finality_extensions = None
@@ -263,14 +368,16 @@ def register(app: Starlette) -> None:
         )
 
     tags = [t.strip()[:32] for t in settings.bazaar_service_tags.split(",") if t.strip()][:5]
+    # /base/* is a Base product; don't advertise SVM/other-L1 rails even if
+    # they appear in X402_DEFAULT_NETWORK for city 402s.
+    base_networks = [n for n in networks if n.startswith("eip155:")] or networks
 
     routes = {
         "GET /pilot/ping": RouteConfig(
-            accepts=PaymentOption(
-                scheme="exact",
-                pay_to=settings.x402_pay_to_address,
+            accepts=_atomic_payment_options(
                 price=settings.middleware_pilot_price,
-                network=settings.x402_default_network,
+                networks=networks,
+                server=server,
             ),
             description=(
                 "x402 SDK middleware pilot endpoint — not a catalog product, "
@@ -280,11 +387,10 @@ def register(app: Starlette) -> None:
             mime_type="application/json",
         ),
         "GET /base/finality-check": RouteConfig(
-            accepts=PaymentOption(
-                scheme="exact",
-                pay_to=settings.x402_pay_to_address,
+            accepts=_atomic_payment_options(
                 price=settings.finality_check_price,
-                network=settings.x402_default_network,
+                networks=base_networks,
+                server=server,
             ),
             resource=finality_check.resource_url(),
             description=finality_check.RESOURCE_DESCRIPTION,
