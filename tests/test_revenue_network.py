@@ -34,6 +34,26 @@ def test_explicit_override_wins(monkeypatch) -> None:
     assert resolve_revenue_network() == "eip155:137"
 
 
+def test_comma_joined_revenue_network_uses_first_caip2(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "revenue_network",
+        "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp,eip155:42161",
+    )
+    assert resolve_revenue_network() == "eip155:8453"
+
+
+def test_comma_joined_default_network_uses_first_caip2(monkeypatch) -> None:
+    _clear_cdp(monkeypatch)
+    monkeypatch.setattr(settings, "revenue_network", None)
+    monkeypatch.setattr(
+        settings,
+        "x402_default_network",
+        "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    )
+    assert resolve_revenue_network() == "eip155:8453"
+
+
 def _revenue_check(report: dict) -> dict:
     return next(c for c in report["checks"] if c["id"] == "revenue_network")
 

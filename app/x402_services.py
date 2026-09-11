@@ -27,6 +27,32 @@ logger = logging.getLogger("x402")
 # embeds a user-supplied topic) can ever emit an uncatalogable / unsettleable 402.
 CDP_MAX_DESCRIPTION_CHARS = 500
 
+# Fallback when a network setting is empty after splitting. Matches the
+# config.py default (Base Sepolia) so local-dev still has a rail.
+_DEFAULT_CAIP2_NETWORK = "eip155:84532"
+
+
+def parse_caip2_networks(value: str | None) -> list[str]:
+    """Split a comma-separated CAIP-2 list into atomic network ids.
+
+    ``X402_DEFAULT_NETWORK`` is documented as one CAIP-2 id, but production
+    sets it to several rails so hand-rolled 402s can emit one ``accepts[]``
+    entry per chain. The SDK's ``PaymentOption.network`` is a single id —
+    passing the joined string makes facilitator ``/supported`` miss and
+    raises ``RouteConfigurationError`` on middleware initialize.
+    """
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def primary_caip2_network(
+    value: str | None, *, default: str = _DEFAULT_CAIP2_NETWORK
+) -> str:
+    """First atomic CAIP-2 id from a (possibly comma-separated) network setting."""
+    networks = parse_caip2_networks(value)
+    return networks[0] if networks else default
+
 
 def _clamp_description(description: str) -> str:
     if len(description) <= CDP_MAX_DESCRIPTION_CHARS:
@@ -43,11 +69,16 @@ def _clamp_description(description: str) -> str:
 
 def _use_cdp(network: str | None) -> bool:
     """CDP facilitator is used when creds are set and the network needs it
-    (Base mainnet etc.; the free x402.org facilitator only settles Base Sepolia)."""
+    (Base mainnet etc.; the free x402.org facilitator only settles Base Sepolia).
+
+    ``network`` may be a comma-separated list (same as ``X402_DEFAULT_NETWORK``
+    in production). Match any atomic id against ``CDP_NETWORKS`` so a joined
+    string does not silently fall through to the testnet-only facilitator.
+    """
     if not (settings.cdp_api_key_id and settings.cdp_api_key_secret):
         return False
-    cdp_nets = {n.strip() for n in settings.cdp_networks.split(",") if n.strip()}
-    return bool(network) and network in cdp_nets
+    cdp_nets = set(parse_caip2_networks(settings.cdp_networks))
+    return any(n in cdp_nets for n in parse_caip2_networks(network))
 
 
 def _facilitator_client(network: str | None = None):
@@ -680,9 +711,9 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
     from x402.http import encode_payment_required_header
     from x402.schemas import PaymentRequired
 
-    networks = [n.strip() for n in params.network.split(",") if n.strip()]
+    networks = parse_caip2_networks(params.network)
     if not networks:
-        networks = ["eip155:84532"]
+        networks = [_DEFAULT_CAIP2_NETWORK]
 
     requirements = []
     
@@ -783,12 +814,12 @@ def resolve_revenue_network() -> str:
     real quota for free Sepolia USDC); else the default network (local dev).
     """
     if settings.revenue_network:
-        return settings.revenue_network
+        return primary_caip2_network(settings.revenue_network)
     if settings.cdp_api_key_id and settings.cdp_api_key_secret:
-        nets = [n.strip() for n in settings.cdp_networks.split(",") if n.strip()]
+        nets = parse_caip2_networks(settings.cdp_networks)
         if nets:
             return nets[0]
-    return settings.x402_default_network
+    return primary_caip2_network(settings.x402_default_network)
 
 
 def build_pro_upgrade_requirements(agent_id: str) -> dict[str, Any]:

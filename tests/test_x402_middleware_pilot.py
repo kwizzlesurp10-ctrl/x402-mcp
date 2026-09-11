@@ -18,6 +18,7 @@ from app import demand, ledger_io, x402_middleware_pilot
 from app.config import settings
 from app.main import app
 from app.swarm import ledger_writer
+from app.x402_services import primary_caip2_network
 
 client = TestClient(app)
 
@@ -33,7 +34,8 @@ def test_payment_required_header_matches_configured_price_and_pay_to() -> None:
     decoded = json.loads(base64.b64decode(response.headers["payment-required"]))
     accept = decoded["accepts"][0]
     assert accept["scheme"] == "exact"
-    assert accept["network"] == settings.x402_default_network
+    assert accept["network"] == primary_caip2_network(settings.x402_default_network)
+    assert "," not in accept["network"]
     assert accept["payTo"].lower() == settings.x402_pay_to_address.lower()
     # $0.001 -> 1000 atomic units of 6-decimal USDC.
     assert accept["amount"] == "1000"
@@ -52,7 +54,8 @@ def test_unpaid_finality_check_returns_402_with_correct_price() -> None:
     assert response.status_code == 402
     decoded = json.loads(base64.b64decode(response.headers["payment-required"]))
     accept = decoded["accepts"][0]
-    assert accept["network"] == settings.x402_default_network
+    assert accept["network"] == primary_caip2_network(settings.x402_default_network)
+    assert "," not in accept["network"]
     assert accept["payTo"].lower() == settings.x402_pay_to_address.lower()
     # $0.01 -> 10000 atomic units of 6-decimal USDC.
     assert accept["amount"] == "10000"
@@ -81,6 +84,74 @@ def test_mn_property_check_still_uses_its_own_hand_rolled_path() -> None:
     if response.status_code == 402:
         # Still the hand-rolled challenge shape, not the generic middleware's.
         assert response.json()["error"] == "payment_required"
+
+
+JOINED_PRODUCTION_NETWORKS = (
+    "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp,eip155:42161"
+)
+
+
+def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
+    """Production sets X402_DEFAULT_NETWORK to several rails. Passing that
+    joined string as PaymentOption.network makes the SDK's initialize() raise
+    RouteConfigurationError and 500 /pilot/ping + /base/finality-check."""
+    monkeypatch.setattr(settings, "x402_default_network", JOINED_PRODUCTION_NETWORKS)
+    pilot_app = FastAPI()
+    x402_middleware_pilot.register(pilot_app)
+    pilot_client = TestClient(pilot_app)
+
+    ping = pilot_client.get("/pilot/ping")
+    assert ping.status_code == 402, ping.text[:300]
+    ping_decoded = json.loads(base64.b64decode(ping.headers["payment-required"]))
+    ping_nets = [a["network"] for a in ping_decoded["accepts"]]
+    assert ping_nets, "402 must advertise at least one rail"
+    assert all("," not in n and n.count(":") == 1 for n in ping_nets)
+    # Joined production string must never appear as a single network id.
+    assert JOINED_PRODUCTION_NETWORKS not in ping_nets
+    assert "eip155:42161" not in ping_nets
+
+    finality = pilot_client.get("/base/finality-check", params={"tx": VALID_TX})
+    assert finality.status_code == 402, finality.text[:300]
+    fin_decoded = json.loads(base64.b64decode(finality.headers["payment-required"]))
+    fin_nets = [a["network"] for a in fin_decoded["accepts"]]
+    assert all(n.startswith("eip155:") and "," not in n for n in fin_nets)
+    assert JOINED_PRODUCTION_NETWORKS not in fin_nets
+
+
+def test_atomic_options_skip_joined_and_unsupported_ids() -> None:
+    server = SimpleNamespace(
+        has_registered_scheme=lambda net, _scheme: net.startswith("eip155:"),
+        get_supported_kind=lambda _v, net, _scheme: object()
+        if net == "eip155:8453"
+        else None,
+    )
+    options = x402_middleware_pilot._atomic_payment_options(
+        price="$0.01",
+        networks=[
+            "eip155:8453",
+            "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "eip155:42161",
+        ],
+        server=server,
+    )
+    assert [o.network for o in options] == ["eip155:8453"]
+
+
+def test_atomic_options_fallback_to_supported_family_rail() -> None:
+    """If every listed rail is unsupported, advertise a same-family kind the
+    facilitator actually has so initialize() does not 500 the route."""
+    kind = SimpleNamespace(network="eip155:84532", scheme="exact", x402_version=2)
+    server = SimpleNamespace(
+        has_registered_scheme=lambda *_a, **_k: True,
+        get_supported_kind=lambda *_a, **_k: None,
+        _supported_responses={"eip155:84532": {"exact": SimpleNamespace(kinds=[kind])}},
+    )
+    options = x402_middleware_pilot._atomic_payment_options(
+        price="$0.01",
+        networks=["eip155:8453", "eip155:42161"],
+        server=server,
+    )
+    assert [o.network for o in options] == ["eip155:84532"]
 
 
 def test_register_is_a_noop_without_pay_to_address(monkeypatch) -> None:
@@ -239,7 +310,11 @@ def test_register_wires_the_after_settle_hook(monkeypatch) -> None:
     from app import x402_services
 
     hooks = []
-    fake_server = SimpleNamespace(on_after_settle=hooks.append)
+    fake_server = SimpleNamespace(
+        on_after_settle=hooks.append,
+        has_registered_scheme=lambda *_a, **_k: True,
+        get_supported_kind=lambda *_a, **_k: object(),
+    )
     monkeypatch.setattr(x402_services, "_resource_server", lambda *a, **k: fake_server)
 
     added = []
