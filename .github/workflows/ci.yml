@@ -34,3 +34,12 @@ jobs:
       - name: vitest
         working-directory: dashboard
         run: pnpm vitest run
+      - name: Desktop admin deps
+        working-directory: desktop-admin
+        run: pnpm install --frozen-lockfile || pnpm install
+      - name: desktop-admin vitest
+        working-directory: desktop-admin
+        run: pnpm vitest run
+      - name: desktop-admin build
+        working-directory: desktop-admin
+        run: pnpm build
