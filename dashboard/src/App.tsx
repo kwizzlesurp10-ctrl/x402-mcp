@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
+import { api, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmAssessment, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
 import { ActiveStorefront } from "./components/ActiveStorefront";
 import { CommandPalette } from "./components/CommandPalette";
 import { OsHealthPanel } from "./components/OsHealthPanel";
 import { PulsePanel } from "./components/PulsePanel";
 import { SwarmActivity } from "./components/SwarmActivity";
+import { SwarmAssessmentPanel } from "./components/SwarmAssessmentPanel";
 import { Inspector402 } from "./components/Inspector402";
 import { MissionProgress } from "./components/MissionProgress";
 import { OnboardingTour } from "./components/OnboardingTour";
@@ -59,6 +60,7 @@ export default function App() {
   const [os, setOs] = useState<OsSnapshot | null>(null);
   const [products, setProducts] = useState<SwarmProduct[]>([]);
   const [swarmRevenue, setSwarmRevenue] = useState<SwarmRevenue | null>(null);
+  const [swarmAssessment, setSwarmAssessment] = useState<SwarmAssessment | null>(null);
   const [activity, setActivity] = useState<StreamEvent[]>([]);
   const [probeDone, setProbeDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +157,49 @@ export default function App() {
           revenue_usdc: 0,
         },
       ]);
+      setSwarmAssessment({
+        generated_at: new Date().toISOString(),
+        signals: { mcp_tools: 42, head: "demo", seller_ready: true },
+        profit_routes: [
+          {
+            id: "mn_invest",
+            name: "Invest in /mn/property-check",
+            priority_score: 8.5,
+            raw_score: 8.5,
+            blocked_by: [],
+            human_gated: false,
+            status_note: "PRODUCT-FOCUS unfrozen — improve offer quality on the access-barrier SKU.",
+            next_action: "Ship buyer-facing accuracy and clearer packaging on /mn/property-check.",
+          },
+          {
+            id: "cost_basis_resale",
+            name: "Cost-basis / access-barrier products",
+            priority_score: 7.8,
+            raw_score: 7.8,
+            blocked_by: [],
+            human_gated: false,
+            status_note: "Revenue concentrates where sellers resell a real cost basis.",
+            next_action: "Design one product that joins restricted multi-source data.",
+          },
+        ],
+        recommended_route: {
+          id: "mn_invest",
+          name: "Invest in /mn/property-check",
+          priority_score: 8.5,
+          why: "PRODUCT-FOCUS unfrozen — improve offer quality on the access-barrier SKU.",
+          next_action: "Ship buyer-facing accuracy and clearer packaging on /mn/property-check.",
+        },
+        backlog: [
+          { charter: "orchestrator", title: "Orchestrator & state manager", status: "partial", human_gated: false, detail: "Swarm orchestrator exists; no weekly trigger yet." },
+          { charter: "outreach", title: "Outreach, partnerships & community", status: "human_gated", human_gated: true, detail: "Mass outreach GATED. Assistant drafts, humans send." },
+          { charter: "advertising", title: "Advertising, distribution & acquisition", status: "human_gated", human_gated: true, detail: "Ad spend GATED. Recommends budgets only." },
+        ],
+        immediate_technical_actions: [
+          { charter: "ops_monitoring", title: "Ops, monitoring, protection & analytics", detail: "Add runtime spend-anomaly alerts." },
+        ],
+        human_gates: ["Outreach, partnerships & community", "Advertising, distribution & acquisition"],
+        scoring_model: { weights: {}, note: "route score = Σ(attr×weight)×10" },
+      });
       setSwarmRevenue({
         scope: "swarm_composites",
         total_spend_usdc: 0.05,
@@ -226,7 +271,7 @@ export default function App() {
       return;
     }
     try {
-      const [s, d, sp, rev, w, pr, srev, tel] = await Promise.all([
+      const [s, d, sp, rev, w, pr, srev, sass, tel] = await Promise.all([
         api.stats(),
         api.doctor(),
         api.ledgerSpend(),
@@ -234,6 +279,7 @@ export default function App() {
         api.wallet(),
         api.swarmProducts(),
         api.swarmRevenue(),
+        api.swarmAssessment(),
         api.telemetry(),
       ]);
       setStats(s);
@@ -243,6 +289,7 @@ export default function App() {
       setWallet(w);
       setProducts(pr);
       setSwarmRevenue(srev);
+      setSwarmAssessment(sass);
       setTelemetry(tel);
       api.pulse().then(setPulse).catch(() => {});
       api.os().then(setOs).catch(() => {});
@@ -327,6 +374,7 @@ export default function App() {
       { id: "hero", label: "Go to net position", run: () => scrollTo("panel-hero") },
       { id: "wallet", label: "Go to wallet", run: () => scrollTo("panel-wallet") },
       { id: "swarm", label: "Go to swarm activity", run: () => scrollTo("panel-swarm") },
+      { id: "assessment", label: "Go to strategic assessment", run: () => scrollTo("panel-swarm-assessment") },
       { id: "os", label: "Go to host OS health", run: () => scrollTo("panel-os") },
       { id: "inspector", label: "Go to 402 Inspector", run: () => scrollTo("panel-inspector") },
       { id: "spend", label: "Go to spend ledger", run: () => scrollTo("panel-spend") },
@@ -654,6 +702,8 @@ export default function App() {
           <OsHealthPanel os={os} />
           <ActiveStorefront products={products} revenueRows={revenue} activityEvents={activity} />
         </div>
+
+        <SwarmAssessmentPanel assessment={swarmAssessment} density={density} />
 
         <section id="panel-activity" className="panel" style={{ gridColumn: "span 8" }}>
           <h3>Activity</h3>

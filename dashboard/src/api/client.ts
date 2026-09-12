@@ -114,6 +114,42 @@ export type SwarmStorefrontRevenue = {
   swarm_revenue_usdc: number;
 };
 
+export type SwarmProfitRoute = {
+  id: string;
+  name: string;
+  priority_score: number;
+  raw_score: number;
+  blocked_by: string[];
+  human_gated: boolean;
+  status_note: string;
+  next_action: string;
+};
+
+export type SwarmBacklogItem = {
+  charter: string;
+  title: string;
+  status: string;
+  human_gated: boolean;
+  detail: string;
+};
+
+export type SwarmAssessment = {
+  generated_at: string;
+  signals: Record<string, unknown>;
+  profit_routes: SwarmProfitRoute[];
+  recommended_route: {
+    id: string;
+    name: string;
+    priority_score: number;
+    why: string;
+    next_action: string;
+  };
+  backlog: SwarmBacklogItem[];
+  immediate_technical_actions: Array<{ charter: string; title: string; detail: string }>;
+  human_gates: string[];
+  scoring_model: { weights: Record<string, number>; note: string };
+};
+
 export type SwarmRevenue = {
   scope?: "swarm_composites";
   note?: string;
@@ -230,6 +266,7 @@ export const api = {
   os: () => getJson<OsSnapshot>("/os"),
   swarmProducts: () => getJson<SwarmProduct[]>("/swarm/products"),
   swarmRevenue: () => getJson<SwarmRevenue>("/swarm/revenue"),
+  swarmAssessment: () => getJson<SwarmAssessment>("/swarm/assessment"),
   telemetry: () => getJson<TelemetryResponse>("/telemetry"),
   usCities: () => getJson<CityCatalog>("/us/cities"),
   demand: () => getJson<DemandReport>("/demand"),
