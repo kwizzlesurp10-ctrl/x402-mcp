@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import demand
-from app.city_compliance import gate, registry
+from app.city_compliance import agentmail, gate, registry
 from app.city_compliance.models import CitySpec
 from app.config import settings
 
@@ -24,12 +24,19 @@ router = APIRouter(tags=["us-city-compliance"])
 @router.get("/us/cities")
 async def us_cities_catalog() -> JSONResponse:
     """Free catalog of network cities (no payment)."""
+    cities = registry.list_cities()
+    agentmail.notify_city_call(
+        "catalog",
+        channel="http",
+        price=settings.city_network_price,
+        detail=f"city_count={len(cities)}",
+    )
     return JSONResponse(
         content={
             "network": "us-city-open-data-compliance",
             "price": settings.city_network_price,
             "network_caip2": settings.x402_default_network,
-            "cities": registry.list_cities(),
+            "cities": cities,
             "note": (
                 "Each city is a separate paid resource at "
                 "/us/{code}/property-check. Minneapolis (mn) is also available "
@@ -52,6 +59,15 @@ async def us_city_sample(city_code: str) -> JSONResponse:
         report = await mod.check_property(spec.sample_address)
     except Exception:
         log.warning("us/%s sample upstream failed", spec.code, exc_info=True)
+        agentmail.notify_city_call(
+            "error",
+            city_code=spec.code,
+            city_name=spec.name,
+            state=spec.state,
+            channel="http",
+            address=spec.sample_address,
+            detail="upstream_open_data_unavailable",
+        )
         return JSONResponse(
             status_code=502,
             content={
@@ -60,6 +76,17 @@ async def us_city_sample(city_code: str) -> JSONResponse:
                 "detail": "city open-data source timed out or refused; retry shortly",
             },
         )
+    agentmail.notify_city_call(
+        "sample",
+        city_code=spec.code,
+        city_name=spec.name,
+        state=spec.state,
+        channel="http",
+        address=spec.sample_address,
+        price=gate.price_for(spec),
+        verdict=agentmail.verdict_from_report(report),
+        paid=False,
+    )
     return JSONResponse(
         content={
             "sample": True,
@@ -217,6 +244,19 @@ async def us_city_property_check(
     except Exception:
         log.warning("us/%s revenue ledger write failed", spec.code, exc_info=True)
 
+    agentmail.notify_city_call(
+        "paid_settle",
+        city_code=spec.code,
+        city_name=spec.name,
+        state=spec.state,
+        channel="http",
+        address=address.strip(),
+        price=gate.price_for(spec),
+        verdict=agentmail.verdict_from_report(report),
+        paid=True,
+        tx_hash=str(tx) if tx else None,
+        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+    )
     receipt = base64.b64encode(json.dumps(result["settlement"]).encode()).decode()
     return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
 

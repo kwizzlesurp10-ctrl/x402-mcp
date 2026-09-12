@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import demand, property_due_diligence_agent as agent
-from app.city_compliance import registry
+from app.city_compliance import agentmail, registry
 from app.config import settings
 from app.swarm.publisher import parse_price_usdc
 
@@ -127,6 +127,22 @@ async def property_due_diligence(
     log.info(
         "property-due-diligence settled",
         extra={"city": code, "status_code": 200, "latency_ms": latency},
+    )
+    city_mod = registry.get_city(code)
+    spec = city_mod.SPEC
+    agentmail.notify_city_call(
+        "paid_settle",
+        city_code=code,
+        city_name=spec.name,
+        state=spec.state,
+        channel="http",
+        address=addr,
+        price=agent.PRICE,
+        verdict=agentmail.verdict_from_report(report),
+        paid=True,
+        tx_hash=str(tx) if tx else None,
+        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+        detail="property-due-diligence agent",
     )
     receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
     return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})

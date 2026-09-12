@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from app.city_compliance import gate, registry
+from app.city_compliance import agentmail, gate, registry
 from app.config import settings
 from app.models import GetPaymentRequirementsInput, PayAndFetchInput
 from app import x402_services
@@ -48,17 +48,36 @@ def _catalog_payload() -> dict[str, Any]:
     }
 
 
-async def list_us_cities() -> dict[str, Any]:
+async def list_us_cities(*, agent_id: str | None = None) -> dict[str, Any]:
     """Free machine catalog — same payload shape as GET /us/cities + MCP path."""
-    return _catalog_payload()
+    payload = _catalog_payload()
+    agentmail.notify_city_call(
+        "catalog",
+        channel="mcp",
+        agent_id=agent_id,
+        price=settings.city_network_price,
+        detail=f"city_count={payload['city_count']}",
+    )
+    return payload
 
 
-async def get_us_city_property_sample(city_code: str) -> dict[str, Any]:
+async def get_us_city_property_sample(
+    city_code: str,
+    *,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
     """Free fixed-address sample for one city (no payment)."""
     code = (city_code or "").strip().lower()
     try:
         mod = registry.get_city(code)
     except KeyError:
+        agentmail.notify_city_call(
+            "error",
+            city_code=code or None,
+            channel="mcp",
+            agent_id=agent_id,
+            detail="unknown_city",
+        )
         return {
             "error": "unknown_city",
             "city": city_code,
@@ -71,6 +90,16 @@ async def get_us_city_property_sample(city_code: str) -> dict[str, Any]:
     try:
         report = await mod.check_property(spec.sample_address)
     except Exception as exc:  # noqa: BLE001 — surface upstream failure to agent
+        agentmail.notify_city_call(
+            "error",
+            city_code=spec.code,
+            city_name=spec.name,
+            state=spec.state,
+            channel="mcp",
+            agent_id=agent_id,
+            address=spec.sample_address,
+            detail=f"upstream_open_data_unavailable:{type(exc).__name__}",
+        )
         return {
             "error": "upstream_open_data_unavailable",
             "city": spec.code,
@@ -81,6 +110,18 @@ async def get_us_city_property_sample(city_code: str) -> dict[str, Any]:
         }
 
     paid = gate.resource_url(spec)
+    agentmail.notify_city_call(
+        "sample",
+        city_code=spec.code,
+        city_name=spec.name,
+        state=spec.state,
+        channel="mcp",
+        agent_id=agent_id,
+        address=spec.sample_address,
+        price=gate.price_for(spec),
+        verdict=agentmail.verdict_from_report(report),
+        paid=False,
+    )
     return {
         "sample": True,
         "city": spec.code,
@@ -141,6 +182,7 @@ async def check_us_city_property(
     *,
     max_price_usdc: float | None = None,
     preferred_network: str | None = None,
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
     """Paid compliance check via the live HTTP x402 resource.
 
@@ -150,6 +192,14 @@ async def check_us_city_property(
     """
     resolved = _paid_url(city_code, address)
     if isinstance(resolved, dict):
+        agentmail.notify_city_call(
+            "error",
+            city_code=(city_code or "").strip().lower() or None,
+            channel="mcp",
+            agent_id=agent_id,
+            address=(address or "").strip() or None,
+            detail=str(resolved.get("error")),
+        )
         return resolved
     mod, url = resolved
     spec = mod.SPEC
@@ -160,7 +210,7 @@ async def check_us_city_property(
         probe = await x402_services.get_payment_requirements(
             GetPaymentRequirementsInput(url=url, method="GET")
         )
-        return {
+        handoff = {
             "paid": False,
             "reason": "buyer_wallet_not_configured",
             "city": spec.code,
@@ -183,6 +233,19 @@ async def check_us_city_property(
                 "alternate_args": {"url": url, "method": "GET"},
             },
         }
+        agentmail.notify_city_call(
+            "paid_probe",
+            city_code=spec.code,
+            city_name=spec.name,
+            state=spec.state,
+            channel="mcp",
+            agent_id=agent_id,
+            address=address.strip(),
+            price=price,
+            paid=False,
+            detail="buyer_wallet_not_configured",
+        )
+        return handoff
 
     result = await x402_services.pay_and_fetch(
         PayAndFetchInput(
@@ -191,6 +254,36 @@ async def check_us_city_property(
             preferred_network=preferred_network or settings.x402_default_network,
             max_price_usdc=max_price_usdc,
         )
+    )
+    settlement = result.get("payment_settlement") or {}
+    tx_hash = (
+        settlement.get("transaction")
+        or settlement.get("tx_hash")
+        or settlement.get("hash")
+    )
+    body_report: dict[str, Any] | None = None
+    try:
+        import json as _json
+
+        parsed = _json.loads(result.get("body") or "{}")
+        if isinstance(parsed, dict):
+            body_report = parsed
+    except Exception:  # noqa: BLE001
+        body_report = None
+
+    agentmail.notify_city_call(
+        "paid_mcp",
+        city_code=spec.code,
+        city_name=spec.name,
+        state=spec.state,
+        channel="mcp",
+        agent_id=agent_id,
+        address=address.strip(),
+        price=price,
+        verdict=agentmail.verdict_from_report(body_report),
+        paid=bool(result.get("payment_settled")),
+        tx_hash=str(tx_hash) if tx_hash else None,
+        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
     )
     return {
         "paid": True,

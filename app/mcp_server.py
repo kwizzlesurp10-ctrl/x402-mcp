@@ -881,7 +881,9 @@ async def list_us_cities(
     from app.city_compliance import mcp_tools as city_mcp
 
     return await _execute_tool(
-        "city.list", agent_id, lambda _: city_mcp.list_us_cities()
+        "city.list",
+        agent_id,
+        lambda resolved: city_mcp.list_us_cities(agent_id=resolved),
     )
 
 
@@ -911,7 +913,9 @@ async def get_us_city_property_sample(
     return await _execute_tool(
         "city.sample",
         agent_id,
-        lambda _: city_mcp.get_us_city_property_sample(city_code),
+        lambda resolved: city_mcp.get_us_city_property_sample(
+            city_code, agent_id=resolved
+        ),
     )
 
 
@@ -953,11 +957,12 @@ async def check_us_city_property(
     return await _execute_tool(
         "city.check",
         agent_id,
-        lambda _: city_mcp.check_us_city_property(
+        lambda resolved: city_mcp.check_us_city_property(
             city_code,
             address,
             max_price_usdc=max_price_usdc,
             preferred_network=preferred_network,
+            agent_id=resolved,
         ),
     )
 

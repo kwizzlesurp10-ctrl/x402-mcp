@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app import demand, diligence_pack
+from app.city_compliance import agentmail, registry
 from app.config import settings
 
 log = logging.getLogger("x402")
@@ -224,6 +225,29 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
             "property_count": pack.get("property_count"),
         },
     )
+
+    for item in pack.get("properties") or []:
+        code = str(item.get("city_code") or "")
+        try:
+            spec = registry.get_city(code).SPEC
+            city_name, state = spec.name, spec.state
+        except KeyError:
+            city_name, state = None, None
+        agentmail.notify_city_call(
+            "paid_settle",
+            city_code=code or None,
+            city_name=city_name,
+            state=state,
+            channel="http",
+            address=str(item.get("address") or "") or None,
+            price=diligence_pack.price_string(),
+            verdict=item.get("compliance_verdict")
+            or agentmail.verdict_from_report(item.get("report")),
+            paid=True,
+            tx_hash=str(tx) if tx else None,
+            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+            detail="us-rental-diligence-pack",
+        )
 
     receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
     return JSONResponse(content=pack, headers={"PAYMENT-RESPONSE": receipt})
