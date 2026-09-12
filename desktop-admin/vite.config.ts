@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
   const apiTarget = env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8402";
 
   return {
+    // Relative asset URLs so Electron loadFile + file:// resolves bundled chunks.
+    base: "./",
     plugins: [react()],
     resolve: {
       dedupe: ["react", "react-dom", "@tanstack/react-virtual"],

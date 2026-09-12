@@ -11,7 +11,8 @@ export type StreamEvent = {
   meta?: Record<string, unknown>;
 };
 
-export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
+export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void, apiBase?: string) {
+  const resolvedBase = apiBase ?? getApiBase();
   const [status, setStatus] = useState<ServerStatus>("checking");
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const esRef = useRef<EventSource | null>(null);
@@ -20,7 +21,7 @@ export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
   const connect = useCallback(() => {
     if (!enabled) return;
     esRef.current?.close();
-    const es = new EventSource(`${getApiBase()}/events`);
+    const es = new EventSource(`${resolvedBase}/events`);
     esRef.current = es;
     es.onopen = () => {
       reconnectAttemptRef.current = 0;
@@ -46,12 +47,12 @@ export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
       es.close();
       setReconnectNonce((n) => n + 1);
     };
-  }, [enabled, onEvent]);
+  }, [enabled, onEvent, resolvedBase]);
 
   useEffect(() => {
     connect();
     return () => esRef.current?.close();
-  }, [connect]);
+  }, [connect, resolvedBase]);
 
   useEffect(() => {
     if (!shouldReconnect(status, enabled)) return;
@@ -66,14 +67,14 @@ export function useSSE(enabled: boolean, onEvent: (e: StreamEvent) => void) {
     if (!enabled || status !== "degraded") return;
     const id = setInterval(async () => {
       try {
-        await fetch(`${getApiBase()}/stats`);
+        await fetch(`${resolvedBase}/stats`);
         setStatus("degraded");
       } catch {
         setStatus("disconnected");
       }
     }, STATS_POLL_MS);
     return () => clearInterval(id);
-  }, [enabled, status]);
+  }, [enabled, status, resolvedBase]);
 
   return { status, reconnect: connect };
 }

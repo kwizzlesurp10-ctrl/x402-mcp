@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   getApiBase,
@@ -28,7 +28,7 @@ import { SwarmActivity } from "@dashboard/components/SwarmActivity";
 import { SwarmAssessmentPanel } from "@dashboard/components/SwarmAssessmentPanel";
 import { VirtualizedLedger } from "@dashboard/components/VirtualizedLedger";
 import { WalletPanel } from "@dashboard/components/WalletPanel";
-import { useSSE, type StreamEvent } from "@dashboard/hooks/useSSE";
+import { useSSE, type StreamEvent } from "./hooks/useSSE";
 import { calculateFinances } from "@dashboard/utils/finance";
 import { downloadText, ledgerToCsv } from "@dashboard/utils/ledger";
 import { formatUsdcAtomic } from "@dashboard/utils/usdc";
@@ -73,6 +73,7 @@ export default function App() {
   const [ledgerFilterNetwork] = useState("");
   const [ledgerFilterAgent, setLedgerFilterAgent] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
+  const autoDoctorPromptedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -103,7 +104,10 @@ export default function App() {
       setRateHistory((prev) => [...prev, rateRemaining].slice(-24));
       setError(null);
       setRefreshKey((k) => k + 1);
-      if (!d.summary.ready) setWizardOpen(true);
+      if (!d.summary.ready && !autoDoctorPromptedRef.current) {
+        setWizardOpen(true);
+        autoDoctorPromptedRef.current = true;
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reach API — run `make api`");
     }
@@ -117,7 +121,7 @@ export default function App() {
     [refresh],
   );
 
-  const { status: serverStatus, reconnect } = useSSE(true, onEvent);
+  const { status: serverStatus, reconnect } = useSSE(true, onEvent, apiBase);
 
   useEffect(() => {
     refresh();

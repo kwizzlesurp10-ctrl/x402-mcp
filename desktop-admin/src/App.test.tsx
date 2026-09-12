@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { StreamEvent } from "./hooks/useSSE";
 
 vi.mock("@dashboard/components/ActiveStorefront", () => ({ ActiveStorefront: () => null }));
 vi.mock("@dashboard/components/OsHealthPanel", () => ({ OsHealthPanel: () => null }));
@@ -18,6 +19,9 @@ vi.mock("./components/MailRailPanel", () => ({
   MailRailPanel: () => <div>AgentMail / MailRail</div>,
 }));
 
+const mockDoctor = vi.fn().mockResolvedValue({ checks: [], summary: { ready: true } });
+let sseOnEvent: ((e: StreamEvent) => void) | null = null;
+
 vi.mock("./api/client", () => ({
   getApiBase: () => "/api",
   setApiBase: vi.fn(),
@@ -26,7 +30,7 @@ vi.mock("./api/client", () => ({
       agents: [],
       config: { free_tier_monthly_quota: 500 },
     }),
-    doctor: vi.fn().mockResolvedValue({ checks: [], summary: { ready: true } }),
+    doctor: (...args: unknown[]) => mockDoctor(...args),
     ledgerSpend: vi.fn().mockResolvedValue([]),
     ledgerRevenue: vi.fn().mockResolvedValue([]),
     wallet: vi.fn().mockResolvedValue({
@@ -60,8 +64,11 @@ vi.mock("./api/client", () => ({
   },
 }));
 
-vi.mock("@dashboard/hooks/useSSE", () => ({
-  useSSE: () => ({ status: "connected", reconnect: vi.fn() }),
+vi.mock("./hooks/useSSE", () => ({
+  useSSE: (_enabled: boolean, onEvent: (e: StreamEvent) => void) => {
+    sseOnEvent = onEvent;
+    return { status: "connected", reconnect: vi.fn() };
+  },
 }));
 
 import App from "./App";
@@ -72,5 +79,28 @@ describe("Admin App", () => {
     expect(screen.getByText("// admin")).toBeInTheDocument();
     expect(await screen.findByText("Net position")).toBeInTheDocument();
     expect(screen.getByText("AgentMail / MailRail")).toBeInTheDocument();
+  });
+
+  it("auto-opens doctor modal once on initial load, not on SSE refresh", async () => {
+    mockDoctor.mockResolvedValue({
+      checks: [{ id: "wallet", name: "Wallet", status: "fail", message: "Missing key" }],
+      summary: { ready: false },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Doctor checks" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Doctor checks" })).not.toBeInTheDocument();
+
+    sseOnEvent?.({ ts: "2026-09-12T00:00:00Z", tool: "stats" });
+
+    await waitFor(() => {
+      expect(mockDoctor.mock.calls.length).toBeGreaterThan(1);
+    });
+    expect(screen.queryByRole("dialog", { name: "Doctor checks" })).not.toBeInTheDocument();
   });
 });
