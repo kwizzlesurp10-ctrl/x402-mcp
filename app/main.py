@@ -1277,8 +1277,28 @@ async def mn_property_check_sample() -> JSONResponse:
 
     from app.city_compliance import agentmail, registry
 
-    report = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
     mn_spec = registry.get_city("mn").SPEC
+    try:
+        report = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
+    except Exception:
+        log.warning("mn/property-check/sample upstream failed", exc_info=True)
+        agentmail.notify_city_call(
+            "error",
+            city_code="mn",
+            city_name=mn_spec.name,
+            state=mn_spec.state,
+            channel="http",
+            address=mn_compliance.SAMPLE_ADDRESS,
+            detail="upstream_open_data_unavailable",
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": "upstream_open_data_unavailable",
+                "city": "mn",
+                "detail": "city open-data source timed out or refused; retry shortly",
+            },
+        )
     agentmail.notify_city_call(
         "sample",
         city_code="mn",

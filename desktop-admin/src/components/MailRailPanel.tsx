@@ -54,7 +54,8 @@ export function MailRailPanel({ refreshKey }: MailRailPanelProps) {
           <span>admin: <span className="mono">{health.admin_recipient || "—"}</span></span>
           {stats && (
             <span className="mono">
-              outbox {stats.outbox_count ?? outbox.length} · inbox {stats.inbox_count ?? inbox.length}
+              outbox {stats.outbound_total ?? stats.outbox_count ?? outbox.length} · inbox{" "}
+              {stats.inbound_total ?? stats.inbox_count ?? inbox.length}
             </span>
           )}
         </div>
@@ -99,7 +100,7 @@ function MailList({
               <strong>{m.subject ?? "(no subject)"}</strong>
               <div style={{ color: "var(--text-muted)", marginTop: 2 }}>
                 {kind === "outbox" ? `to ${m.to ?? "—"}` : `from ${m.sender ?? m.from ?? "—"}`}
-                {m.delivered === false ? " · failed" : ""}
+                {m.status === "dispatch_failed" || m.delivered === false ? " · failed" : ""}
               </div>
             </li>
           ))}
