@@ -97,6 +97,25 @@ async def property_due_diligence(
         report = await agent.run_check(city_code=code, address=addr)
     except Exception:  # noqa: BLE001
         log.warning("property-due-diligence join failed after settle", exc_info=True)
+        tx = settlement.get("transaction") or settlement.get("txHash")
+        try:
+            spec = registry.get_city(code).SPEC
+            city_name, state = spec.name, spec.state
+        except KeyError:
+            city_name, state = None, None
+        agentmail.notify_city_call(
+            "error",
+            city_code=code,
+            city_name=city_name,
+            state=state,
+            channel="http",
+            address=addr,
+            price=agent.PRICE,
+            paid=True,
+            tx_hash=str(tx) if tx else None,
+            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+            detail="upstream_open_data_unavailable",
+        )
         receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
         return JSONResponse(
             status_code=502,

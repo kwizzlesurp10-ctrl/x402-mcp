@@ -210,6 +210,20 @@ async def us_city_property_check(
         log.warning("us/%s property join failed after settle", spec.code, exc_info=True)
         # Payment already settled — never re-challenge; return 502 with receipt.
         settlement = result.get("settlement") or {}
+        tx = settlement.get("transaction") or settlement.get("txHash")
+        agentmail.notify_city_call(
+            "error",
+            city_code=spec.code,
+            city_name=spec.name,
+            state=spec.state,
+            channel="http",
+            address=address.strip(),
+            price=gate.price_for(spec),
+            paid=True,
+            tx_hash=str(tx) if tx else None,
+            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+            detail="upstream_open_data_unavailable",
+        )
         receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
         return JSONResponse(
             status_code=502,
