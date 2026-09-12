@@ -8,6 +8,7 @@ is fire-and-forget: failures are logged and never propagate to callers.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from app import mailrail
@@ -87,12 +88,24 @@ def _event_id(
     channel: str = "http",
     agent_id: str | None = None,
     tx_hash: str | None = None,
+    request_id: str | None = None,
 ) -> str:
-    parts = ["city-call", call_kind, channel, city_code or "all", address or "-"]
+    """Build a MailRail dedup key.
+
+    Paid settlements and explicit ``request_id`` values are stable across retries
+    of the same request. All other calls include a per-invocation nonce so each
+    catalog browse, sample, or probe emits its own alert.
+    """
+    city = city_code or "all"
+    addr = address or "-"
+    if tx_hash:
+        return mailrail.event_key("city-call", call_kind, channel, city, addr, tx_hash)
+    if request_id:
+        return mailrail.event_key("city-call", call_kind, channel, city, request_id)
+    nonce = time.time_ns()
+    parts = ["city-call", call_kind, channel, city, addr, nonce]
     if agent_id:
         parts.append(agent_id)
-    if tx_hash:
-        parts.append(tx_hash)
     return mailrail.event_key(*parts)
 
 
@@ -111,6 +124,7 @@ def notify_city_call(
     tx_hash: str | None = None,
     payer: str | None = None,
     detail: str | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Dispatch AgentMail for one city-network operation. Never raises."""
     try:
@@ -136,6 +150,7 @@ def notify_city_call(
             channel=channel,
             agent_id=agent_id,
             tx_hash=tx_hash,
+            request_id=request_id,
         )
         return mailrail.send_agent_mail(
             to=_recipient(),

@@ -52,6 +52,73 @@ def test_format_city_call_alert_includes_city_context() -> None:
     assert "0xabc" in body
 
 
+def test_two_catalog_calls_both_dispatch(mail_ledger: Path) -> None:
+    """Each catalog browse must emit its own AgentMail (no process-lifetime dedup)."""
+    res1 = agentmail.notify_city_call("catalog", channel="http", detail="first")
+    res2 = agentmail.notify_city_call("catalog", channel="http", detail="second")
+    assert res1 is not None and res1["status"] == "sent"
+    assert res2 is not None and res2["status"] == "sent"
+    records = _ledger_records(mail_ledger)
+    assert len(records) == 2
+    assert records[0]["event_id"] != records[1]["event_id"]
+
+
+@pytest.mark.asyncio
+async def test_two_sample_calls_both_dispatch(
+    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each sample call must emit its own AgentMail even for the same city."""
+
+    async def fake_check(address: str) -> dict[str, Any]:
+        return {"address": address, "compliance_verdict": "sample_ok"}
+
+    monkeypatch.setattr(registry.get_city("mn"), "check_property", fake_check)
+    await city_mcp.get_us_city_property_sample("mn", agent_id="sample-agent")
+    await city_mcp.get_us_city_property_sample("mn", agent_id="sample-agent")
+    records = _ledger_records(mail_ledger)
+    assert len(records) == 2
+    assert all(r["metadata"]["call_kind"] == "sample" for r in records)
+    assert records[0]["event_id"] != records[1]["event_id"]
+
+
+def test_paid_tx_hash_retries_deduplicate(mail_ledger: Path) -> None:
+    """True retries of the same settled payment share one event_id."""
+    kwargs = {
+        "call_kind": "paid_settle",
+        "city_code": "sea",
+        "channel": "http",
+        "address": "400 Pine St",
+        "tx_hash": "0xabc123",
+        "paid": True,
+    }
+    res1 = agentmail.notify_city_call(**kwargs)
+    res2 = agentmail.notify_city_call(**kwargs)
+    assert res1 is not None and res1["status"] == "sent"
+    assert res2 is not None and res2["status"] == "deduplicated"
+    assert len(_ledger_records(mail_ledger)) == 1
+
+
+def test_request_id_retries_deduplicate(mail_ledger: Path) -> None:
+    """Explicit request_id enables stable dedup without a tx hash."""
+    res1 = agentmail.notify_city_call(
+        "paid_probe",
+        city_code="nyc",
+        channel="mcp",
+        address="1 Centre St",
+        request_id="probe-handoff-42",
+    )
+    res2 = agentmail.notify_city_call(
+        "paid_probe",
+        city_code="nyc",
+        channel="mcp",
+        address="1 Centre St",
+        request_id="probe-handoff-42",
+    )
+    assert res1 is not None and res1["status"] == "sent"
+    assert res2 is not None and res2["status"] == "deduplicated"
+    assert len(_ledger_records(mail_ledger)) == 1
+
+
 def test_notify_city_call_records_ledger(mail_ledger: Path) -> None:
     res = agentmail.notify_city_call(
         "catalog",
