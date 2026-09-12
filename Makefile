@@ -1,4 +1,4 @@
-.PHONY: up api dashboard test
+.PHONY: up api dashboard desktop-admin test
 
 up:
 	python scripts/dev_up.py
@@ -9,6 +9,10 @@ api:
 dashboard:
 	cd dashboard && pnpm dev
 
+desktop-admin:
+	cd desktop-admin && pnpm dev
+
 test:
 	.venv/Scripts/python.exe -m pytest -v
 	cd dashboard && pnpm vitest run
+	cd desktop-admin && pnpm vitest run

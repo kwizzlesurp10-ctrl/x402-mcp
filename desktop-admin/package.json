@@ -1,0 +1,62 @@
+{
+  "name": "x402-mission-control-admin",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Standalone Electron admin desktop for x402-mcp Mission Control",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5174 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 electron .\"",
+    "build": "vite build",
+    "build:electron": "pnpm build && electron-builder --dir",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.14.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^29.1.1",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^3.0.5",
+    "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "org.x402.mission-control.admin",
+    "productName": "x402 Mission Control Admin",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Finance"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.finance"
+    },
+    "win": {
+      "target": ["nsis"]
+    }
+  }
+}
