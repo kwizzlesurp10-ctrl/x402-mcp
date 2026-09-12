@@ -14,7 +14,11 @@ vi.mock("../api/client", () => ({
       has_webhook: false,
       has_smtp: false,
     }),
-    mailrailStats: vi.fn().mockResolvedValue({ outbox_count: 1, inbox_count: 0 }),
+    mailrailStats: vi.fn().mockResolvedValue({
+      outbound_total: 1,
+      inbound_total: 0,
+      dedup_keys_cached: 1,
+    }),
     mailrailLedger: vi.fn().mockResolvedValue({
       events: [{ subject: "City catalog browse", to: "ops@x402.test", ts: new Date().toISOString() }],
       count: 1,
@@ -28,5 +32,6 @@ describe("MailRailPanel", () => {
     render(<MailRailPanel refreshKey={1} />);
     expect(screen.getByText("AgentMail / MailRail")).toBeInTheDocument();
     expect(await screen.findByText("City catalog browse")).toBeInTheDocument();
+    expect(screen.getByText(/outbox 1 · inbox 0/)).toBeInTheDocument();
   });
 });

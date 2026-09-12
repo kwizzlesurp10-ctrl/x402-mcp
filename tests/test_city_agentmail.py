@@ -226,6 +226,27 @@ def test_http_us_cities_catalog_sends_agentmail(mail_ledger: Path) -> None:
     assert records[0]["metadata"]["channel"] == "http"
 
 
+def test_http_mn_sample_upstream_failure_sends_agentmail(
+    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import mn_compliance
+
+    async def boom(address: str) -> dict[str, Any]:
+        raise TimeoutError("upstream down")
+
+    monkeypatch.setattr(mn_compliance, "check_property", boom)
+    client = TestClient(app)
+    res = client.get("/mn/property-check/sample")
+    assert res.status_code == 502
+    assert res.json()["error"] == "upstream_open_data_unavailable"
+    records = _ledger_records(mail_ledger)
+    assert len(records) == 1
+    assert records[0]["metadata"]["call_kind"] == "error"
+    assert records[0]["metadata"]["city_code"] == "mn"
+    assert records[0]["metadata"]["channel"] == "http"
+    assert "upstream_open_data_unavailable" in records[0]["body"]
+
+
 def test_http_city_sample_sends_agentmail(
     mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
