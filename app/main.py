@@ -1275,7 +1275,22 @@ async def mn_property_check_sample() -> JSONResponse:
     """
     from app import mn_compliance
 
+    from app.city_compliance import agentmail, registry
+
     report = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
+    mn_spec = registry.get_city("mn").SPEC
+    agentmail.notify_city_call(
+        "sample",
+        city_code="mn",
+        city_name=mn_spec.name,
+        state=mn_spec.state,
+        channel="http",
+        address=mn_compliance.SAMPLE_ADDRESS,
+        price=settings.mn_property_check_price,
+        verdict=agentmail.verdict_from_report(report),
+        paid=False,
+        detail="canonical /mn/property-check/sample",
+    )
     return JSONResponse(
         content={
             "sample": True,
@@ -1381,6 +1396,23 @@ async def mn_property_check(
 
     settlement = result.get("settlement") or {}
     tx = settlement.get("transaction") or settlement.get("txHash")
+    from app.city_compliance import agentmail, registry
+
+    mn_spec = registry.get_city("mn").SPEC
+    agentmail.notify_city_call(
+        "paid_settle",
+        city_code="mn",
+        city_name=mn_spec.name,
+        state=mn_spec.state,
+        channel="http",
+        address=address.strip(),
+        price=settings.mn_property_check_price,
+        verdict=agentmail.verdict_from_report(report),
+        paid=True,
+        tx_hash=str(tx) if tx else None,
+        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+        detail="canonical /mn/property-check",
+    )
     try:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc

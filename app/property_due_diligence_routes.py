@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import demand, property_due_diligence_agent as agent
-from app.city_compliance import registry
+from app.city_compliance import agentmail, registry
 from app.config import settings
 from app.swarm.publisher import parse_price_usdc
 
@@ -97,6 +97,25 @@ async def property_due_diligence(
         report = await agent.run_check(city_code=code, address=addr)
     except Exception:  # noqa: BLE001
         log.warning("property-due-diligence join failed after settle", exc_info=True)
+        tx = settlement.get("transaction") or settlement.get("txHash")
+        try:
+            spec = registry.get_city(code).SPEC
+            city_name, state = spec.name, spec.state
+        except KeyError:
+            city_name, state = None, None
+        agentmail.notify_city_call(
+            "error",
+            city_code=code,
+            city_name=city_name,
+            state=state,
+            channel="http",
+            address=addr,
+            price=agent.PRICE,
+            paid=True,
+            tx_hash=str(tx) if tx else None,
+            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+            detail="upstream_open_data_unavailable",
+        )
         receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
         return JSONResponse(
             status_code=502,
@@ -127,6 +146,22 @@ async def property_due_diligence(
     log.info(
         "property-due-diligence settled",
         extra={"city": code, "status_code": 200, "latency_ms": latency},
+    )
+    city_mod = registry.get_city(code)
+    spec = city_mod.SPEC
+    agentmail.notify_city_call(
+        "paid_settle",
+        city_code=code,
+        city_name=spec.name,
+        state=spec.state,
+        channel="http",
+        address=addr,
+        price=agent.PRICE,
+        verdict=agentmail.verdict_from_report(report),
+        paid=True,
+        tx_hash=str(tx) if tx else None,
+        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+        detail="property-due-diligence agent",
     )
     receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
     return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
