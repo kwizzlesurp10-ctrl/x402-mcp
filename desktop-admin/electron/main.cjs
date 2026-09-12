@@ -4,6 +4,7 @@ const path = require("node:path");
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 let mainWindow = null;
 let tray = null;
+let isQuitting = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -34,7 +35,7 @@ function createWindow() {
   }
 
   mainWindow.on("close", (event) => {
-    if (!isDev && tray) {
+    if (!isDev && tray && !isQuitting) {
       event.preventDefault();
       mainWindow.hide();
     }
@@ -63,10 +64,20 @@ function createTray() {
         },
       },
       { type: "separator" },
-      { label: "Quit", click: () => app.quit() },
+      {
+        label: "Quit",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
     ]),
   );
 }
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
 
 app.whenReady().then(() => {
   createWindow();
