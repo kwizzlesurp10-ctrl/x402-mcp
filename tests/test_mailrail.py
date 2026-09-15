@@ -112,6 +112,41 @@ def test_live_resend_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     assert "api.resend.com" in calls[0][0]
 
 
+def test_smtp_provider_ledgers_without_http_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """SMTP may pass doctor checks but send_agent_mail does not dispatch it."""
+    ledger_file = tmp_path / "mailrail.jsonl"
+    monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger_file)
+    monkeypatch.setattr(settings, "mailrail_enabled", True)
+    monkeypatch.setattr(settings, "mailrail_provider", "smtp")
+    monkeypatch.setattr(settings, "mailrail_smtp_url", "smtps://user:pass@smtp.example.com:465")
+    _SEEN_KEYS.clear()
+
+    calls: list[object] = []
+
+    def fake_post(*_a: object, **_k: object) -> None:
+        calls.append((_a, _k))
+        raise AssertionError("SMTP must not issue HTTP dispatch")
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    res = send_agent_mail(
+        "ops@localhost",
+        "SMTP stanza",
+        "doctor-only",
+        event_id="smtp_no_dispatch",
+    )
+    assert res["status"] == "sent"
+    assert res["delivered"] is True
+    assert calls == []
+    record = json.loads(ledger_file.read_text(encoding="utf-8").strip().splitlines()[0])
+    assert record["provider"] == "smtp"
+    assert record["status"] == "sent"
+
+
 def test_live_webhook_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ledger_file = tmp_path / "mailrail.jsonl"
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger_file)

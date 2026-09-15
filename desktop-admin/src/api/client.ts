@@ -222,7 +222,7 @@ export type MailRailHealth = {
   enabled: boolean;
   provider: string;
   from_address: string;
-  admin_recipient: string;
+  admin_recipient: string | null;
   has_api_key: boolean;
   has_webhook: boolean;
   has_smtp: boolean;
@@ -236,18 +236,29 @@ export type MailRailMessage = {
   subject?: string;
   body?: string;
   provider?: string;
+  status?: string;
   delivered?: boolean;
   sender?: string;
   inbound_id?: string;
 };
 
+export type MailRailChannelFlags = {
+  resend_active?: boolean;
+  webhook_active?: boolean;
+  smtp_active?: boolean;
+};
+
 export type MailRailStats = {
+  enabled?: boolean;
+  provider?: string;
+  from_address?: string;
+  admin_recipient?: string | null;
+  outbound_total?: number;
+  inbound_total?: number;
+  dedup_keys_cached?: number;
+  channels?: MailRailChannelFlags;
   outbox_count?: number;
   inbox_count?: number;
-  delivered_count?: number;
-  dedup_hits?: number;
-  last_dispatch_ts?: string | null;
-  last_inbound_ts?: string | null;
 };
 
 let apiBase = readStoredApiBase();
