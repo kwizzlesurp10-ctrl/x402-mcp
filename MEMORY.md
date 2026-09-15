@@ -11,7 +11,7 @@
 
 ### 🔐 Wallet Addresses (⚠️ NEVER commit secrets!)
 - **Seller Address (live cashier / payTo):** `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e` — sole receive wallet. Canonical in `app/agent_surface.py` (`DEFAULT_PAY_TO`), pinned in `render.yaml` and `smithery.yaml`, cited by `docs/BOUNTIES.md` and `/.well-known/funding.json`. Prior receive addresses are retired; pay **only** this cashier. Live Render dashboard `X402_PAY_TO_ADDRESS` must match this value.
-- **Buyer Address (local testing):** `0xc22c17Fca624dB679B2471f2Bb099E1E29a46209` *(~/secrets/ only)*
+- **Buyer Address (keepalive / funds):** `0xd9C8BadD832875acc8CD56Ca3BfE500e3A3398ea` — operator spend wallet; listed in `OPERATOR_WALLETS`. Prior local-test buyer: `0xc22c17Fca624dB679B2471f2Bb099E1E29a46209` *(~/secrets/ only)*
 
 ### 🌐 Live Deployment URLs
 - **Main Storefront:** https://x402-mcp.onrender.com
