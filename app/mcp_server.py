@@ -1239,8 +1239,8 @@ for tool in mcp._tool_manager._tools.values():
 _get_tool = mcp._tool_manager.get_tool
 
 
-def _get_tool_with_legacy_alias(name: str):
-    return _get_tool(_LEGACY_TOOL_ALIASES.get(name, name))
+def _get_tool_with_legacy_alias(name: str, *args: Any, **kwargs: Any):
+    return _get_tool(_LEGACY_TOOL_ALIASES.get(name, name), *args, **kwargs)
 
 
 mcp._tool_manager.get_tool = _get_tool_with_legacy_alias
