@@ -10,14 +10,9 @@ def build_payment_rails() -> dict:
     return {
         "stripe": {
             "primary": True,
-            "description": "Fiat checkout for Pro subscriptions and tool credits",
-            "checkout_endpoint": "/stripe/checkout",
-            "webhook_endpoint": "/stripe/webhook",
-            "requires_env": ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
-            "configured": bool(
-                getattr(settings, "stripe_secret_key", None)
-                and getattr(settings, "stripe_webhook_secret", None)
-            ),
+            "description": "Fiat checkout rail for Pro tier and tool credit packs",
+            "configured": bool(getattr(settings, "stripe_secret_key", None)),
+            "checkout_endpoints": ["/stripe/checkout", "/stripe/webhook"],
         },
         "x402_coinbase": {
             "primary": True,

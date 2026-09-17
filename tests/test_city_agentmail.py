@@ -216,6 +216,20 @@ async def test_mcp_wrapper_passes_resolved_agent_id(
     assert records[0]["metadata"]["agent_id"] == "wrapper-agent"
 
 
+def test_http_unpaid_402_does_not_send_agentmail(
+    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.city_compliance import gate
+
+    monkeypatch.setattr(settings, "x402_pay_to_address", "0x" + "ab" * 20)
+    monkeypatch.setattr(gate, "build_payment_required_header", lambda *a, **k: "pr")
+    client = TestClient(app)
+    res = client.get("/us/sea/property-check", params={"address": "400 Pine St"})
+    assert res.status_code == 402
+    assert res.json()["error"] == "payment_required"
+    assert _ledger_records(mail_ledger) == []
+
+
 def test_http_us_cities_catalog_sends_agentmail(mail_ledger: Path) -> None:
     client = TestClient(app)
     res = client.get("/us/cities")
@@ -224,6 +238,27 @@ def test_http_us_cities_catalog_sends_agentmail(mail_ledger: Path) -> None:
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "catalog"
     assert records[0]["metadata"]["channel"] == "http"
+
+
+def test_http_mn_sample_upstream_failure_sends_agentmail(
+    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import mn_compliance
+
+    async def boom(address: str) -> dict[str, Any]:
+        raise TimeoutError("upstream down")
+
+    monkeypatch.setattr(mn_compliance, "check_property", boom)
+    client = TestClient(app)
+    res = client.get("/mn/property-check/sample")
+    assert res.status_code == 502
+    assert res.json()["error"] == "upstream_open_data_unavailable"
+    records = _ledger_records(mail_ledger)
+    assert len(records) == 1
+    assert records[0]["metadata"]["call_kind"] == "error"
+    assert records[0]["metadata"]["city_code"] == "mn"
+    assert records[0]["metadata"]["channel"] == "http"
+    assert "upstream_open_data_unavailable" in records[0]["body"]
 
 
 def test_http_city_sample_sends_agentmail(
