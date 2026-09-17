@@ -1,6 +1,7 @@
 # x402 Micropayments MCP
 
 [![smithery badge](https://smithery.ai/badge/kwizzlesurp10/x402-mcp)](https://smithery.ai/server/kwizzlesurp10/x402-mcp)
+<a href="https://24klabs.ai/listing/us-city-open-data-compliance-network"><img src="https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"></a>
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Mainnet](https://img.shields.io/badge/Network-Base%20Mainnet%20(8453)-0052FF.svg)](https://base.org)
 [![A2A Protocol](https://img.shields.io/badge/Identity-A2A%20v1.0%20Agent%20Card-green.svg)](https://x402-mcp.onrender.com/.well-known/agent-card.json)
