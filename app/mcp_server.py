@@ -130,7 +130,20 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
-mcp = FastMCP(
+_LEGACY_TOOL_ALIASES = {
+    "get_agent_card": "x402.agent_card",
+}
+
+
+class CompatibilityFastMCP(FastMCP):
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        return await super().call_tool(
+            _LEGACY_TOOL_ALIASES.get(name, name),
+            arguments,
+        )
+
+
+mcp = CompatibilityFastMCP(
     "x402-micropayments",
     instructions=INSTRUCTIONS,
     transport_security=_transport_security(),
@@ -140,10 +153,6 @@ mcp = FastMCP(
     json_response=True,
     stateless_http=True,
 )
-
-_LEGACY_TOOL_ALIASES = {
-    "get_agent_card": "x402.agent_card",
-}
 
 
 async def _execute_tool(
@@ -1235,12 +1244,3 @@ def _simplify_schema(schema: Any) -> Any:
 # Simplify the parameter schemas of all registered tools to prevent validation errors (status 422) on strict client parsers.
 for tool in mcp._tool_manager._tools.values():
     tool.parameters = _simplify_schema(tool.parameters)
-
-_get_tool = mcp._tool_manager.get_tool
-
-
-def _get_tool_with_legacy_alias(name: str, *args: Any, **kwargs: Any):
-    return _get_tool(_LEGACY_TOOL_ALIASES.get(name, name), *args, **kwargs)
-
-
-mcp._tool_manager.get_tool = _get_tool_with_legacy_alias
