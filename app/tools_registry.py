@@ -22,6 +22,14 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "tier": "free",
     },
     {
+        "name": "get_agent_card",
+        "description": (
+            "Back-compat alias for x402.agent_card. Returns the A2A Protocol v1.0 "
+            "Agent ID Card and MCP server card."
+        ),
+        "tier": "free",
+    },
+    {
         "name": "x402.discover",
         "description": (
             "Discover paid HTTP APIs in the x402 Bazaar via the facilitator catalog. "

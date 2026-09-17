@@ -42,6 +42,12 @@ def test_signals_are_real():
     assert s["app_modules"] > 0 and s["test_files"] > 0
 
 
+def test_assessor_mcp_tool_count_tracks_registry():
+    from app.tools_registry import TOOL_COUNT
+
+    assert assessor.gather_signals()["mcp_tools"] == TOOL_COUNT
+
+
 def test_feedback_loop_marks_completed_charters():
     """The assessor detects completed technical work from code (feedback loop)."""
     a = assessor.assess()

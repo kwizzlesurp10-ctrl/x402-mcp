@@ -26,13 +26,17 @@ def test_manifest_tools_match_registry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_agent_card_legacy_alias_still_invocable() -> None:
-    content, _structured = await mcp_server.mcp.call_tool("get_agent_card", {})
-    payload = json.loads(content[0].text)
-    assert payload["data"]["card"]
-    tool_names = {t.name for t in await mcp_server.mcp.list_tools()}
-    assert "get_agent_card" not in tool_names
-    assert "x402.agent_card" in tool_names
+async def test_get_agent_card_compat_alias_delegates_to_canonical() -> None:
+    manifest_names = {tool["name"] for tool in build_mcp_manifest()["tools"]}
+    registered_names = {tool.name for tool in await mcp_server.mcp.list_tools()}
+    payload_alias = json.loads(await mcp_server.get_agent_card_compat(agent_id="compat-agent"))
+    payload_canonical = json.loads(await mcp_server.get_agent_card(agent_id="compat-agent"))
+
+    assert "get_agent_card" in manifest_names
+    assert "get_agent_card" in registered_names
+    assert payload_alias["data"] == payload_canonical["data"]
+    assert payload_alias["meta"]["agent_id"] == "compat-agent"
+    assert payload_canonical["meta"]["agent_id"] == "compat-agent"
 
 
 @pytest.mark.asyncio
