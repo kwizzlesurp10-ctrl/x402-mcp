@@ -28,7 +28,7 @@ def test_manifest_tools_match_registry() -> None:
 @pytest.mark.asyncio
 async def test_get_agent_card_compat_alias_delegates_to_canonical() -> None:
     manifest_names = {tool["name"] for tool in build_mcp_manifest()["tools"]}
-    registered_names = {t.name for t in mcp_server.mcp._tool_manager._tools.values()}
+    registered_names = {tool.name for tool in await mcp_server.mcp.list_tools()}
     payload_alias = json.loads(await mcp_server.get_agent_card_compat(agent_id="compat-agent"))
     payload_canonical = json.loads(await mcp_server.get_agent_card(agent_id="compat-agent"))
 
