@@ -130,7 +130,20 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
-mcp = FastMCP(
+_LEGACY_TOOL_ALIASES = {
+    "get_agent_card": "x402.agent_card",
+}
+
+
+class CompatibilityFastMCP(FastMCP):
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        return await super().call_tool(
+            _LEGACY_TOOL_ALIASES.get(name, name),
+            arguments,
+        )
+
+
+mcp = CompatibilityFastMCP(
     "x402-micropayments",
     instructions=INSTRUCTIONS,
     transport_security=_transport_security(),
