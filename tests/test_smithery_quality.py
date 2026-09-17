@@ -38,8 +38,6 @@ def test_remote_config_schema_has_no_required_fields() -> None:
 def test_every_tool_uses_dot_notation() -> None:
     assert len(EXPECTED_TOOL_NAMES) == TOOL_COUNT
     for name in EXPECTED_TOOL_NAMES:
-        if name == "get_agent_card":
-            continue
         assert "." in name, name
         domain, action = name.split(".", 1)
         assert domain and action, name

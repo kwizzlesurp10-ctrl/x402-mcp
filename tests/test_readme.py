@@ -85,7 +85,7 @@ def test_readme_agent_id_card_section() -> None:
     text = README.read_text(encoding="utf-8")
     assert "Agent ID Cards & Machine Identity" in text
     assert "Agent-to-Agent (A2A) Protocol v1.0" in text
-    assert "`get_agent_card`" in text
+    assert "`x402.agent_card`" in text
     assert "`x402://agent-card`" in text
     assert "`agent_id`" in text
 

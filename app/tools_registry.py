@@ -197,17 +197,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ),
         "tier": "free",
     },
-    {
-        "name": "get_agent_card",
-        "description": (
-            "Get the A2A Protocol v1.0 Agent Card and tool capability registry. "
-            "Returns machine-readable identity, supported payment networks, "
-            "pricing models, and skill descriptions. No payment required."
-        ),
-        "tier": "free",
-    },
 )
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)
 TOOL_COUNT = len(TOOL_SPECS)
-

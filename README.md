@@ -57,10 +57,10 @@ The public seller host holds **no spend key** — it only verifies and settles i
 
 ## Features
 
-- **23 MCP tools** for buyer, seller, x402 commerce, swarm-agency, US city compliance, MailRail messaging, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **22 MCP tools** for buyer, seller, x402 commerce, swarm-agency, US city compliance, MailRail messaging, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
 - **4 MCP prompts** (`onboarding_flow`, `x402_tool_selector`, `generate_quote`, `troubleshoot_payment`) for LLM orchestrators
 - **4 MCP resources** (`x402://agent-card`, `x402://server-card`, `x402://tools-manifest`, `x402://pricing-table`) exposing live machine descriptors
-- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `get_agent_card` (`x402.agent_card`) / `x402://agent-card` with per-`agent_id` quota isolation
+- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `x402.agent_card` / `x402://agent-card` with per-`agent_id` quota isolation
 - **x402/Coinbase rail** (primary): x402 v2 wire format end to end — challenge generation, verify + settle via the CDP facilitator on Base mainnet, Bazaar discoverability on listings
 - **Stripe payment rail** (fiat alternative, HTTP only): `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments (not exposed as an MCP tool)
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
@@ -256,7 +256,7 @@ Cost-effective multi-agent operating group (scout, warden, treasurer, archivist,
 `x402-mcp` implements the **Agent-to-Agent (A2A) Protocol v1.0** and MCP machine identity for autonomous discovery.
 
 1. **HTTP:** `GET https://x402-mcp.onrender.com/.well-known/agent-card.json` (legacy: `/.well-known/agent.json`)
-2. **MCP tool:** `get_agent_card` (optional `target_id` for a skill)
+2. **MCP tool:** `x402.agent_card` (optional `target_id` for a skill; implemented by server handler `get_agent_card`)
 3. **MCP resource:** `x402://agent-card`
 4. **Registry:** `/.well-known/agents.json` · **payTo:** `/.well-known/funding.json`
 

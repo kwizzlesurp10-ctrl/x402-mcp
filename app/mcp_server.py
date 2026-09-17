@@ -222,33 +222,6 @@ async def get_agent_card(
 
 
 @mcp.tool(
-    name="get_agent_card",
-    title="A2A Agent ID Card (compat)",
-    description=(
-        "Back-compat alias for x402.agent_card. "
-        "Returns the A2A Protocol v1.0 Agent ID Card and MCP server card."
-    ),
-    annotations=READONLY,
-)
-async def get_agent_card_compat(
-    target_id: Desc[
-        str | None,
-        Field(
-            description=(
-                "Optional skill ID, tool name, or tag to inspect. "
-                "Omit for the full server agent card."
-            ),
-        ),
-    ] = None,
-    agent_id: Desc[
-        str | None,
-        Field(description="Optional calling agent identifier for quota tracking."),
-    ] = None,
-) -> str:
-    return await get_agent_card(target_id=target_id, agent_id=agent_id)
-
-
-@mcp.tool(
     name="x402.discover",
     title="Discover x402 services",
     description=(
