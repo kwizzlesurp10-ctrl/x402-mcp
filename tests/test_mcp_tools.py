@@ -26,6 +26,20 @@ def test_manifest_tools_match_registry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_agent_card_legacy_alias_still_invocable() -> None:
+    raw = await mcp_server.mcp._tool_manager.call_tool(
+        "get_agent_card",
+        {},
+        convert_result=False,
+    )
+    payload = json.loads(raw)
+    assert payload["data"]["card"]
+    tool_names = {t.name for t in await mcp_server.mcp.list_tools()}
+    assert "get_agent_card" not in tool_names
+    assert "x402.agent_card" in tool_names
+
+
+@pytest.mark.asyncio
 async def test_get_supported_networks_tool_response_shape() -> None:
     raw = await mcp_server.get_supported_networks(agent_id="smoke-agent-1")
     payload = json.loads(raw)

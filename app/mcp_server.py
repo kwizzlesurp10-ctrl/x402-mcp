@@ -141,6 +141,10 @@ mcp = FastMCP(
     stateless_http=True,
 )
 
+_LEGACY_TOOL_ALIASES = {
+    "get_agent_card": "x402.agent_card",
+}
+
 
 async def _execute_tool(
     tool_name: str,
@@ -1231,3 +1235,6 @@ def _simplify_schema(schema: Any) -> Any:
 # Simplify the parameter schemas of all registered tools to prevent validation errors (status 422) on strict client parsers.
 for tool in mcp._tool_manager._tools.values():
     tool.parameters = _simplify_schema(tool.parameters)
+
+_get_tool = mcp._tool_manager.get_tool
+mcp._tool_manager.get_tool = lambda name: _get_tool(_LEGACY_TOOL_ALIASES.get(name, name))
