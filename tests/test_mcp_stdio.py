@@ -71,6 +71,19 @@ async def test_stdio_get_supported_networks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stdio_get_agent_card_compat_alias() -> None:
+    payload = await _call_stdio_tool(
+        "get_agent_card",
+        {"agent_id": "stdio-agent-card-alias"},
+    )
+
+    assert "data" in payload
+    assert "meta" in payload
+    assert payload["data"]["agent_id"] == "stdio-agent-card-alias"
+    assert "card" in payload["data"]
+
+
+@pytest.mark.asyncio
 async def test_stdio_get_payment_requirements(probe_402_url: str) -> None:
     payload = await _call_stdio_tool(
         "x402.probe",
