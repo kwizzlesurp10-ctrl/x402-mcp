@@ -176,5 +176,5 @@ def test_mn_discovery_example_carries_match_packaging() -> None:
 
     example = mn_city.discovery_output_example()
     assert example["match"]["mode"] == "exact"
-    assert example["rental_licenses"][0]["apn"] == "1602924320087"
+    assert example["registrations"][0]["apn"] == "1602924320087"
     assert example["violation_cases"]["open_total"] == 0
