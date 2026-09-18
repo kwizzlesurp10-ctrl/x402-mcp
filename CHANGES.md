@@ -4,6 +4,13 @@ This file documents deltas **only** within this repository (`x402-mcp/`).
 If this clone sits inside a larger parent workspace, use this manifest for goal
 verification instead of a repo-wide `git status` of the parent tree.
 
+## MN property-check buyer match accuracy (2026-09-18)
+
+- `app/mn_compliance.py` USPS-normalizes street queries (Avenue→AVE, North→N), prefers an exact parcel over a prefix mash, joins unlicensed violations via CaseViolations.`Display`, and exposes `match` + `violation_cases.open_total`
+- Discovery/OpenAPI example APN aligned to the live sample parcel `1602924320087`
+- `/llms.txt` and `/.well-known/x402` `what` text document sample-vs-paid and ambiguous prefix hits
+- Guards in `tests/test_mn_compliance.py`, `tests/test_city_compliance.py`, `tests/test_agent_surface.py`
+
 ## Sole cashier `0x8A897D54…` (2026-09-13)
 
 - `smithery.yaml` default + exampleConfig and `render.yaml` `X402_PAY_TO_ADDRESS` now pin `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e` (replaces the retired Smithery default and the unpinned Render dashboard slot)

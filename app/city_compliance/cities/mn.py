@@ -83,6 +83,7 @@ async def check_property(address: str) -> dict[str, Any]:
         "canonical_resource": "/mn/property-check",
         "licensed": raw.get("licensed"),
         "rental_licenses": licenses,  # preserve MN-native keys for agents
+        "match": raw.get("match"),
     }
 
 
@@ -101,6 +102,7 @@ def discovery_output_example() -> dict[str, Any]:
         "violation_cases": ex.get("violation_cases") or {"total": 0, "recent": []},
         "condemned_or_boarded": ex.get("condemned_or_boarded")
         or {"flagged": False, "records": []},
+        "match": ex.get("match"),
         "canonical_resource": "/mn/property-check",
         "network_product": "us-city-open-data-compliance",
     }

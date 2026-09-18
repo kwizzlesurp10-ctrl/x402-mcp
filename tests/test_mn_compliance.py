@@ -151,6 +151,9 @@ def test_402_header_carries_bazaar_discovery(
     assert example["licensed"] is True
     assert example["compliance_verdict"] == "licensed_with_violations"
     assert example["rental_licenses"][0]["license_number"] == "LIC394217"
+    assert example["rental_licenses"][0]["apn"] == "1602924320087"
+    assert example["match"]["mode"] == "exact"
+    assert example["violation_cases"]["open_total"] == 0
 
     # The facilitator validates info against the extension's own schema
     # before cataloging; a failure here means the product stays invisible.
@@ -249,34 +252,39 @@ def test_malformed_signature_is_402_not_500(monkeypatch: pytest.MonkeyPatch) -> 
 
 # ---- data layer against a mock ArcGIS backend -------------------------------
 
-_LICENSES = {
-    "features": [
-        {
-            "attributes": {
-                "address": "1700 PENN AVE N",
-                "apn": "1602924310042",
-                "licenseNumber": "LIC394217",
-                "category": "CONV",
-                "tier": "Tier 1",
-                "status": "Active",
-                "issueDate": 1740000000000,
-                "expirationDate": 1803859200000,
-                "licensedUnits": 1,
-                "ownerName": "EXAMPLE LLC",
-                "ward": "5",
-                "neighborhoodDesc": "Willard - Hay",
-                "communityDesc": "Near North",
-                "shortTermRental": "No",
-            }
-        }
-    ]
+_PENN_LICENSE = {
+    "address": "1700 PENN AVE N",
+    "apn": "1602924310042",
+    "licenseNumber": "LIC394217",
+    "category": "CONV",
+    "tier": "Tier 1",
+    "status": "Active",
+    "issueDate": 1740000000000,
+    "expirationDate": 1803859200000,
+    "licensedUnits": 1,
+    "ownerName": "EXAMPLE LLC",
+    "ward": "5",
+    "neighborhoodDesc": "Willard - Hay",
+    "communityDesc": "Near North",
+    "shortTermRental": "No",
 }
+
+_THIRD_LICENSE = {
+    **_PENN_LICENSE,
+    "address": "1700 3RD AVE N",
+    "apn": "2102924340014",
+    "licenseNumber": "LIC118903",
+    "neighborhoodDesc": "Near North",
+}
+
+_LICENSES = {"features": [{"attributes": _PENN_LICENSE}, {"attributes": _THIRD_LICENSE}]}
 
 _VIOLATIONS = {
     "features": [
         {
             "attributes": {
                 "APN": "1602924310042",
+                "Display": "1700 PENN AVE N",
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
                 "Case_Group": "Housing",
@@ -284,6 +292,37 @@ _VIOLATIONS = {
                 "Inspection_Type_Desc": "Initial Inspection",
                 "Start_Date": 1735689600000,
                 "Completed_Date": 1738368000000,
+            }
+        },
+        {
+            "attributes": {
+                "APN": "1602924310042",
+                "Display": "1700 PENN AVE N",
+                "Violation_Case_Number": "CE-OPEN-1",
+                "Case_Type": "HIS",
+                "Case_Group": "HISINSP",
+                "Inspection_Result": "Violations Found",
+                "Inspection_Type_Desc": "Reinspection",
+                "Start_Date": 1738368000000,
+                "Completed_Date": None,
+            }
+        },
+    ]
+}
+
+_UNLICENSED_VIOLATIONS = {
+    "features": [
+        {
+            "attributes": {
+                "APN": "0102824230016",
+                "Display": "3201 20TH AVE S",
+                "Violation_Case_Number": "CE-UNLIC-1",
+                "Case_Type": "Nuisance",
+                "Case_Group": "Nuisance",
+                "Inspection_Result": "Open",
+                "Inspection_Type_Desc": "Initial Inspection",
+                "Start_Date": 1735689600000,
+                "Completed_Date": None,
             }
         }
     ]
@@ -297,9 +336,14 @@ class _MockArcGIS(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         where = parse_qs(parsed.query).get("where", [""])[0]
         if "Active_Rental_Licenses" in parsed.path:
-            body = _LICENSES if "1700 PENN" in where else {"features": []}
+            body = _LICENSES if "1700" in where else {"features": []}
         elif "CaseViolations" in parsed.path:
-            body = _VIOLATIONS
+            if "1602924310042" in where or "1700 PENN" in where:
+                body = _VIOLATIONS
+            elif "3201 20TH" in where:
+                body = _UNLICENSED_VIOLATIONS
+            else:
+                body = {"features": []}
         elif "Condemned_by_Boarding" in parsed.path:
             body = _CONDEMNED
         else:
@@ -330,11 +374,15 @@ async def test_check_property_composes_report(mock_arcgis: str) -> None:
 
     assert report["licensed"] is True
     assert report["compliance_verdict"] == "licensed_with_violations"
+    assert report["match"]["mode"] == "exact"
+    assert report["match"]["ambiguous"] is False
+    assert report["match"]["hit_count"] == 1
     license_record = report["rental_licenses"][0]
     assert license_record["license_number"] == "LIC394217"
     assert license_record["tier"] == "Tier 1"
     assert license_record["expiration_date"] == "2027-03-01"
     assert report["violation_cases"]["total"] >= 1
+    assert report["violation_cases"]["open_total"] == 1
     assert "case_number" in report["violation_cases"]["recent"][0]
     assert report["condemned_or_boarded"]["flagged"] is False
     assert "disclaimer" in report
@@ -349,6 +397,67 @@ async def test_check_property_unknown_address(mock_arcgis: str) -> None:
     assert report["compliance_verdict"] == "unlicensed"
     assert report["rental_licenses"] == []
     assert report["violation_cases"]["total"] == 0
+    assert report["match"]["mode"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_usps_abbreviations_match_the_city_row(mock_arcgis: str) -> None:
+    """Live ArcGIS stores AVE/N. 'Avenue North' used to 200 as unlicensed."""
+    mn_compliance._cache.clear()
+    report = await mn_compliance.check_property("1700 Penn Avenue North")
+    assert report["licensed"] is True
+    assert report["match"]["normalized"] == "1700 PENN AVE N"
+    assert report["match"]["mode"] == "exact"
+    assert report["rental_licenses"][0]["license_number"] == "LIC394217"
+
+
+@pytest.mark.asyncio
+async def test_exact_match_does_not_mash_prefix_siblings(mock_arcgis: str) -> None:
+    mn_compliance._cache.clear()
+    report = await mn_compliance.check_property("1700 Penn Ave N")
+    assert [lic["address"] for lic in report["rental_licenses"]] == ["1700 PENN AVE N"]
+    assert report["match"]["ambiguous"] is False
+
+
+@pytest.mark.asyncio
+async def test_house_number_only_is_flagged_ambiguous(mock_arcgis: str) -> None:
+    mn_compliance._cache.clear()
+    report = await mn_compliance.check_property("1700")
+    assert report["match"]["mode"] == "prefix"
+    assert report["match"]["ambiguous"] is True
+    assert report["match"]["too_broad"] is True
+    assert report["match"]["hit_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unlicensed_address_still_joins_violations_by_display(
+    mock_arcgis: str,
+) -> None:
+    mn_compliance._cache.clear()
+    report = await mn_compliance.check_property("3201 20th Ave S")
+    assert report["licensed"] is False
+    assert report["compliance_verdict"] == "unlicensed"
+    assert report["violation_cases"]["total"] == 1
+    assert report["violation_cases"]["open_total"] == 1
+    assert report["violation_cases"]["recent"][0]["case_number"] == "CE-UNLIC-1"
+
+
+def test_normalize_street_query_maps_usps_tokens() -> None:
+    assert mn_compliance.normalize_street_query("1700 Penn Avenue North") == (
+        "1700 PENN AVE N"
+    )
+    assert mn_compliance.normalize_street_query("1700 PENN AVE. N.") == "1700 PENN AVE N"
+    assert mn_compliance.normalize_street_query("  1700 penn ave n  ") == (
+        "1700 PENN AVE N"
+    )
+
+
+def test_discovery_example_apn_matches_the_live_sample_parcel() -> None:
+    """Catalog example used a stale APN that disagreed with /sample."""
+    assert (
+        mn_compliance.DISCOVERY_OUTPUT_EXAMPLE["rental_licenses"][0]["apn"]
+        == "1602924320087"
+    )
 
 
 @pytest.mark.asyncio

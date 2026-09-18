@@ -217,7 +217,11 @@ def paid_resources() -> list[dict[str, Any]]:
             "GET ?address= (1-120 chars) → compliance_verdict enum "
             "licensed_clean|licensed_with_violations|unlicensed|condemned_or_boarded "
             "plus license/violation/condemned fields from city open data. "
-            f"Free sample: {base}/mn/property-check/sample.",
+            "USPS street abbreviations (Avenue→AVE, North→N) are normalized; "
+            "match.mode is exact|prefix|none and match.ambiguous means multiple "
+            "parcels matched. violation_cases.open_total is live inspections "
+            "(Completed_Date null); total includes closed history. "
+            f"Free sample (1700 Penn Ave N only): {base}/mn/property-check/sample.",
             "params": {"address": "street address string, 1-120 chars (required)"},
         },
         {
@@ -357,6 +361,14 @@ def llms_txt() -> str:
         "- **Delivery is settled-gated**: content is served only after on-chain",
         "  settlement succeeds, so a verified-but-unsettled payment gets a 402,",
         "  not the product.",
+        "- **MN / city property-check address forms**: Minneapolis ArcGIS stores",
+        "  USPS abbreviations (AVE, ST, N). Paid queries like 'Avenue' or",
+        "  'North' are normalized before the join. Read `match` on the 200:",
+        "  `mode=exact` is one parcel; `ambiguous=true` means a prefix hit",
+        "  multiple parcels — do not treat that license list as one property.",
+        "  `violation_cases.open_total` is inspections still open;",
+        "  `total` includes closed history. The free sample is only",
+        "  1700 Penn Ave N; any other address is the paid path.",
         "- **finality-check is gated by the x402 SDK's own middleware, not this",
         "  repo's hand-rolled path**: a malformed `tx` still returns 402 (not",
         "  422) if unpaid, since payment gating runs before query validation;",
