@@ -172,6 +172,17 @@ def _clear_challenge_cache():
     challenge_cache._mem.clear()
 
 
+@pytest.fixture(autouse=True)
+def _clear_mn_property_cache():
+    """Adapter tests (olas/nevermined) hit live Minneapolis ArcGIS for the
+    sample address and would otherwise leak that join into mocked MN tests."""
+    from app import mn_compliance
+
+    mn_compliance._cache.clear()
+    yield
+    mn_compliance._cache.clear()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def isolated_swarm_registry(tmp_path_factory):
     """Point the swarm registry singleton at a tmp products file so tests

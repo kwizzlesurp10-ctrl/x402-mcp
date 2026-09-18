@@ -254,7 +254,7 @@ def test_malformed_signature_is_402_not_500(monkeypatch: pytest.MonkeyPatch) -> 
 
 _PENN_LICENSE = {
     "address": "1700 PENN AVE N",
-    "apn": "1602924310042",
+    "apn": "1602924320087",
     "licenseNumber": "LIC394217",
     "category": "CONV",
     "tier": "Tier 1",
@@ -283,7 +283,7 @@ _VIOLATIONS = {
     "features": [
         {
             "attributes": {
-                "APN": "1602924310042",
+                "APN": "1602924320087",
                 "Display": "1700 PENN AVE N",
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
@@ -296,7 +296,7 @@ _VIOLATIONS = {
         },
         {
             "attributes": {
-                "APN": "1602924310042",
+                "APN": "1602924320087",
                 "Display": "1700 PENN AVE N",
                 "Violation_Case_Number": "CE-OPEN-1",
                 "Case_Type": "HIS",
@@ -338,7 +338,7 @@ class _MockArcGIS(BaseHTTPRequestHandler):
         if "Active_Rental_Licenses" in parsed.path:
             body = _LICENSES if "1700" in where else {"features": []}
         elif "CaseViolations" in parsed.path:
-            if "1602924310042" in where or "1700 PENN" in where:
+            if "1602924320087" in where or "1700 PENN" in where:
                 body = _VIOLATIONS
             elif "3201 20TH" in where:
                 body = _UNLICENSED_VIOLATIONS
@@ -370,6 +370,7 @@ def mock_arcgis(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.mark.asyncio
 async def test_check_property_composes_report(mock_arcgis: str) -> None:
+    mn_compliance._cache.clear()
     report = await mn_compliance.check_property("1700 Penn Ave N")
 
     assert report["licensed"] is True
@@ -379,6 +380,7 @@ async def test_check_property_composes_report(mock_arcgis: str) -> None:
     assert report["match"]["hit_count"] == 1
     license_record = report["rental_licenses"][0]
     assert license_record["license_number"] == "LIC394217"
+    assert license_record["apn"] == "1602924320087"
     assert license_record["tier"] == "Tier 1"
     assert license_record["expiration_date"] == "2027-03-01"
     assert report["violation_cases"]["total"] >= 1
@@ -392,6 +394,7 @@ async def test_check_property_composes_report(mock_arcgis: str) -> None:
 
 @pytest.mark.asyncio
 async def test_check_property_unknown_address(mock_arcgis: str) -> None:
+    mn_compliance._cache.clear()
     report = await mn_compliance.check_property("9999 Nowhere St")
     assert report["licensed"] is False
     assert report["compliance_verdict"] == "unlicensed"
@@ -463,6 +466,7 @@ def test_discovery_example_apn_matches_the_live_sample_parcel() -> None:
 @pytest.mark.asyncio
 async def test_check_property_escapes_quotes(mock_arcgis: str) -> None:
     # An apostrophe in the address must not break the ArcGIS where clause.
+    mn_compliance._cache.clear()
     report = await mn_compliance.check_property("100 O'Brien's Way")
     assert report["licensed"] is False
 

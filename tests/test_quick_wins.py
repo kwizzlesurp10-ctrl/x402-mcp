@@ -111,7 +111,7 @@ _LICENSES = {
         {
             "attributes": {
                 "address": "1700 PENN AVE N",
-                "apn": "1602924310042",
+                "apn": "1602924320087",
                 "licenseNumber": "LIC394217",
                 "category": "CONV",
                 "tier": "Tier 1",
@@ -132,7 +132,7 @@ _VIOLATIONS = {
     "features": [
         {
             "attributes": {
-                "APN": "1602924310042",
+                "APN": "1602924320087",
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
                 "Case_Group": "Housing",
