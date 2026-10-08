@@ -52,8 +52,9 @@ LICENSE_FIELDS = (
     "licensedUnits,ownerName,ward,neighborhoodDesc,communityDesc,shortTermRental"
 )
 VIOLATION_FIELDS = (
-    "APN,Violation_Case_Number,Case_Type,Case_Group,Inspection_Result,"
-    "Inspection_Type_Desc,Start_Date,Completed_Date"
+    "APN,Violation_Case_Number,Case_Type,Case_Group,Status_Violation_Case,"
+    "Violation_Code,Violation_Code_Description,Status_Violation,"
+    "Processed_Date,Resolved_Date"
 )
 CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 
@@ -89,10 +90,16 @@ def _escape(value: str) -> str:
     return value.replace("'", "''")
 
 
-def _iso(epoch_ms: Any) -> str | None:
-    if not isinstance(epoch_ms, (int, float)):
-        return None
-    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).date().isoformat()
+def _iso(value: Any) -> str | None:
+    """ArcGIS dates arrive as epoch ms or as already-formatted strings."""
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        return raw[:10]
+    return None
 
 
 async def _query(
@@ -214,10 +221,11 @@ async def check_property(address: str) -> dict[str, Any]:
                     "case_number": v.get("Violation_Case_Number"),
                     "case_type": v.get("Case_Type"),
                     "case_group": v.get("Case_Group"),
-                    "inspection_result": v.get("Inspection_Result"),
-                    "inspection_type": v.get("Inspection_Type_Desc"),
-                    "start_date": _iso(v.get("Start_Date")),
-                    "completed_date": _iso(v.get("Completed_Date")),
+                    "inspection_result": v.get("Status_Violation") or v.get("Status_Violation_Case"),
+                    "inspection_type": v.get("Violation_Code_Description"),
+                    "violation_code": v.get("Violation_Code"),
+                    "start_date": _iso(v.get("Processed_Date")),
+                    "completed_date": _iso(v.get("Resolved_Date")),
                 }
                 for v in recent_violations
             ],

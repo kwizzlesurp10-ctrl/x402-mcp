@@ -1,6 +1,6 @@
 """Application configuration."""
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     # Seller (cold receive) — on-chain payTo for revenue. Prefer separate from buyer.
     # Live cashier is 0x05e1720bB82F86B5bc7940a99FDC702E32256357 (DEFAULT_PAY_TO).
     x402_pay_to_address: str | None = None
+
+    @model_validator(mode="after")
+    def _public_upgrade_url(self) -> "Settings":
+        """Do not advertise localhost once PUBLIC_BASE_URL is a real origin.
+
+        Render sets PUBLIC_BASE_URL and leaves UPGRADE_URL unset, so the field
+        default leaked http://localhost:8402/upgrade into every tool meta block.
+        """
+        local_upgrade = "http://localhost:8402/upgrade"
+        base = (self.public_base_url or "").strip().rstrip("/")
+        if self.upgrade_url == local_upgrade and base and not base.startswith(
+            ("http://localhost", "http://127.0.0.1")
+        ):
+            self.upgrade_url = f"{base}/upgrade"
+        return self
 
     @field_validator("x402_pay_to_address", mode="before")
     @classmethod

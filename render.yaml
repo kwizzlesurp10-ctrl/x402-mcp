@@ -71,3 +71,5 @@ services:
                               # without a redeploy.
       - key: PUBLIC_BASE_URL
         value: "https://x402-mcp.onrender.com"  # VERIFY this matches the assigned URL
+      - key: UPGRADE_URL
+        value: "https://x402-mcp.onrender.com/upgrade"
