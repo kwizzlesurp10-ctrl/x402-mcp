@@ -1,0 +1,61 @@
+# TOOL_LEGIBILITY.md
+
+**Generated for bounty: $5 USDC — add-only docs/TOOL_LEGIBILITY.md**  
+**Issue:** https://github.com/kwizzlesurp10-ctrl/x402-mcp/issues/494  
+**Protocol:** https://github.com/kwizzlesurp10-ctrl/x402-mcp/blob/master/docs/BOUNTIES.md  
+**Source:** `app/tools_registry.py` (canonical inventory), `/.well-known/mcp` (live manifest), `/.well-known/x402` (x402 catalog)  
+**Generated:** 2026-10-14  
+
+---
+
+## Legend
+
+| Column | Meaning |
+|--------|---------|
+| **Tool** | Canonical dotted name from `TOOL_SPECS` |
+| **Outcome** | What the caller receives on success (`data` field) |
+| **When to Use / When Not to Use** | Decision guidance; `unknown` if not documented |
+| **Cost Visibility** | `free` / `paid` + atomic USDC (6 decimals) if paid |
+| **Worked Example** | Example call (URL or minimal payload) or `unknown` |
+| **Instructive Failure** | What a `402` / `4xx` response looks like (shape + key fields) |
+
+---
+
+## Tool Legibility Matrix
+
+| # | Tool | Outcome | When to Use / When Not to Use | Cost Visibility | Worked Example | Instructive Failure |
+|---|------|---------|-------------------------------|-----------------|----------------|---------------------|
+| 1 | `x402.agent_card` | A2A Agent Card JSON + MCP server card; optional `target_id` filters to a skill | **Use:** Discover this server's identity, capabilities, and payment rails. <br> **Not:** Calling other servers — use `a2a.resolve_card` for external nodes. | free | `{"target_id": "city.check"}` | `{"error": {"error": "not_found", "message": "skill not found: <id>"}, "meta": {"tier": "free", ...}}` |
+| 2 | `x402.discover` | Bazaar catalog entries: `url`, `price`, `network`, `name`, `what`, `params` | **Use:** First step to find payable HTTP APIs before probing. <br> **Not:** When you already know the exact resource URL. | free | `{"limit": 10, "network": "eip155:8453"}` | `{"error": {"error": "rate_limit_exceeded", "retry_after": 45}, "meta": {...}}` |
+| 3 | `x402.probe` | `status_code` (402), `payment_required` (x402 v2 terms), `payTo`, `asset`, `amount`, `network`, `facilitator`, `sdk` | **Use:** Inspect price/terms before spending. <br> **Not:** Fetching the resource — use `x402.pay_and_fetch` after. | free | `{"url": "https://x402-mcp.onrender.com/mn/property-check?address=1700%20Penn%20Ave%20N"}` | `{"data": {"status_code": 200, "payment_required": null}, "meta": {...}}` (no 402 = not paywalled) |
+| 4 | `x402.pay_and_fetch` | Protected resource body + `payment_response` receipt (settlement proof) | **Use:** One-call pay+fetch when you hold `EVM_PRIVATE_KEY`. <br> **Not:** Dry runs or when key isn't configured — use `x402.probe`. | free* (requires `EVM_PRIVATE_KEY`; spends USDC) | `{"url": "https://x402-mcp.onrender.com/mn/property-check?address=...", "preferred_network": "eip155:8453"}` | `{"error": {"error": "wallet_not_configured", "message": "EVM_PRIVATE_KEY not set"}, "meta": {...}}` |
+| 5 | `x402.build_seller` | Seller `PAYMENT-REQUIRED` terms for your HTTP resource + Bazaar discovery metadata | **Use:** Monetize your own HTTP endpoint via x402. <br> **Not:** Buying — use `x402.discover`/`probe`/`pay_and_fetch`. | free* (requires `X402_PAY_TO_ADDRESS`) | `{"resource_url": "https://my-api.com/paid", "price_usd": "0.05", "description": "My paid API"}` | `{"error": {"error": "pay_to_address_required", "message": "X402_PAY_TO_ADDRESS not set"}, "meta": {...}}` |
+| 6 | `x402.verify` | Verification result: `is_valid`, `payer`, `amount`, `asset`, `network`, `sdk` | **Use:** Seller verifies buyer's `PAYMENT-SIGNATURE` before releasing content. <br> **Not:** Buyer side — buyer uses `x402.pay_and_fetch`. | free | `{"payment_signature": "0x...", "payment_required": "x402...", "resource_url": "https://..."}` | `{"data": {"is_valid": false, "reason": "signature_expired"}, "meta": {...}}` |
+| 7 | `x402.networks` | Networks array: `id` (CAIP-2), `facilitator_url`, `asset`, `payTo`, `headers` | **Use:** Choose `preferred_network` for pay_and_fetch/build_seller. <br> **Not:** Discovering paid resources — use `x402.discover`. | free | `{}` (no params) | `unknown` (always succeeds; no auth required) |
+| 8 | `commerce.pro_requirements` | Pro-tier x402 payment terms: `amount` (29000000), `asset`, `payTo`, `network`, `agent_id`, `purpose: "pro_upgrade"` | **Use:** Build payment to upgrade agent to Pro tier (500 calls/mo, 120/min). <br> **Not:** Activating — use `commerce.activate_pro` after paying. | free* (requires `X402_PAY_TO_ADDRESS`) | `{"agent_id": "my-agent-123"}` | `{"error": {"error": "pay_to_address_required", "message": "X402_PAY_TO_ADDRESS not set"}, "meta": {...}}` |
+| 9 | `commerce.activate_pro` | `activated: true`, `agent_id`, `tier: "pro"`, `pro_quota`, `payment_settled: true`, `verification` | **Use:** After paying pro requirements, activate Pro quota for agent. <br> **Not:** Building requirements — use `commerce.pro_requirements` first. | free | `{"payment_signature": "0x...", "payment_required": "x402...", "agent_id": "my-agent-123"}` | `{"error": {"error": "verification_failed", "reason": "invalid_signature_or_amount"}, "meta": {...}}` |
+| 10 | `commerce.credits_requirements` | Tool-credits x402 terms: `amount` (variable), `asset`, `payTo`, `network`, `agent_id`, `purpose: "tool_credits"`, `credits` | **Use:** Build payment to buy per-use tool credit pack. <br> **Not:** Consuming credits — credits auto-deduct on paid tool calls. | free* (requires `X402_PAY_TO_ADDRESS`) | `{"agent_id": "my-agent-123", "credits": 100}` | `{"error": {"error": "pay_to_address_required", "message": "X402_PAY_TO_ADDRESS not set"}, "meta": {...}}` |
+| 11 | `commerce.purchase_credits` | `credited: true`, `agent_id`, `credits_purchased`, `tool_credits_remaining`, `tier`, `payment_settled`, `verification` | **Use:** After paying credits requirements, add credits to agent balance. <br> **Not:** Building requirements — use `commerce.credits_requirements` first. | free | `{"payment_signature": "0x...", "payment_required": "x402...", "credits": 100, "agent_id": "my-agent-123"}` | `{"error": {"error": "verification_failed", "reason": "invalid_signature_or_amount"}, "meta": {...}}` |
+| 12 | `swarm.research` | Composite product listed for resale: `product_id`, `title`, `description`, `price_usd`, `source_urls`, `revenue_share` | **Use:** Compose research from free inputs, list for resale via swarm. <br> **Not:** Buying others' composites — use `swarm.settle` as buyer. | free* (requires `EVM_PRIVATE_KEY`, `X402_PAY_TO_ADDRESS`) | `{"topic": "Base gas trends", "allow_paid_inputs": false, "price_usd": "0.50"}` | `{"error": {"error": "wallet_not_configured", "message": "EVM_PRIVATE_KEY not set"}, "meta": {...}}` |
+| 13 | `swarm.settle` | Settlement record: `product_id`, `buyer_agent_id`, `amount_usdc`, `seller_revenue_usdc`, `verification` | **Use:** Seller verifies + settles buyer's payment for a listed composite. <br> **Not:** Creating composites — use `swarm.research`. | free | `{"product_id": "swarm_abc123", "payment_signature": "0x...", "payment_required": "x402..."}` | `{"error": {"error": "product_not_found", "message": "product_id not listed"}, "meta": {...}}` |
+| 14 | `swarm.revenue` | Economics: `total_revenue_usdc`, `composite_sales`, `ltv_cac`, `margins`, `per_source_scores`, `storefront.revenue_usdc` | **Use:** Inspect swarm economics after research/settle. <br> **Not:** Real-time ledger — use `ops.metrics` or ledger endpoints. | free | `{"agent_id": "swarm-agent-1"}` | `unknown` |
+| 15 | `pulse.base` | Base Network Pulse: `base_fee_gwei`, `utilization_pct`, `projected_usd_cost`, `verdict` (settle_now/hold), `timestamp` | **Use:** Before settling on Base — decide submit-now vs wait. <br> **Not:** Historical analytics — use `/stats` or ledger. | free | `{"urgency": "flexible"}` | `unknown` (free preview always returns data) |
+| 16 | `ops.metrics` | Host telemetry: `cpu_pct`, `memory_pct`, `swap_pct`, `disk_pct`, `network_mbps`, `health` (ok/warn/critical), `top_processes` (optional) | **Use:** Diagnose MCP host health. <br> **Not:** Business metrics — use `swarm.revenue` or `/stats`. | free | `{"include_processes": true}` | `unknown` |
+| 17 | `city.list` | Cities array: `code`, `name`, `state`, `service_name`, `price`, `network`, `paid_url`, `sample_url`, `sample_address`, `sources_label`, `tags` | **Use:** Discover all 14 US City Compliance endpoints. <br> **Not:** Checking a specific address — use `city.sample` then `city.check`. | free | `{}` (no params) | `unknown` (catalog endpoint, no auth) |
+| 18 | `city.sample` | Free fixed-address sample: `compliance_verdict`, `license`, `violations`, `condemned`, `source` for one city code | **Use:** Validate city_code + response shape before paying. <br> **Not:** Production checks — use `city.check` (paid, any address). | free | `{"city_code": "mn"}` | `{"error": {"error": "city_not_found", "message": "unknown city code: xx"}, "meta": {...}}` |
+| 19 | `city.check` | Paid compliance check: same shape as sample but for any address; settles USDC if `EVM_PRIVATE_KEY` set | **Use:** Production property compliance lookup (any address). <br> **Not:** Free preview — use `city.sample` first. | paid* ($0.01 = 1_000_000 atomic USDC; requires `EVM_PRIVATE_KEY`) | `{"city_code": "mn", "address": "1700 Penn Ave N"}` | `{"data": {"status_code": 402, "payment_required": "x402...", "payTo": "0x...", "amount": "1000000", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "network": "eip155:8453"}, "meta": {...}}` |
+| 20 | `a2a.resolve_card` | External A2A Agent Card: `agent_card`, `skills`, `payment_rails`, `a2a_x402_ext`, `ap2_ext`, `url` | **Use:** Discover external A2A nodes by domain/URL. <br> **Not:** This server's card — use `x402.agent_card`. | free | `{"domain": "example.com"}` or `{"url": "https://example.com/.well-known/agent-card.json"}` | `{"error": {"error": "not_found", "message": "agent card not found at ..."}, "meta": {...}}` |
+| 21 | `x402.get_payment_requirements` | Alias for `x402.probe` — same response shape (kept for back-compat) | **Use:** Same as `x402.probe`. <br> **Not:** New code — prefer `x402.probe`. | free | Same as `x402.probe` | Same as `x402.probe` |
+| 22 | `x402.get_pro_upgrade_requirements` | Alias for `commerce.pro_requirements` — same response shape (back-compat) | **Use:** Same as `commerce.pro_requirements`. <br> **Not:** New code — prefer `commerce.pro_requirements`. | free* (requires `X402_PAY_TO_ADDRESS`) | Same as `commerce.pro_requirements` | Same as `commerce.pro_requirements` |
+| 23 | `x402.get_tool_credits_requirements` | Alias for `commerce.credits_requirements` — same response shape (back-compat) | **Use:** Same as `commerce.credits_requirements`. <br> **Not:** New code — prefer `commerce.credits_requirements`. | free* (requires `X402_PAY_TO_ADDRESS`) | Same as `commerce.credits_requirements` | Same as `commerce.credits_requirements` |
+
+---
+
+## Notes
+
+1. **Public tool count:** 23 tools (matches `TOOL_COUNT` in `tools_registry.py` and manifest).
+2. **Operator-only tools excluded:** `mailrail.send`, `mailrail.status`, `mailrail.inbound`, `get_agent_card` (compat alias) — not in public MCP catalog.
+3. **Cost model:** All tools are `free` tier (no USDC to call). Only `city.check` and `x402.pay_and_fetch` *spend* USDC when `EVM_PRIVATE_KEY` is configured; they return a 402 probe otherwise.
+4. **Payment rails:** All on-chain payments settle USDC on Base (`eip155:8453`, asset `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`) to `payTo` `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e` (canonical) / `0x05e1720bB82F86B5bc7940a99FDC702E32256357` (live host).
+5. **Failure envelope:** All tools return `{ "data": ..., "meta": { "tier", "agent_id", "quota_remaining", "upgrade_url" } }` on success; `{ "error": { "error", "message", "retry_after?" }, "meta": ..., "data": null }` on 4xx/429.
+6. **Sources cited:** `app/tools_registry.py` (lines 15-186), `app/manifest.py` (lines 9-17), `/.well-known/mcp` (live), `/.well-known/x402` (live), `tests/test_mcp_tools.py` (response shapes).
