@@ -226,3 +226,13 @@ curl.exe -s "https://x402-mcp.onrender.com/us/cities"
 curl.exe -s -o NUL -w "%{http_code}\n" -H "x-demand-ignore: 1" "https://x402-mcp.onrender.com/us/sea/property-check"
 curl.exe -s -o NUL -w "%{http_code}\n" -H "x-demand-ignore: 1" "https://x402-mcp.onrender.com/mn/property-check"
 ```
+
+## Cursor Cloud specific instructions
+
+Cloud agents run Linux. The Makefile `api` and `test` targets call `.venv/Scripts/python.exe` and do not run here. The environment install creates `.venv` and puts pnpm 9.15.4 on `PATH`. Boot already listens on the API (`8402`) and Mission Control dashboard (`5173`).
+
+- API, if you need to start it yourself: `.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8402`
+- Dashboard: `cd dashboard && pnpm dev --host 0.0.0.0 --port 5173`. Boot also writes `dashboard/.env.local` with `VITE_PUBLIC_API_BASE_URL=http://127.0.0.1:8402` when that file is missing. Vite only proxies `/api`, and the client calls unprefixed routes such as `/stats`, so without that variable the dev UI parses `index.html` as JSON.
+- Tests: `.venv/bin/python -m pytest -q`, then `cd dashboard && pnpm vitest run`, then `cd desktop-admin && pnpm vitest run`
+
+Install writes `.env` only when that file is missing, and it sets only `X402_PAY_TO_ADDRESS` to the public receive address used in CI (`0x05e1720bB82F86B5bc7940a99FDC702E32256357`). Do not copy `.env.example` over it. That example sets `MAILRAIL_ADMIN_RECIPIENT=ops@localhost`, which fails `tests/test_mailrail_agent.py::test_agent_card_is_not_public_and_names_notify_email`. Leave `EVM_PRIVATE_KEY` and `SVM_PRIVATE_KEY` empty. Redis is optional; with `REDIS_URL` unset the API keeps quota state in memory. `GET /health` should report `wallet_configured` false and `pay_to_configured` true.
