@@ -42,8 +42,13 @@ def operator_notify_email() -> str:
     )
 
 
-def agent_card() -> dict[str, Any]:
+def _public_contact_email() -> str:
+    return settings.contact_email or "kwizzlesurp10@gmail.com"
+
+
+def agent_card(*, public: bool = False) -> dict[str, Any]:
     base = settings.public_base_url.rstrip("/")
+    notify_email = _public_contact_email() if public else operator_notify_email()
     return {
         "id": AGENT_ID,
         "name": AGENT_NAME,
@@ -62,7 +67,7 @@ def agent_card() -> dict[str, Any]:
             "fail_closed": True,
         },
         "notify": {
-            "email": operator_notify_email(),
+            "email": notify_email,
             "github_repo": getattr(settings, "github_repo", None)
             or "kwizzlesurp10-ctrl/x402-mcp",
         },

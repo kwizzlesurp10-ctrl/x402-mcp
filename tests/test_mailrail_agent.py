@@ -45,6 +45,17 @@ def test_public_agent_card_route() -> None:
     assert "OPERATOR_TOKEN" in str(body["auth"])
 
 
+def test_public_agent_card_hides_mailrail_admin_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "secret-admin@example.com")
+    monkeypatch.setattr(settings, "contact_email", "public-contact@example.com")
+    client = TestClient(app)
+    body = client.get("/agent/mailrail").json()
+    assert body["notify"]["email"] == "public-contact@example.com"
+    assert body["notify"]["email"] != "secret-admin@example.com"
+
+
 def test_wrong_agent_id_is_403(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "operator_token", "s3cret")
     client = TestClient(app)

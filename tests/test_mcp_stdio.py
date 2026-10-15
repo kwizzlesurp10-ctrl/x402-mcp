@@ -118,7 +118,7 @@ async def test_stdio_get_pro_upgrade_requirements() -> None:
 async def test_stdio_get_tool_credits_requirements() -> None:
     payload = await _call_stdio_tool(
         "commerce.credits_requirements",
-        {"credits": 25},
+        {},
         env={
             "X402_PAY_TO_ADDRESS": "0xTestPayTo00000000000000000000000001",
             "REVENUE_NETWORK": "eip155:84532",
@@ -126,7 +126,7 @@ async def test_stdio_get_tool_credits_requirements() -> None:
     )
 
     assert payload["meta"]["agent_id"] == payload["data"]["agent_id"]
-    assert payload["data"]["credits"] == 25
+    assert payload["data"]["credits"] == 100
 
 
 @pytest.mark.asyncio

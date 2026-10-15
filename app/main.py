@@ -730,7 +730,7 @@ async def mailrail_agent_card() -> dict:
     """Public card for the dedicated MailRail postmaster agent (no ledgers)."""
     from app.mailrail_agent import agent_card
 
-    return agent_card()
+    return agent_card(public=True)
 
 
 @app.get("/mailrail/ledger")

@@ -3,12 +3,16 @@
 Commerce activate/purchase must never verify against caller-supplied
 ``payment_required`` blobs. Challenges are issued by
 ``build_pro_upgrade_requirements`` / ``build_tool_credits_requirements``,
-cached per agent (and credit pack), and enforced before verify+settle.
+cached with server-generated ids (bounded TTL), and enforced before verify+settle.
+Settlement tx hashes are deduped (Redis SETNX when available).
 """
 
 from __future__ import annotations
 
 import logging
+import secrets
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -19,21 +23,38 @@ logger = logging.getLogger("commerce_payment")
 
 CommercePurpose = Literal["pro_tier_upgrade", "tool_credits"]
 
+CHALLENGE_TTL_SECONDS = 900
+CHALLENGE_MAX_ENTRIES = 512
+SETTLEMENT_DEDUPE_TTL_SECONDS = 40 * 24 * 3600
+
 # Base Sepolia USDC (SDK registry may not resolve the "USDC" symbol on testnet).
 BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
 
 @dataclass(frozen=True)
 class StoredCommerceChallenge:
+    challenge_id: str
     purpose: CommercePurpose
     agent_id: str
     payment_required_header: str
-    credits: int | None = None
+    credits: int | None
+    expires_at: float
 
 
-# In-memory challenge cache (mirrors swarm product storage; Redis not required).
-_pro_challenges: dict[str, StoredCommerceChallenge] = {}
-_credits_challenges: dict[tuple[str, int], StoredCommerceChallenge] = {}
+_challenges: OrderedDict[str, StoredCommerceChallenge] = OrderedDict()
+_pending_by_agent: dict[tuple[CommercePurpose, str], str] = {}
+_mem_settled_txs: set[str] = set()
+
+
+def normalize_credit_pack(credits: int | None) -> int:
+    """Only the configured pack size is sold at ``tool_credit_pack_price``."""
+    pack = settings.tool_credit_pack_size
+    if credits is not None and credits != pack:
+        raise ValueError(
+            f"unsupported credit pack size {credits}; "
+            f"only {pack} credits per pack is sold"
+        )
+    return pack
 
 
 def _price_to_atomic(price: str) -> int:
@@ -117,38 +138,151 @@ def validate_commerce_requirements(
             )
 
 
-def _requirements_from_built(built: dict[str, Any]) -> list[dict[str, Any]]:
-    reqs = built.get("requirements") or []
-    return [r for r in reqs if isinstance(r, dict)]
+def _purge_challenge_cache() -> None:
+    now = time.time()
+    for challenge_id in list(_challenges.keys()):
+        ch = _challenges.get(challenge_id)
+        if ch is not None and ch.expires_at <= now:
+            _challenges.pop(challenge_id, None)
+            _pending_by_agent.pop((ch.purpose, ch.agent_id), None)
+    while len(_challenges) > CHALLENGE_MAX_ENTRIES:
+        challenge_id, ch = _challenges.popitem(last=False)
+        _pending_by_agent.pop((ch.purpose, ch.agent_id), None)
 
 
-def store_pro_challenge(agent_id: str, built: dict[str, Any]) -> None:
+def _insert_challenge(
+    purpose: CommercePurpose,
+    agent_id: str,
+    payment_required_header: str,
+    credits: int | None,
+) -> StoredCommerceChallenge:
+    _purge_challenge_cache()
+    pending_key = (purpose, agent_id)
+    old_id = _pending_by_agent.get(pending_key)
+    if old_id:
+        _challenges.pop(old_id, None)
+
+    challenge_id = secrets.token_hex(16)
+    ch = StoredCommerceChallenge(
+        challenge_id=challenge_id,
+        purpose=purpose,
+        agent_id=agent_id,
+        payment_required_header=payment_required_header,
+        credits=credits,
+        expires_at=time.time() + CHALLENGE_TTL_SECONDS,
+    )
+    while len(_challenges) >= CHALLENGE_MAX_ENTRIES:
+        _, evicted = _challenges.popitem(last=False)
+        _pending_by_agent.pop((evicted.purpose, evicted.agent_id), None)
+
+    _pending_by_agent[pending_key] = challenge_id
+    _challenges[challenge_id] = ch
+    return ch
+
+
+def store_pro_challenge(agent_id: str, built: dict[str, Any]) -> StoredCommerceChallenge:
     header = built.get("payment_required_header")
     if not header:
         raise ValueError("pro upgrade requirements missing payment_required_header")
-    _pro_challenges[agent_id] = StoredCommerceChallenge(
-        purpose="pro_tier_upgrade",
-        agent_id=agent_id,
-        payment_required_header=header,
-    )
+    ch = _insert_challenge("pro_tier_upgrade", agent_id, header, None)
+    built["commerce_challenge_id"] = ch.challenge_id
+    return ch
 
 
-def store_credits_challenge(agent_id: str, credits: int, built: dict[str, Any]) -> None:
+def store_credits_challenge(
+    agent_id: str, credits: int, built: dict[str, Any]
+) -> StoredCommerceChallenge:
     header = built.get("payment_required_header")
     if not header:
         raise ValueError("tool credits requirements missing payment_required_header")
-    _credits_challenges[(agent_id, credits)] = StoredCommerceChallenge(
-        purpose="tool_credits",
-        agent_id=agent_id,
-        payment_required_header=header,
-        credits=credits,
-    )
+    pack = normalize_credit_pack(credits)
+    ch = _insert_challenge("tool_credits", agent_id, header, pack)
+    built["commerce_challenge_id"] = ch.challenge_id
+    built["credits"] = pack
+    return ch
+
+
+def consume_challenge(challenge: StoredCommerceChallenge) -> None:
+    """Drop a challenge after successful fulfillment (one-time use)."""
+    _challenges.pop(challenge.challenge_id, None)
+    _pending_by_agent.pop((challenge.purpose, challenge.agent_id), None)
 
 
 def clear_commerce_challenges() -> None:
-    """Test helper: reset in-memory challenge cache."""
-    _pro_challenges.clear()
-    _credits_challenges.clear()
+    """Test helper: reset in-memory challenge cache and settlement dedupe."""
+    _challenges.clear()
+    _pending_by_agent.clear()
+    _mem_settled_txs.clear()
+
+
+def clear_commerce_settlement_dedupe() -> None:
+    """Test helper: reset in-process settlement dedupe only."""
+    _mem_settled_txs.clear()
+
+
+def _redis_client() -> Any | None:
+    if not settings.redis_url:
+        return None
+    try:
+        import redis
+
+        return redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("commerce settlement dedupe: redis unavailable (%s)", exc)
+        return None
+
+
+def record_commerce_settlement(purpose: CommercePurpose, tx: str | None) -> bool:
+    """Register a settlement tx; False if this tx was already fulfilled for purpose.
+
+    Matches swarm ``record_settlement``: ``tx=None`` is always accepted (no dedupe).
+    """
+    if not tx:
+        return True
+    mem_key = f"{purpose}:{tx}"
+    client = _redis_client()
+    if client is not None:
+        try:
+            redis_key = f"commerce:settled:{purpose}:{tx}"
+            return bool(
+                client.set(redis_key, "1", nx=True, ex=SETTLEMENT_DEDUPE_TTL_SECONDS)
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("commerce settlement dedupe redis failed: %s", exc)
+    if mem_key in _mem_settled_txs:
+        return False
+    _mem_settled_txs.add(mem_key)
+    return True
+
+
+def settlement_tx_from_payment(payment: dict[str, Any]) -> str | None:
+    settlement = payment.get("settlement") or {}
+    if not isinstance(settlement, dict):
+        return None
+    tx = (
+        settlement.get("transaction")
+        or settlement.get("tx_hash")
+        or settlement.get("txHash")
+        or settlement.get("transactionHash")
+    )
+    return str(tx) if tx else None
+
+
+def _get_pending_challenge(
+    purpose: CommercePurpose, agent_id: str
+) -> StoredCommerceChallenge | None:
+    _purge_challenge_cache()
+    challenge_id = _pending_by_agent.get((purpose, agent_id))
+    if not challenge_id:
+        return None
+    ch = _challenges.get(challenge_id)
+    if ch is None:
+        _pending_by_agent.pop((purpose, agent_id), None)
+        return None
+    if ch.expires_at <= time.time():
+        consume_challenge(ch)
+        return None
+    return ch
 
 
 def resolve_pro_authoritative_header(
@@ -156,10 +290,10 @@ def resolve_pro_authoritative_header(
     *,
     rebuild: Any,
 ) -> StoredCommerceChallenge:
-    stored = _pro_challenges.get(agent_id)
+    stored = _get_pending_challenge("pro_tier_upgrade", agent_id)
     if stored is None:
         rebuild()
-        stored = _pro_challenges.get(agent_id)
+        stored = _get_pending_challenge("pro_tier_upgrade", agent_id)
     if stored is None:
         raise ValueError("failed to issue pro-tier payment challenge")
 
@@ -172,26 +306,25 @@ def resolve_pro_authoritative_header(
 
 def resolve_credits_authoritative_header(
     agent_id: str,
-    credits: int,
+    credits: int | None,
     *,
-    rebuild: Any,  # noqa: ARG001 — kept for API symmetry; credits must be pre-issued
+    rebuild: Any,  # noqa: ARG001
 ) -> StoredCommerceChallenge:
-    stored = _credits_challenges.get((agent_id, credits))
+    pack = normalize_credit_pack(credits)
+    stored = _get_pending_challenge("tool_credits", agent_id)
     if stored is None:
-        pending = [
-            ch for (aid, _pack), ch in _credits_challenges.items() if aid == agent_id
-        ]
-        if len(pending) == 1:
-            stored = pending[0]
-        else:
-            raise ValueError(
-                "No tool-credit payment challenge on file for this agent/pack. "
-                "Call commerce.credits_requirements, pay, then commerce.purchase_credits."
-            )
+        raise ValueError(
+            "No tool-credit payment challenge on file for this agent. "
+            "Call commerce.credits_requirements, pay, then commerce.purchase_credits."
+        )
+    if stored.credits != pack:
+        raise ValueError(
+            f"credit pack mismatch: payment was for {stored.credits} credits, "
+            f"caller requested {pack}"
+        )
 
-    reqs = _requirements_from_header(stored.payment_required_header)
     validate_commerce_requirements(
-        reqs,
+        _requirements_from_header(stored.payment_required_header),
         min_amount_atomic=_price_to_atomic(settings.tool_credit_pack_price),
     )
     return stored
@@ -207,16 +340,11 @@ def _requirements_from_header(payment_required_header: str) -> list[dict[str, An
     ]
 
 
-def credits_to_grant(challenge: StoredCommerceChallenge, caller_credits: int) -> int:
-    """Paid pack size from the server challenge — never caller-inflated credits."""
+def credits_to_grant(challenge: StoredCommerceChallenge) -> int:
+    """Paid pack size from the server challenge."""
     if challenge.purpose != "tool_credits":
         raise ValueError("not a tool credits challenge")
     granted = challenge.credits
     if granted is None or granted <= 0:
         granted = settings.tool_credit_pack_size
-    if caller_credits != granted:
-        raise ValueError(
-            f"credit pack mismatch: payment was for {granted} credits, "
-            f"caller requested {caller_credits}"
-        )
     return granted

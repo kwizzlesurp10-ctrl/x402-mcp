@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 
 import pytest
 
 from app import x402_services
 from app.commerce import InMemoryQuotaStore
 from app.commerce_payment import (
+    CHALLENGE_MAX_ENTRIES,
     clear_commerce_challenges,
     credits_to_grant,
+    normalize_credit_pack,
+    record_commerce_settlement,
     validate_commerce_requirements,
 )
 from app.config import settings
@@ -55,6 +59,16 @@ def _evil_payment_required_header(
     return encode_payment_required_header(
         PaymentRequired(x402_version=2, accepts=[req], error="evil")
     )
+
+
+def test_normalize_credit_pack_rejects_non_default() -> None:
+    with pytest.raises(ValueError, match="unsupported credit pack"):
+        normalize_credit_pack(25)
+
+
+def test_build_tool_credits_rejects_custom_pack(pay_to: str) -> None:
+    with pytest.raises(ValueError, match="unsupported credit pack"):
+        x402_services.build_tool_credits_requirements("agent-x", 50)
 
 
 def test_validate_rejects_underpay(pay_to: str) -> None:
@@ -109,17 +123,10 @@ def test_validate_rejects_wrong_network(pay_to: str) -> None:
         )
 
 
-def test_credits_to_grant_rejects_inflated_pack() -> None:
-    from app.commerce_payment import StoredCommerceChallenge
-
-    ch = StoredCommerceChallenge(
-        purpose="tool_credits",
-        agent_id="a1",
-        payment_required_header="e30=",
-        credits=25,
-    )
-    with pytest.raises(ValueError, match="pack mismatch"):
-        credits_to_grant(ch, 9999)
+def test_record_commerce_settlement_dedupes_in_memory() -> None:
+    assert record_commerce_settlement("tool_credits", "0xabc") is True
+    assert record_commerce_settlement("tool_credits", "0xabc") is False
+    assert record_commerce_settlement("pro_tier_upgrade", "0xabc") is True
 
 
 @pytest.mark.asyncio
@@ -159,8 +166,8 @@ async def test_purchase_credits_ignores_caller_payment_required(
     pay_to: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent = "security-credits-agent"
-    pack = 25
-    built = x402_services.build_tool_credits_requirements(agent, pack)
+    pack = settings.tool_credit_pack_size
+    built = x402_services.build_tool_credits_requirements(agent)
     server_header = built["payment_required_header"]
     evil = _evil_payment_required_header(pay_to="0x" + "cc" * 20, amount_atomic=1)
 
@@ -192,8 +199,7 @@ async def test_purchase_credits_rejects_inflated_credits_param(
     pay_to: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     agent = "inflate-agent"
-    pack = 25
-    x402_services.build_tool_credits_requirements(agent, pack)
+    x402_services.build_tool_credits_requirements(agent)
 
     async def fake_settle(params):
         return {
@@ -205,7 +211,7 @@ async def test_purchase_credits_rejects_inflated_credits_param(
     monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
     monkeypatch.setattr(x402_services, "quota_store", InMemoryQuotaStore())
 
-    with pytest.raises(ValueError, match="pack mismatch"):
+    with pytest.raises(ValueError, match="unsupported credit pack"):
         await x402_services.purchase_tool_credits("c2ln", "ignored", agent, 9999)
 
 
@@ -228,6 +234,62 @@ async def test_purchase_credits_without_challenge_fails(
         await x402_services.purchase_tool_credits(
             "c2ln", "ignored", agent, settings.tool_credit_pack_size
         )
+
+
+@pytest.mark.asyncio
+async def test_purchase_credits_replay_does_not_double_credit(
+    pay_to: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = "replay-credits"
+    pack = settings.tool_credit_pack_size
+    x402_services.build_tool_credits_requirements(agent)
+
+    async def fake_settle(params):
+        return {
+            "is_valid": True,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xREPLAY"},
+        }
+
+    store = InMemoryQuotaStore()
+    monkeypatch.setattr(x402_services, "quota_store", store)
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
+
+    first = await x402_services.purchase_tool_credits("sig", "ignored", agent, None)
+    x402_services.build_tool_credits_requirements(agent)
+    second = await x402_services.purchase_tool_credits("sig", "ignored", agent, None)
+
+    assert first["credits_purchased"] == pack
+    assert second.get("already_fulfilled") is True
+    assert second["credits_purchased"] == 0
+    assert store.get_credits(agent) == pack
+
+
+@pytest.mark.asyncio
+async def test_activate_pro_replay_is_idempotent(
+    pay_to: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = "replay-pro"
+    x402_services.build_pro_upgrade_requirements(agent)
+
+    async def fake_settle(params):
+        return {
+            "is_valid": True,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xPROREPLAY"},
+        }
+
+    store = InMemoryQuotaStore()
+    monkeypatch.setattr(x402_services, "quota_store", store)
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
+
+    first = await x402_services.activate_pro_tier("sig", "ignored", agent)
+    x402_services.build_pro_upgrade_requirements(agent)
+    second = await x402_services.activate_pro_tier("sig", "ignored", agent)
+
+    assert first["activated"] is True
+    assert second.get("already_fulfilled") is True
+    assert store.get_tier(agent) == "pro"
 
 
 @pytest.mark.asyncio
@@ -257,3 +319,49 @@ async def test_mutated_payment_required_header_not_used_for_verify(
 
     await x402_services.activate_pro_tier("sig", mutated, agent)
     assert captured[0] == server_header
+
+
+@pytest.mark.asyncio
+async def test_challenge_consumed_after_pro_activation(
+    pay_to: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.commerce_payment import _get_pending_challenge
+
+    agent = "consume-agent"
+    x402_services.build_pro_upgrade_requirements(agent)
+    assert _get_pending_challenge("pro_tier_upgrade", agent) is not None
+
+    async def fake_settle(params):
+        return {
+            "is_valid": True,
+            "payment_settled": True,
+            "settlement": {"success": True, "transaction": "0xuse1"},
+        }
+
+    monkeypatch.setattr(x402_services, "_verify_and_settle_payment", fake_settle)
+    monkeypatch.setattr(x402_services, "quota_store", InMemoryQuotaStore())
+
+    await x402_services.activate_pro_tier("sig", "ignored", agent)
+    assert _get_pending_challenge("pro_tier_upgrade", agent) is None
+
+
+def test_challenge_cache_bounded(pay_to: str) -> None:
+    from app.commerce_payment import _challenges
+
+    for i in range(CHALLENGE_MAX_ENTRIES + 5):
+        x402_services.build_pro_upgrade_requirements(f"agent-{i}")
+    assert len(_challenges) <= CHALLENGE_MAX_ENTRIES
+
+
+def test_credits_to_grant_uses_server_pack() -> None:
+    from app.commerce_payment import StoredCommerceChallenge
+
+    ch = StoredCommerceChallenge(
+        challenge_id="c1",
+        purpose="tool_credits",
+        agent_id="a1",
+        payment_required_header="e30=",
+        credits=settings.tool_credit_pack_size,
+        expires_at=time.time() + 60,
+    )
+    assert credits_to_grant(ch) == settings.tool_credit_pack_size

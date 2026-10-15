@@ -10,9 +10,13 @@ import httpx
 
 from app.commerce import quota_store
 from app.commerce_payment import (
+    consume_challenge,
     credits_to_grant,
+    normalize_credit_pack,
+    record_commerce_settlement,
     resolve_credits_authoritative_header,
     resolve_pro_authoritative_header,
+    settlement_tx_from_payment,
     store_credits_challenge,
     store_pro_challenge,
 )
@@ -1039,8 +1043,11 @@ async def verify_and_settle_from_headers(
     )
 
 
-def build_tool_credits_requirements(agent_id: str, credits: int) -> dict[str, Any]:
+def build_tool_credits_requirements(
+    agent_id: str, credits: int | None = None
+) -> dict[str, Any]:
     """Build x402 payment requirements to purchase per-use MCP tool credits."""
+    pack = normalize_credit_pack(credits)
     pay_to = settings.x402_pay_to_address
     if not pay_to:
         raise ValueError("X402_PAY_TO_ADDRESS required to collect tool credit payments.")
@@ -1050,13 +1057,12 @@ def build_tool_credits_requirements(agent_id: str, credits: int) -> dict[str, An
             network=resolve_revenue_network(),
             pay_to=pay_to,
             price=settings.tool_credit_pack_price,
-            description=f"x402 MCP tool credits ({credits}) for agent {agent_id}",
+            description=f"x402 MCP tool credits ({pack}) for agent {agent_id}",
         )
     )
     result["purpose"] = "tool_credits"
     result["agent_id"] = agent_id
-    result["credits"] = credits
-    store_credits_challenge(agent_id, credits, result)
+    store_credits_challenge(agent_id, pack, result)
     return result
 
 
@@ -1064,15 +1070,16 @@ async def purchase_tool_credits(
     payment_signature: str,
     payment_required: str,  # noqa: ARG001 — ignored; server challenge is authoritative
     agent_id: str,
-    credits: int,
+    credits: int | None,
 ) -> dict[str, Any]:
     """Verify + settle x402 payment, then credit agent balance (per-use revenue)."""
+    pack = normalize_credit_pack(credits)
     challenge = resolve_credits_authoritative_header(
         agent_id,
-        credits,
-        rebuild=lambda: build_tool_credits_requirements(agent_id, credits),
+        pack,
+        rebuild=lambda: None,
     )
-    credits_paid = credits_to_grant(challenge, credits)
+    credits_paid = credits_to_grant(challenge)
     payment = await _verify_and_settle_payment(
         VerifyPaymentInput(
             payment_signature=payment_signature,
@@ -1089,6 +1096,22 @@ async def purchase_tool_credits(
             f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
+    tx = settlement_tx_from_payment(payment)
+    if not record_commerce_settlement("tool_credits", tx):
+        consume_challenge(challenge)
+        snapshot = quota_store.peek(agent_id)
+        return {
+            "credited": True,
+            "already_fulfilled": True,
+            "agent_id": agent_id,
+            "credits_purchased": 0,
+            "tool_credits_remaining": snapshot.tool_credits_remaining,
+            "tier": snapshot.tier,
+            "payment_settled": True,
+            "verification": payment,
+        }
+
+    consume_challenge(challenge)
     balance = quota_store.add_credits(agent_id, credits_paid)
     snapshot = quota_store.peek(agent_id)
 
@@ -1129,6 +1152,21 @@ async def activate_pro_tier(
             f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
+    tx = settlement_tx_from_payment(payment)
+    if not record_commerce_settlement("pro_tier_upgrade", tx):
+        consume_challenge(challenge)
+        snapshot = quota_store.peek(agent_id)
+        return {
+            "activated": True,
+            "already_fulfilled": True,
+            "agent_id": agent_id,
+            "tier": snapshot.tier,
+            "pro_quota": settings.pro_tier_monthly_quota,
+            "payment_settled": True,
+            "verification": payment,
+        }
+
+    consume_challenge(challenge)
     quota_store.activate_pro_tier(agent_id)
     snapshot = quota_store.peek(agent_id)
 

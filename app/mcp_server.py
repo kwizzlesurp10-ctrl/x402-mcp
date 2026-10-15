@@ -620,13 +620,11 @@ async def get_tool_credits_requirements(
         Field(description="Optional agent identity the credits will attach to."),
     ] = None,
 ) -> str:
-    pack = credits or settings.tool_credit_pack_size
-
     return await _execute_tool(
         "commerce.credits_requirements",
         agent_id,
         lambda resolved: _sync_result(
-            x402_services.build_tool_credits_requirements(resolved, pack)
+            x402_services.build_tool_credits_requirements(resolved, credits)
         ),
     )
 
@@ -658,13 +656,11 @@ async def purchase_tool_credits(
         Field(description="Agent identity to credit."),
     ] = None,
 ) -> str:
-    pack = credits or settings.tool_credit_pack_size
-
     return await _execute_tool(
         "commerce.purchase_credits",
         agent_id,
         lambda resolved: x402_services.purchase_tool_credits(
-            payment_signature, payment_required, resolved, pack
+            payment_signature, payment_required, resolved, credits
         ),
     )
 
