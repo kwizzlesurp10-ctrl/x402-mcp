@@ -21,12 +21,13 @@ settled sale (#501) — it is not a roadmap item. This file covers remaining
 
 ## 30 → 60 days: repeat the civic-data wedge
 
-- [x] US city compliance network is live (14 jurisdictions including Chicago,
-      NYC, Seattle, Denver, SF, LA, Boston, Philly, Orlando, NOLA, MoCo,
-      Gainesville, KC, Minneapolis) at catalog `$0.01` per
-      `GET /us/{code}/property-check`.
+- [x] US city compliance network is live (public catalog currently includes
+      Minneapolis, Seattle, NYC, Chicago, Denver, SF, LA, Boston, Philly,
+      Orlando, NOLA, MoCo, Gainesville, KC, Austin, San Diego) at catalog
+      `$0.01` per `GET /us/{code}/property-check`. Unpublished stubs are
+      not listed as live paid SKUs.
 - [ ] Generalize remaining city-portal adapters (ArcGIS + Socrata) for
-      *additional* cities beyond the 14 already shipping.
+      *additional* cities beyond the public catalog already shipping.
 - [ ] Publish the seller-storefront pattern (no spend key on the public
       host) as a standalone guide other CDP builders can copy.
 

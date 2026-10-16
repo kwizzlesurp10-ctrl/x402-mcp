@@ -47,6 +47,7 @@ from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput
 
 from app.ops_events import event_stream, format_sse
 from app.payment_rails import build_payment_rails
+from app.a2a_discovery import resolve_agent_card
 from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
 from app.ssrf_guard import SSRFBlockedError, validate_probe_url
 from app.swarm import orchestrator as swarm_orchestrator
@@ -86,11 +87,14 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Rebuild the pinned listing BEFORE serving: the purchase URL is in the
     # Bazaar catalog, so the first request after a cold start may well be a
     # buyer. Bounded and non-fatal — a slow RPC must not stall the boot.
+    pulse_refresh = None
     if settings.pinned_pulse_product_id:
         from app.swarm import publisher
 
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(publisher.restore_pinned_listing(), timeout=45.0)
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            pulse_refresh = asyncio.create_task(publisher.pulse_refresh_loop())
     try:
         if _mcp_http_app is not None:
             async with mcp.session_manager.run():
@@ -106,6 +110,10 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
             warmer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await warmer_task
+        if pulse_refresh:
+            pulse_refresh.cancel()
+            with suppress(asyncio.CancelledError):
+                await pulse_refresh
 
 
 class UpstashAnalyticsMiddleware(BaseHTTPMiddleware):
@@ -147,6 +155,8 @@ def _cors_origins() -> list[str]:
     origins = [
         "https://x402-mission-control.vercel.app",
         "https://kwizzle-landing-page.onrender.com",
+        "https://kwizzlesurp.com",
+        "https://www.kwizzlesurp.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
@@ -696,24 +706,37 @@ async def stats_snapshot() -> dict:
     return data
 
 
+def _mailrail_operator_guard(request: Request) -> None:
+    """Fail closed: OPERATOR_TOKEN plus the MailRail postmaster agent id."""
+    from app.mailrail_agent import authorize_http
+
+    authorize_http(request)
+
+
 @app.get("/mailrail/health")
 async def mailrail_health() -> dict:
-    """MailRail communication rail readiness check."""
+    """Public readiness only — no addresses, keys, or message bodies."""
     return {
         "ok": True,
         "enabled": settings.mailrail_enabled,
         "provider": settings.mailrail_provider,
-        "from_address": settings.mailrail_from_address,
-        "admin_recipient": settings.mailrail_admin_recipient,
-        "has_api_key": bool(settings.mailrail_api_key),
-        "has_webhook": bool(settings.mailrail_webhook_url),
-        "has_smtp": bool(settings.mailrail_smtp_url),
+        "agent_id": "x402-mailrail-postmaster",
+        "public": False,
     }
 
 
+@app.get("/agent/mailrail")
+async def mailrail_agent_card() -> dict:
+    """Public card for the dedicated MailRail postmaster agent (no ledgers)."""
+    from app.mailrail_agent import agent_card
+
+    return agent_card()
+
+
 @app.get("/mailrail/ledger")
-async def mailrail_ledger(limit: int = 50) -> dict:
-    """Read recent MailRail logged dispatches (newest first)."""
+async def mailrail_ledger(request: Request, limit: int = 50) -> dict:
+    """Read recent MailRail logged dispatches (newest first). Operator-only."""
+    _mailrail_operator_guard(request)
     from app.mailrail import get_outbox_messages
 
     events = get_outbox_messages(limit=limit)
@@ -721,22 +744,23 @@ async def mailrail_ledger(limit: int = 50) -> dict:
 
 
 @app.post("/mailrail/inbound")
-async def mailrail_inbound(payload: models.InboundMailInput) -> dict:
-    """Ingest and route an incoming message to the MailRail Postmaster."""
+async def mailrail_inbound(request: Request, payload: models.InboundMailInput) -> dict:
+    """Ingest inbound postmaster mail. Operator-only."""
+    _mailrail_operator_guard(request)
     from app.mailrail import process_inbound_mail
 
-    result = process_inbound_mail(
+    return process_inbound_mail(
         sender=payload.sender,
         subject=payload.subject,
         body=payload.body,
         metadata=payload.metadata,
     )
-    return result
 
 
 @app.get("/mailrail/inbox")
-async def mailrail_inbox(limit: int = 50) -> dict:
-    """Read recent MailRail inbound messages (newest first)."""
+async def mailrail_inbox(request: Request, limit: int = 50) -> dict:
+    """Read recent MailRail inbound messages (newest first). Operator-only."""
+    _mailrail_operator_guard(request)
     from app.mailrail import get_inbox_messages
 
     events = get_inbox_messages(limit=limit)
@@ -744,8 +768,9 @@ async def mailrail_inbox(limit: int = 50) -> dict:
 
 
 @app.get("/mailrail/stats")
-async def mailrail_stats() -> dict:
-    """Real-time telemetry and stats for MailRail In/Out Postmaster."""
+async def mailrail_stats(request: Request) -> dict:
+    """MailRail in/out counts. Operator-only (derived from message ledgers)."""
+    _mailrail_operator_guard(request)
     from app.mailrail import get_mailrail_stats
 
     return get_mailrail_stats()
@@ -900,6 +925,29 @@ async def probe_url(
         # Upstream unreachable/timeout — a clean 502, not an opaque 500.
         raise HTTPException(
             status_code=502, detail="upstream probe target unreachable"
+        ) from exc
+
+
+@app.get("/a2a/resolve")
+async def a2a_resolve_endpoint(
+    request: Request,
+    url: str = Query(description="Target origin or agent card URL to resolve"),
+) -> dict:
+    """Resolve an external A2A Agent Card by domain or URL — SSRF-guarded."""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        probe_rate_limiter.check(client_ip)
+        return await resolve_agent_card(url)
+    except ProbeRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "rate_limit_exceeded", "retry_after": exc.retry_after},
+        ) from exc
+    except SSRFBlockedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="upstream a2a target unreachable"
         ) from exc
 
 

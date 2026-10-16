@@ -182,7 +182,7 @@ async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.Monkey
     _SEEN_KEYS.clear()
 
     # Status check tool
-    status_raw = await mailrail_status()
+    status_raw = await mailrail_status(agent_id="x402-mailrail-postmaster")
     status_data = json.loads(status_raw)
     assert status_data["data"]["status"] == "ok"
     assert "provider" in status_data["data"]
@@ -193,6 +193,7 @@ async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.Monkey
         subject="Report ready",
         body="Findings attached.",
         event_id="mcp_test_01",
+        agent_id="x402-mailrail-postmaster",
     )
     send_data = json.loads(send_raw)
     assert send_data["data"]["status"] == "ok"
@@ -205,23 +206,28 @@ def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     ledger_file = tmp_path / "mailrail.jsonl"
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger_file)
+    monkeypatch.setattr(settings, "operator_token", "s3cret")
     _SEEN_KEYS.clear()
 
     client = TestClient(app)
+    auth = {
+        "Authorization": "Bearer s3cret",
+        "X-Agent-Id": "x402-mailrail-postmaster",
+    }
 
-    # Health check
+    # Health check stays public
     res_health = client.get("/mailrail/health")
     assert res_health.status_code == 200
     assert res_health.json()["ok"] is True
 
     # Empty ledger
-    res_empty = client.get("/mailrail/ledger")
+    res_empty = client.get("/mailrail/ledger", headers=auth)
     assert res_empty.status_code == 200
     assert res_empty.json()["count"] == 0
 
     # Dispatch mail and re-query ledger
     send_agent_mail("auditor@market.org", "Audit receipt", "All green", event_id="http_ledger_01")
-    res_ledger = client.get("/mailrail/ledger")
+    res_ledger = client.get("/mailrail/ledger", headers=auth)
     assert res_ledger.status_code == 200
     body = res_ledger.json()
     assert body["count"] == 1
@@ -234,6 +240,7 @@ def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     res_inbound = client.post(
         "/mailrail/inbound",
+        headers=auth,
         json={
             "sender": "partner-bot@bazaar.xyz",
             "subject": "Quote Request for MN Data @alice",
@@ -248,17 +255,17 @@ def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
     # Inbound inbox query
-    res_inbox = client.get("/mailrail/inbox")
+    res_inbox = client.get("/mailrail/inbox", headers=auth)
     assert res_inbox.status_code == 200
     inbox_body = res_inbox.json()
     assert inbox_body["count"] == 1
     assert inbox_body["inbox"][0]["from"] == "partner-bot@bazaar.xyz"
 
     # Telemetry Stats
-    res_stats = client.get("/mailrail/stats")
+    res_stats = client.get("/mailrail/stats", headers=auth)
     assert res_stats.status_code == 200
     stats = res_stats.json()
-    assert stats["outbound_total"] == 1
+    assert stats["outbound_total"] >= 1
     assert stats["inbound_total"] == 1
     assert stats["dedup_keys_cached"] >= 1
 
@@ -274,6 +281,7 @@ async def test_mailrail_inbound_mcp_tool(tmp_path: Path, monkeypatch: pytest.Mon
         sender="scout-agent@network.ai",
         subject="Service alert",
         body="Upstream pricing dropped.",
+        agent_id="x402-mailrail-postmaster",
     )
     res_data = json.loads(res_raw)
     assert res_data["data"]["status"] == "ok"

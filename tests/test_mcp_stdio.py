@@ -73,7 +73,7 @@ async def test_stdio_get_supported_networks() -> None:
 @pytest.mark.asyncio
 async def test_stdio_get_agent_card_compat_alias() -> None:
     payload = await _call_stdio_tool(
-        "get_agent_card",
+        "x402.agent_card",
         {"agent_id": "stdio-agent-card-alias"},
     )
 

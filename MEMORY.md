@@ -2,7 +2,7 @@
 
 **Project:** x402 Micropayments MCP Server  
 **Status:** ✅ **LIVE on Base mainnet** (◕‿◕) ✨  
-**Last Updated:** Sunday, September 13, 2026  
+**Last Updated:** Saturday, September 19, 2026  
 **GitHub:** https://github.com/kwizzlesurp10-ctrl/x402-mcp  
 
 ---
@@ -10,8 +10,9 @@
 ## 📌 Quick Reference
 
 ### 🔐 Wallet Addresses (⚠️ NEVER commit secrets!)
-- **Seller Address (live cashier / payTo):** `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e` — sole receive wallet. Canonical in `app/agent_surface.py` (`DEFAULT_PAY_TO`), pinned in `render.yaml` and `smithery.yaml`, cited by `docs/BOUNTIES.md` and `/.well-known/funding.json`. Prior receive addresses are retired; pay **only** this cashier. Live Render dashboard `X402_PAY_TO_ADDRESS` must match this value.
-- **Buyer Address (local testing):** `0xc22c17Fca624dB679B2471f2Bb099E1E29a46209` *(~/secrets/ only)*
+- **Seller Address (live cashier / payTo):** `0x05e1720bB82F86B5bc7940a99FDC702E32256357` — sole receive wallet. Canonical in `app/agent_surface.py` (`DEFAULT_PAY_TO`), pinned in `render.yaml` and `smithery.yaml`, cited by `docs/BOUNTIES.md` and `/.well-known/funding.json`. Prior receive addresses are retired; pay **only** this cashier. Live Render dashboard `X402_PAY_TO_ADDRESS` must match this value.
+- **Buyer Address (hot / local testing):** `0xce2b941f877cc96B26fDd4A7eb2c1eF4B7369a51` — private key in local `.keys/buyer-hot.key` only (gitignored).
+- **Key files:** `.keys/*.key` are **local-only**. Do not commit. Rotate immediately if leaked.
 
 ### 🌐 Live Deployment URLs
 - **Main Storefront:** https://x402-mcp.onrender.com
@@ -34,9 +35,8 @@ Live paid catalog — same price strings the machine catalog emits:
 | Chicago Building Violations | `GET /us/chi/property-check` | `$0.01` |
 | Denver STR License Check | `GET /us/den/property-check` | `$0.01` |
 | Austin STR License Check | `GET /us/atx/property-check` | `$0.01` |
-| Miami STR/Certificate of Use Check | `GET /us/mia/property-check` | `$0.01` |
-| Atlanta STR License Check | `GET /us/atl/property-check` | `$0.01` |
 | San Diego STR License Check | `GET /us/sd/property-check` | `$0.01` |
+| Nashville STR Permit Check | `GET /us/bna/property-check` | `$0.01` |
 | SF Housing NOV Check | `GET /us/sf/property-check` | `$0.01` |
 | LA Code Enforcement Open | `GET /us/lax/property-check` | `$0.01` |
 | Boston Property Violations | `GET /us/bos/property-check` | `$0.01` |
@@ -56,10 +56,33 @@ Free samples: `GET /pulse` (Base Network Pulse preview), `GET /us/cities`, `GET 
 - ✅ Buyer wallet `EVM_PRIVATE_KEY` stays local-only (never on Render/Vercel)
 - ✅ Redis quota store with Upstash integration ready
 - ✅ Operator token required for `/quota` endpoint protection
+- ✅ **Add-only change control (2026-09-19):** existing files may not be edited, renamed, or deleted without `kwizzlesurp10-ctrl` clicking Approve on GitHub Environment `operator-approve`. New files are allowed. Direct push to `master` is blocked.
+
+### 🧊 Change control (healthy checkpoint)
+- **Runbook:** `docs/CHANGE-CONTROL.md`
+- **Checkpoint tag:** `healthy-2026-09-16` at `c242834` (pre-lock storefront)
+- **Guard:** `scripts/add_only_guard.py` + `tests/test_add_only_guard.py` (12 tests)
+- **CI:** `.github/workflows/add-only.yml` — required check name `change-control`
+- **CODEOWNERS:** `* @kwizzlesurp10-ctrl`
+- **Grok agent:** `.grok/agents/x402-change-control.md`
+- **Ruleset:** `master-add-only` (PRs required, no force-push, no admin bypass)
+- **Environment:** `operator-approve` — required reviewer `kwizzlesurp10-ctrl`, 15-minute wait, `can_admins_bypass: false`
+- **Notify:** label `change-control`; issues assigned to `kwizzlesurp10-ctrl`. Env vars like `OPERATOR_APPROVED=1` are ignored.
+- **Landed:** PR #561 (add-only files). **Waiting on operator click:** PR #564 (YAML colon fix so jobs actually run) + issue #565.
+- **Honesty:** same-account agents with the owner token can still call the deployment-approve API. 15-minute wait is a cancel window. Strongest upgrade: a second GitHub user as the only Environment reviewer.
+
+### 💵 Verified external sale (issue #526, closed 2026-09-16)
+- **Product:** `base-tx-decision` (`GET /base/tx-decision`) at `$0.01`
+- **Payer class:** external first-time (`is_operator_settle: false`); wallet appears once
+- **Payer:** `0x7ef12be65ed6ec9d8a89c414662e2ac471154ae2`
+- **Tx:** https://basescan.org/tx/0x87811a9be488a36e8334e309672e9792cc0086afe10fe370c89a374ed41cda97 (block 50961197, 2026-09-06 16:22:21 UTC)
+- **payTo:** live cashier `0x05e1720bB82F86B5bc7940a99FDC702E32256357` (the receive address used at sale time was later rotated from  original dev-wallet address meant for demo / testing) (corrected path) ; do not pay retired (dev-wwalet) prefixes)
+- **Not** the first-ever external sale (that remains `0xadacdfdd` on 2026-07-22, later-repriced Pulse)
+- SKU stays **demoted** under `docs/PRODUCT-FOCUS.md` (0.11% conversion; reversal clause is ~1%)
 
 ---
 
-## 🎯 Current Status (August 24, 2026)
+## 🎯 Current Status (September 19, 2026)
 
 ### ✅ Completed Features
 - [x] x402 v2 wire format implementation (challenge generation → payment → verification → settlement)
@@ -80,6 +103,8 @@ Free samples: `GET /pulse` (Base Network Pulse preview), `GET /us/cities`, `GET 
 - [x] Cache invalidation optimization (10s ledger/stats/doctor caches)
 - [x] Tool registry single-source-of-truth enforcement
 - [x] PRO billing schema alignment (Outward/City MN products)
+- [x] Add-only change control: freeze existing files; operator Environment click to mutate (PR #561)
+- [x] Acknowledged external sale #526: `base-tx-decision` $0.01 from `0x7ef12be6…` (closed)
 
 ### ⏳ Roadmap Items
 - [ ] Migrate to production Redis (Upstash recommended)
@@ -183,10 +208,12 @@ docker run -p 8402:8402 x402-mcp
 
 ### ⚠️ Critical Don'ts
 1. **NEVER commit `.env.buyer` or wallet keys** — they're gitignored for a reason
-2. **Don't modify core selling calls** — locked for stability; use `/tasks/` extension pattern instead
-3. **Don't set `EVM_PRIVATE_KEY` on Render/Vercel** — buyer credentials stay local-only
-4. **Don't skip cache invalidation** — stale stats break agent trust decisions
-5. **Don't edit dashboard without isolating risk** — test builds locally first
+2. **Don't modify, delete, or rename existing files** without operator Approve on Environment `operator-approve` (add-only freeze; see `docs/CHANGE-CONTROL.md`)
+3. **Don't modify core selling calls** — locked for stability; use `/tasks/` extension pattern instead
+4. **Don't set `EVM_PRIVATE_KEY` on Render/Vercel** — buyer credentials stay local-only
+5. **Don't skip cache invalidation** — stale stats break agent trust decisions
+6. **Don't edit dashboard without isolating risk** — test builds locally first
+7. **Don't treat `OPERATOR_APPROVED=1` as a bypass** — agents can set env vars; it is ignored
 
 ### ✅ Recommended Approaches
 1. **Use CLAUDE.md for AI guidance** — it contains repo-specific conventions
@@ -290,6 +317,11 @@ curl "https://x402-mcp.onrender.com/us/cities"
 
 ## 🌟 Recent Milestones
 
+### September 2026
+- ✅ Add-only change control live (tag `healthy-2026-09-16`, PR #561, Environment `operator-approve`)
+- ✅ Closed sale-watch issue #526: confirmed external `$0.01` `base-tx-decision` (tx `0x87811a9b…`)
+- ⏳ Operator must Approve PR #564 (workflow YAML colon fix) so the `change-control` check runs on future PRs
+
 ### August 2026
 - ✅ Launched Alpha Sentinel MCP integration (market intelligence tool)
 - ✅ Fixed dashboard mobile responsiveness (≤768px layouts)
@@ -327,8 +359,8 @@ This file evolves automatically through:
 3. **Cron Jobs** — Periodic sanity checks on architecture docs
 4. **User Feedback** — Common questions add troubleshooting tips
 
-**Last auto-updated:** August 24, 2026 at 16:30 UTC  
-**Next review scheduled:** September 1, 2026  
+**Last auto-updated:** September 19, 2026  
+**Next review scheduled:** after PR #564 Environment click + merge  
 
 ---
 

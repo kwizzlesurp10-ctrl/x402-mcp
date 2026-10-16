@@ -21,7 +21,7 @@ from app.swarm import ledger_writer
 client = TestClient(app)
 
 OPERATOR = "0x67ffc9B439aE24B0f7C7cA837C4AdfAFA06F9d38"
-HOT_BUYER = "0x9138fEA6e13a701694D4d598000Fc3c1dE3d594C"
+HOT_BUYER = "0xce2b941f877cc96B26fDd4A7eb2c1eF4B7369a51"
 STRANGER = "0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09"
 
 

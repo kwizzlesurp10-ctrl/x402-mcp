@@ -164,13 +164,13 @@ export default function App() {
         profit_routes: [
           {
             id: "mn_invest",
-            name: "Invest in /mn/property-check",
+            name: "MARC-HD Compliance Verification",
             priority_score: 8.5,
             raw_score: 8.5,
             blocked_by: [],
             human_gated: false,
-            status_note: "PRODUCT-FOCUS unfrozen — improve offer quality on the access-barrier SKU.",
-            next_action: "Ship buyer-facing accuracy and clearer packaging on /mn/property-check.",
+            status_note: "MARC-HD compliance diligence is shipped and live at $0.85.",
+            next_action: "Maintain diligence verification engine and monitor usage.",
           },
           {
             id: "cost_basis_resale",
@@ -413,18 +413,18 @@ export default function App() {
 
   return (
     <Bubble
-      size={30}
-      trail={4}
+      size={15}
+      trail={2}
       follow={0.5}
-      blend={14}
+      blend={8}
       speed={2}
       refraction={80}
       dispersion={1}
       frost={0}
-      shine={0.25}
-      rim={0.5}
-      iridescence={1}
-      intensity={0.9}
+      shine={0.1}
+      rim={0.3}
+      iridescence={0.5}
+      intensity={0.3}
 
       colorA={[0.2902, 0.4549, 0.7216]}
       colorB={[0.4118, 0.4118, 0.4157]}

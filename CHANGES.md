@@ -4,9 +4,26 @@ This file documents deltas **only** within this repository (`x402-mcp/`).
 If this clone sits inside a larger parent workspace, use this manifest for goal
 verification instead of a repo-wide `git status` of the parent tree.
 
-## Sole cashier `0x8A897D54…` (2026-09-13)
+## A2A Discovery & AP2 Protocol Expansion (2026-09-29)
 
-- `smithery.yaml` default + exampleConfig and `render.yaml` `X402_PAY_TO_ADDRESS` now pin `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e` (replaces the retired Smithery default and the unpinned Render dashboard slot)
+- Aligned with Google Agent Payments Protocol (AP2 v1): declared `AP2_EXTENSION_URI` in `app/agent_surface.py` under `capabilities.extensions` alongside `a2a-x402`, with `stateTransitionHistory: True`
+- Enriched `us-rental-diligence-pack` skill schema with explicit multi-city input properties
+- Added active A2A Agent Card discovery module `app/a2a_discovery.py` with URL candidate normalization, SSRF protection (`app.ssrf_guard`), extension inspection, payment rail extraction, and fail-closed resolution
+- Registered new MCP tool `a2a.resolve_card` in `app/tools_registry.py` and FastMCP in `app/mcp_server.py`; bumped `TOOL_COUNT` from 19 to 20
+- Synchronized `README.md` (`20 MCP tools`, `a2a.*` domain routing, tools table)
+- Added zero-spend CDP Bazaar preflight validation CLI `scripts/validate_bazaar_endpoint.py`
+- Added comprehensive unit tests in `tests/test_a2a_discovery.py` and AP2 extension assertion in `tests/test_agent_surface.py`
+
+## Wallet rotation + `.keys` gitignore (2026-09-20)
+
+- Generated new hot-buyer and cold-receive keypairs after prior `.keys/*.key` files were public on GitHub
+- Sole cashier / `DEFAULT_PAY_TO` is now `0x05e1720bB82F86B5bc7940a99FDC702E32256357` (pinned in `smithery.yaml`, `render.yaml`, docs, CI)
+- Private key files removed from git tracking; `.gitignore` keeps `.keys/**` local (README exception only)
+- Prior receive/buyer addresses retired in `tests/test_payto_single_cashier.py`
+
+## Sole cashier pin (2026-09-13)
+
+- `smithery.yaml` default + exampleConfig and `render.yaml` `X402_PAY_TO_ADDRESS` pin the sole cashier
 - `tests/test_payto_single_cashier.py` rejects retired receive prefixes and asserts Smithery + Render match `DEFAULT_PAY_TO`
 - `/doctor` `pay_to` check now FAILs when the configured receive wallet is not the sole cashier
 - `X402_PAY_TO_ADDRESS` is stripped on load — Render's env textarea was appending ` \\n` and poisoning uncached 402s

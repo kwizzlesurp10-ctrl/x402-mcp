@@ -180,6 +180,8 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
       <dt>poll latency</dt><dd><span id="h-spark" class="spark" aria-hidden="true"></span><span id="h-latency">—</span></dd>
       <dt>last poll</dt><dd id="h-lastpoll">—</dd>
       <dt>manifest</dt><dd><a href="/.well-known/mcp">/.well-known/mcp</a></dd>
+      <dt>agent card</dt><dd><a href="/.well-known/agent-card.json">/.well-known/agent-card.json</a></dd>
+      <dt>extensions</dt><dd id="h-extensions">a2a-x402 v0.1 · ap2 v1</dd>
     </dl>
   </section>
 
@@ -204,6 +206,12 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
     <div class="meter-label"><span>Rate limit / min</span><span id="q-rate-num">—</span></div>
     <div class="meter" id="q-rate-meter" aria-hidden="true">░░░░░░░░░░░░░░░░░░░░░░░░</div>
     <p class="hint">Reads /quota/&lt;agent&gt; without consuming a call. Auto-refreshes every 5s. Press <kbd>/</kbd> to focus.</p>
+    <div class="meter-label" style="margin-top:14px"><span>A2A Agent Card Discovery</span></div>
+    <div class="agent-row">
+      <input id="a2a-input" placeholder="target domain or card URL" spellcheck="false" aria-label="A2A Agent Card">
+      <button id="a2a-go" type="button">Resolve</button>
+    </div>
+    <pre id="a2a-result" class="hint" style="max-height:120px;overflow:auto;display:none;background:var(--ink);padding:6px;border:1px solid var(--line);font-size:11px;color:var(--amber);margin-top:4px;white-space:pre-wrap;"></pre>
   </section>
 
   <section id="p-tools">
@@ -561,7 +569,7 @@ async function loadManifest(){
   try{
     const m = await getJSON("/.well-known/mcp");
     $("h-transport").textContent = m.transport.join(" · ");
-    $("h-protocol").textContent = `x402 ${m.x402.protocol_version}`;
+    $("h-protocol").textContent = `x402 ${m.x402.protocol_version} · a2a-x402 · ap2 v1`;
     $("h-network").textContent = m.x402.default_network;
     $("tools-count").textContent = `· ${m.tools.length}`;
     $("tools-body").innerHTML = m.tools.map(t => `
@@ -600,6 +608,24 @@ async function loadUpgrade(){
 function tick(){
   $("clock").textContent = new Date().toISOString().replace("T"," ").slice(0,19) + " UTC";
 }
+
+async function resolveA2ACard(){
+  const target = $("a2a-input").value.trim();
+  if (!target) return;
+  $("a2a-result").style.display = "block";
+  $("a2a-result").textContent = "Resolving agent card (SSRF-guarded)…";
+  try{
+    const res = await getJSON(`/a2a/resolve?url=${encodeURIComponent(target)}`);
+    $("a2a-result").textContent = JSON.stringify(res, null, 2);
+    tape("ok", `a2a resolve — ${target}: ${res.status || "done"}`);
+  }catch(e){
+    $("a2a-result").textContent = `Error: ${e.message}`;
+    tape("err", `a2a resolve failed: ${e.message}`);
+  }
+}
+
+$("a2a-go").addEventListener("click", resolveA2ACard);
+$("a2a-input").addEventListener("keydown", (e) => { if (e.key === "Enter") resolveA2ACard(); });
 
 $("agent-go").addEventListener("click", pollQuota);
 $("agent-input").addEventListener("keydown", (e) => { if (e.key === "Enter") pollQuota(); });

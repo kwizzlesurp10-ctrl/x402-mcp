@@ -211,3 +211,38 @@ def test_doctor_fails_when_redis_store_loses_connection(
     monkeypatch.setattr(commerce, "quota_store", store)
     report = offline_doctor.run_checks()
     assert _redis_check(report)["status"] == "fail"
+
+
+def test_stats_endpoint_reports_redis_when_store_is_redis(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: fakeredis.FakeServer,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    import app.main as main_mod
+
+    store = RedisQuotaStore(_fake_client(fake_server))
+    monkeypatch.setattr(main_mod, "quota_store", store)
+    monkeypatch.setattr(commerce, "quota_store", store)
+    main_mod._stats_cache["time"] = None
+    body = TestClient(main_mod.app).get("/stats").json()
+    assert body["config"]["redis_mode"] == "redis"
+
+
+def test_stats_endpoint_does_not_claim_healthy_redis_on_memory_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    import app.main as main_mod
+
+    fallback = InMemoryQuotaStore()
+    fallback.fallback_reason = "ConnectionError: connection refused"
+    monkeypatch.setattr(main_mod, "quota_store", fallback)
+    monkeypatch.setattr(commerce, "quota_store", fallback)
+    monkeypatch.setattr(settings, "redis_url", "redis://down-host:6379/0")
+    main_mod._stats_cache["time"] = None
+    body = TestClient(main_mod.app).get("/stats").json()
+    assert body["config"]["redis_mode"] == "memory"
+    report = doctor.run_checks()
+    assert _redis_check(report)["status"] == "fail"

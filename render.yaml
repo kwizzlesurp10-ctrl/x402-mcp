@@ -18,7 +18,7 @@ services:
       # payTo is a public receive address, not a secret. Pin it here so a
       # dashboard edit cannot silently split discovery from the live 402.
       - key: X402_PAY_TO_ADDRESS
-        value: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e"
+        value: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
       - key: CDP_API_KEY_ID
         sync: false
       - key: CDP_API_KEY_SECRET
@@ -60,7 +60,7 @@ services:
       # commit. Lets /ledger/revenue and the dashboard tell a real external sale
       # apart from the operator paying itself.
       - key: OPERATOR_WALLETS
-        value: "0x67ffc9B439aE24B0f7C7cA837C4AdfAFA06F9d38,0xc22c17Fca624dB679B2471f2Bb099E1E29a46209,0x9138fEA6e13a701694D4d598000Fc3c1dE3d594C"
+        value: "0x67ffc9B439aE24B0f7C7cA837C4AdfAFA06F9d38,0xc22c17Fca624dB679B2471f2Bb099E1E29a46209,0xce2b941f877cc96B26fDd4A7eb2c1eF4B7369a51"
       # --- seller-only posture ---
       - key: SWARM_ENABLED
         value: "false"        # no buyer role on a public box

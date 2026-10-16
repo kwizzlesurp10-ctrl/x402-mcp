@@ -1,0 +1,174 @@
+name: add-only
+
+# Existing files are frozen. New files are allowed. A modify/delete/rename of a
+# file that already exists:
+#   1. opens a `change-control` issue assigned to kwizzlesurp10-ctrl
+#   2. waits on GitHub Environment `operator-approve` (you click Approve)
+#   3. only then is the required `change-control` check green
+#
+# Env vars like OPERATOR_APPROVED are ignored. Agents can set those.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      mutation: ${{ steps.guard.outputs.mutation }}
+      summary: ${{ steps.guard.outputs.summary }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify add-only vs mutation
+        id: guard
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from add_only_guard import git_name_status, parse_name_status, summarize
+
+          event = os.environ.get("EVENT_NAME", "")
+          head = os.environ["HEAD_SHA"]
+          if event == "pull_request":
+              base = os.environ["PR_BASE"]
+          else:
+              base = os.environ.get("PUSH_BEFORE") or ""
+          if not base or set(base) <= {"0"}:
+              raise SystemExit("no base SHA to diff against; refusing closed")
+          subprocess.check_call(["git", "fetch", "--no-tags", "--depth=50", "origin", base], stdout=subprocess.DEVNULL)
+          entries = parse_name_status(git_name_status(rev_range=f"{base}...{head}"))
+          payload = json.loads(summarize(entries))
+          mutation = "true" if payload["mutation"] else "false"
+          lines = [f"{m.get('status')} {m.get('orig_path', '')} {m['path']}".strip() for m in payload["mutations"]]
+          summary = "; ".join(lines)[:1000]
+          out = os.environ["GITHUB_OUTPUT"]
+          with open(out, "a", encoding="utf-8") as fh:
+              fh.write(f"mutation={mutation}\n")
+              fh.write("summary<<EOF\n")
+              fh.write(summary + "\n")
+              fh.write("EOF\n")
+          print(json.dumps(payload, indent=2))
+          PY
+
+  notify:
+    needs: classify
+    if: needs.classify.outputs.mutation == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Ensure change-control label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh label create change-control --color B60205 --description "Existing-file mutation; needs operator-approve click" --force
+
+      - name: Open change-control issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PYTHONPATH: scripts
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SUMMARY: ${{ needs.classify.outputs.summary }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from alerts import Alerter, event_key, marker
+
+          repo = os.environ["GH_REPO"]
+          pr = os.environ.get("PR_NUMBER") or ""
+          sha = os.environ["HEAD_SHA"]
+          event = os.environ["EVENT_NAME"]
+          ref = os.environ["REF_NAME"]
+          summary = os.environ.get("SUMMARY") or "(see workflow log)"
+          run_url = os.environ["RUN_URL"]
+          subject = f"pr-{pr}" if pr else f"push-{ref}-{sha[:12]}"
+          key = event_key("change-control", subject)
+          title = f"change-control: existing files mutated on {subject}"
+          body = "\n".join([
+              "An agent (or commit) modified, renamed, or deleted a file that already exists.",
+              "",
+              "This repo is add-only. New files are fine. Existing files need a click on GitHub Environment `operator-approve`.",
+              "",
+              f"- event: `{event}`",
+              f"- ref: `{ref}`",
+              f"- sha: `{sha}`",
+              f"- mutations: `{summary}`",
+              f"- workflow: {run_url}",
+              "",
+              "Open the workflow run and Approve the `operator-approve` environment to land this. Reject / wait-timer lets you cancel.",
+              "",
+              "Docs: docs/CHANGE-CONTROL.md",
+          ])
+          alerter = Alerter(repo, "change-control")
+          alerter.alert(key, title, body)
+          print(alerter.summary())
+          needle = marker(key)
+          raw = subprocess.check_output(
+              ["gh", "issue", "list", "--repo", repo, "--label", "change-control",
+               "--state", "open", "--limit", "20", "--json", "number,title"],
+              text=True,
+          )
+          for row in json.loads(raw or "[]"):
+              if needle in (row.get("title") or ""):
+                  subprocess.run(
+                      ["gh", "issue", "edit", str(row["number"]), "--repo", repo,
+                       "--add-assignee", "kwizzlesurp10-ctrl"],
+                      check=False,
+                  )
+                  break
+          PY
+
+  add-only-ok:
+    needs: classify
+    if: needs.classify.outputs.mutation != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "add-only ok — no existing files mutated"
+
+  operator-approve:
+    needs: classify
+    if: needs.classify.outputs.mutation == 'true'
+    environment: operator-approve
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "operator clicked Approve on environment operator-approve"
+
+  change-control:
+    needs: [classify, add-only-ok, operator-approve]
+    if: always() && needs.classify.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require add-only path or operator click
+        run: |
+          add="${{ needs.add-only-ok.result }}"
+          op="${{ needs.operator-approve.result }}"
+          echo "add-only-ok=$add operator-approve=$op"
+          if [ "$add" = "success" ] || [ "$op" = "success" ]; then
+            echo "change-control: pass"
+            exit 0
+          fi
+          echo "change-control: fail — existing files mutated and operator has not approved"
+          exit 1

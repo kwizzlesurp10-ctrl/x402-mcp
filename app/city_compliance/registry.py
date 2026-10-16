@@ -8,6 +8,7 @@ from typing import Any
 from app.city_compliance.cities import (
     atl,
     atx,
+    bna,
     bos,
     chi,
     den,
@@ -44,6 +45,7 @@ _MODULES: tuple[ModuleType, ...] = (
     gain,  # Gainesville, FL
     kc,  # Kansas City, MO
     atx,  # Austin, TX
+    bna,  # Nashville, TN
     mia,  # Miami, FL
     atl,  # Atlanta, GA
     sd,  # San Diego, CA

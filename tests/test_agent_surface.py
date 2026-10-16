@@ -211,6 +211,13 @@ def test_agent_card_declares_x402_extension_and_funding() -> None:
     assert body["funding"]["assetSymbol"] == "USDC"
 
 
+def test_agent_card_declares_ap2_extension() -> None:
+    body = client.get("/.well-known/agent-card.json").json()
+    exts = body["capabilities"].get("extensions") or []
+    assert any("ap2" in (e.get("uri") or "") for e in exts)
+    assert body["capabilities"].get("stateTransitionHistory") is True
+
+
 def test_well_known_x402_includes_payto() -> None:
     body = client.get("/.well-known/x402").json()
     assert body["payTo"].lower().startswith("0x")
@@ -283,6 +290,10 @@ def test_agentic_market_json_served_at_well_known() -> None:
     assert "us-rental-diligence" in service_ids
     assert "us-city-compliance-network" in service_ids
     assert "x402-mailrail-postmaster" in service_ids
+    city_net = next(s for s in body["services"] if s["id"] == "us-city-compliance-network")
+    assert "bna" in city_net.get("jurisdictions", [])
+    diligence = next(s for s in body["services"] if s["id"] == "us-rental-diligence")
+    assert diligence["url"].endswith("/tasks/us-rental-diligence")
     assert "swarm" in body
     assert len(body["swarm"]["agents"]) == 7
 

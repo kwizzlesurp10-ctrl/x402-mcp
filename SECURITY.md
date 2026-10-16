@@ -41,4 +41,6 @@ Include as much detail as possible:
 
 This policy covers the x402-mcp codebase, its dependencies as used in the project, the seller storefront endpoints, payment verification/settlement paths, quota and Redis stores, and the operator dashboard. Issues in upstream x402 SDKs, Coinbase CDP, or third-party facilitators should be reported to their respective maintainers; we will still assist in triage when relevant.
 
+MailRail send/inbound and message ledgers are **operator-only**. They are not public MCP tools. HTTP ingest/ledger/inbox/stats require `Authorization: Bearer $OPERATOR_TOKEN` and fail closed if the token is unset. See [docs/MAILRAIL-PUBLIC-SURFACE.md](docs/MAILRAIL-PUBLIC-SURFACE.md).
+
 Thank you for helping keep x402-mcp and the agent commerce ecosystem secure.

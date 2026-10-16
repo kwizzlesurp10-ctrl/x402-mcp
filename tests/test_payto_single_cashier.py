@@ -15,12 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 client = TestClient(app)
 
 # Sole live seller cashier. Discovery, 402, Smithery, and Render must agree.
-CANONICAL_PAY_TO = "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e"
+CANONICAL_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
 
 # Former receive addresses. Paying either does not credit the live cashier.
 RETIRED_PAY_TO_PREFIXES = (
     "0xAB745e5F",  # pre-2026-09 retired bounty / Smithery default
-    "0xcA6791f9",  # Render dashboard drift; must not be advertised
+    "0xcA6791f9",  # leaked cold-receive.key / Render dashboard drift
+    "0x8A897D54",  # prior live cashier rotated 2026-09-20
+    "0x9138fEA6",  # leaked buyer-hot.key
 )
 
 PUBLIC_SURFACES = (
