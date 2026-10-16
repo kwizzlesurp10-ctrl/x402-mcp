@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -61,7 +61,7 @@ INSTRUCTIONS = (
     "ops.metrics host health, city.* US open-data property compliance. "
     "Buyer path: x402.discover → x402.probe → x402.pay_and_fetch. "
     "City path: city.list → city.sample → city.check. "
-    "Pro quota: commerce.pro_requirements → pay → commerce.activate_pro. "
+    "Pro quota: commerce.activate_pro (MCP x402/payment) or commerce.pro_requirements → pay → activate. "
     "Credits: commerce.credits_requirements → pay → commerce.purchase_credits. "
     "Public seller hosts have no spend key — probe tools still work; "
     "pay-and-fetch needs EVM_PRIVATE_KEY. Every tool response includes commerce meta."
@@ -572,29 +572,52 @@ async def get_pro_upgrade_requirements(
     title="Activate Pro tier",
     description=(
         "Verify a Pro-tier x402 payment and unlock Pro quota limits for the agent. "
-        "Call after commerce.pro_requirements and a completed USDC payment."
+        "MCP-native: call without payment to receive x402 requirements in the tool result, "
+        "then retry with _meta['x402/payment'] (@x402/mcp client). "
+        "Legacy: pass PAYMENT-SIGNATURE + PAYMENT-REQUIRED after commerce.pro_requirements."
     ),
     annotations=WRITE_PAYMENT,
 )
 async def activate_pro_tier(
     payment_signature: Desc[
-        str,
-        Field(description="PAYMENT-SIGNATURE from the Pro-tier USDC payment."),
-    ],
+        str | None,
+        Field(
+            description=(
+                "Legacy HTTP-style PAYMENT-SIGNATURE. Omit for MCP x402/payment transport."
+            ),
+        ),
+    ] = None,
     payment_required: Desc[
-        str,
-        Field(description="PAYMENT-REQUIRED JSON returned by commerce.pro_requirements."),
-    ],
+        str | None,
+        Field(
+            description=(
+                "Legacy PAYMENT-REQUIRED from commerce.pro_requirements. "
+                "Ignored when using MCP _meta payment."
+            ),
+        ),
+    ] = None,
     agent_id: Desc[
         str | None,
         Field(description="Agent identity to grant Pro quota. Must match the requirements call."),
     ] = None,
+    ctx: Context | None = None,
 ) -> str:
-    return await _execute_tool(
+    from app import mcp_x402_payment
+
+    return await mcp_x402_payment.handle_commerce_mcp_tool(
         "commerce.activate_pro",
-        agent_id,
-        lambda resolved: x402_services.activate_pro_tier(
-            payment_signature, payment_required, resolved
+        agent_id=agent_id,
+        ctx=ctx,
+        payment_signature=payment_signature,
+        payment_required=payment_required,
+        credits=None,
+        legacy_executor=lambda resolved: x402_services.activate_pro_tier(
+            payment_signature or "",
+            payment_required or "",
+            resolved,
+        ),
+        mcp_grant=lambda resolved, verification: x402_services.grant_pro_tier_after_settlement(
+            resolved, verification
         ),
     )
 
@@ -636,19 +659,21 @@ async def get_tool_credits_requirements(
     title="Purchase tool credits",
     description=(
         "Verify an x402 payment and add per-use tool credits to the agent. "
-        "Call after commerce.credits_requirements and a completed USDC payment."
+        "MCP-native: call without payment for x402 requirements, then retry with "
+        "_meta['x402/payment']. Legacy: PAYMENT-SIGNATURE + PAYMENT-REQUIRED after "
+        "commerce.credits_requirements."
     ),
     annotations=WRITE_PAYMENT,
 )
 async def purchase_tool_credits(
     payment_signature: Desc[
-        str,
-        Field(description="PAYMENT-SIGNATURE from the credits USDC payment."),
-    ],
+        str | None,
+        Field(description="Legacy PAYMENT-SIGNATURE. Omit for MCP x402/payment transport."),
+    ] = None,
     payment_required: Desc[
-        str,
-        Field(description="PAYMENT-REQUIRED JSON returned by commerce.credits_requirements."),
-    ],
+        str | None,
+        Field(description="Legacy PAYMENT-REQUIRED from commerce.credits_requirements."),
+    ] = None,
     credits: Desc[
         int | None,
         Field(description="Credit pack size that was purchased. Must match the requirements call."),
@@ -657,15 +682,36 @@ async def purchase_tool_credits(
         str | None,
         Field(description="Agent identity to credit."),
     ] = None,
+    ctx: Context | None = None,
 ) -> str:
+    from app import mcp_x402_payment
+    from app.commerce_payment import credits_to_grant
+
     pack = credits or settings.tool_credit_pack_size
 
-    return await _execute_tool(
+    def _mcp_grant(resolved: str, verification: dict) -> dict:
+        challenge = mcp_x402_payment.resolve_commerce_challenge(
+            "commerce.purchase_credits", resolved, pack
+        )
+        paid = credits_to_grant(challenge, pack)
+        return x402_services.grant_tool_credits_after_settlement(
+            resolved, paid, verification
+        )
+
+    return await mcp_x402_payment.handle_commerce_mcp_tool(
         "commerce.purchase_credits",
-        agent_id,
-        lambda resolved: x402_services.purchase_tool_credits(
-            payment_signature, payment_required, resolved, pack
+        agent_id=agent_id,
+        ctx=ctx,
+        payment_signature=payment_signature,
+        payment_required=payment_required,
+        credits=pack,
+        legacy_executor=lambda resolved: x402_services.purchase_tool_credits(
+            payment_signature or "",
+            payment_required or "",
+            resolved,
+            pack,
         ),
+        mcp_grant=_mcp_grant,
     )
 
 

@@ -84,7 +84,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "name": "commerce.activate_pro",
         "description": (
             "Verify a Pro-tier x402 payment and unlock Pro quota limits for the agent. "
-            "Call after commerce.pro_requirements and a completed USDC payment."
+            "MCP-native: call unpaid for x402 requirements, retry with _meta x402/payment; "
+            "or legacy PAYMENT-SIGNATURE after commerce.pro_requirements."
         ),
         "tier": "free",
     },
@@ -101,7 +102,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "name": "commerce.purchase_credits",
         "description": (
             "Verify an x402 payment and add per-use tool credits to the agent. "
-            "Call after commerce.credits_requirements and a completed USDC payment."
+            "MCP-native: unpaid call + _meta x402/payment retry; or legacy headers after "
+            "commerce.credits_requirements."
         ),
         "tier": "free",
     },
