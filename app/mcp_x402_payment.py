@@ -33,11 +33,18 @@ CommerceMcpTool = Literal["commerce.activate_pro", "commerce.purchase_credits"]
 
 # Idempotent settlement cache: payment fingerprint → verify+settle result dict.
 _settlement_cache: dict[str, dict[str, Any]] = {}
+# Grant cache: tool + agent + payment fingerprint → fulfillment payload (no double credit).
+_fulfillment_cache: dict[str, dict[str, Any]] = {}
 
 
 def clear_mcp_settlement_cache() -> None:
     """Test helper: reset in-memory settlement idempotency cache."""
     _settlement_cache.clear()
+    _fulfillment_cache.clear()
+
+
+def _fulfillment_cache_key(tool_name: str, agent_id: str, payment_key: str) -> str:
+    return f"{tool_name}|{agent_id}|{payment_key}"
 
 
 def extract_payment_from_context(ctx: Any) -> dict[str, Any] | None:
@@ -160,9 +167,6 @@ async def verify_and_settle_mcp_payload(
         return _invalid_payment_result(f"malformed_payment: {exc}")
 
     cache_key = _idempotency_key(payload)
-    cached = _settlement_cache.get(cache_key)
-    if cached is not None:
-        return cached
 
     accepts = _payment_requirements_models(challenge.payment_required_header)
     if not accepts:
@@ -175,6 +179,10 @@ async def verify_and_settle_mcp_payload(
         return _invalid_payment_result(
             "payment does not match server-authored requirements (payTo/amount/network)"
         )
+
+    cached = _settlement_cache.get(cache_key)
+    if cached is not None and cached.get("payment_settled"):
+        return cached
 
     try:
         verify_result = await server.verify_payment(payload, matched)
@@ -269,16 +277,6 @@ async def handle_commerce_mcp_tool(
             description=desc,
         )
 
-    try:
-        snapshot = quota_store.consume_quota(resolved)
-    except QuotaExceededError as exc:
-        return build_payment_required_result(
-            tool_name=tool_name,
-            challenge_header=_issue_challenge_header(tool_name, resolved, credits),
-            description="quota exceeded",
-            error_message=str(exc.detail.get("error", "quota_exceeded")),
-        )
-
     challenge = resolve_commerce_challenge(tool_name, resolved, credits)
     settlement = await verify_and_settle_mcp_payload(mcp_payment, challenge)
     if not settlement.get("is_valid") or not settlement.get("payment_settled"):
@@ -294,10 +292,24 @@ async def handle_commerce_mcp_tool(
             error_message=str(reason),
         )
 
-    data = mcp_grant(resolved, settlement)
+    try:
+        payload = PaymentPayload.model_validate(mcp_payment)
+    except Exception:  # noqa: BLE001
+        payload = None
+    grant_key = (
+        _fulfillment_cache_key(tool_name, resolved, _idempotency_key(payload))
+        if payload is not None
+        else None
+    )
+    if grant_key is not None and grant_key in _fulfillment_cache:
+        data = _fulfillment_cache[grant_key]
+    else:
+        data = mcp_grant(resolved, settlement)
+        if grant_key is not None:
+            _fulfillment_cache[grant_key] = data
     from app.ops_events import emit_tool_event
 
-    meta = quota_store.build_meta(snapshot)
+    meta = quota_store.build_meta(quota_store.peek(resolved))
     emit_tool_event(tool_name, resolved, meta.model_dump())
     return _success_call_tool_result(ToolResponse(data=data, meta=meta), settlement)
 
