@@ -146,7 +146,21 @@ def normalize_street_query(address: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if not cleaned:
         return ""
-    return " ".join(_STREET_TOKEN_MAP.get(token, token) for token in cleaned.split())
+    tokens = [_STREET_TOKEN_MAP.get(token, token) for token in cleaned.split()]
+    merged: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if (
+            i + 1 < len(tokens)
+            and tokens[i] in ("N", "S")
+            and tokens[i + 1] in ("E", "W")
+        ):
+            merged.append(tokens[i] + tokens[i + 1])
+            i += 2
+        else:
+            merged.append(tokens[i])
+            i += 1
+    return " ".join(merged)
 
 
 def _distinct_parcels(
