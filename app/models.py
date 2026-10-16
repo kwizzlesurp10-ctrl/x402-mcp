@@ -37,7 +37,7 @@ class DiscoverServicesInput(BaseModel):
 
     query: str | None = Field(
         default=None,
-        description="Optional keyword filter applied client-side to discovered services",
+        description="Optional Bazaar search query (server-side CDP discovery search)",
     )
     limit: int = Field(default=20, ge=1, le=100, description="Max services to return")
     max_price_usdc: float | None = Field(

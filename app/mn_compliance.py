@@ -17,6 +17,8 @@ Owner phone/email exist in the source data but are intentionally not served.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +26,17 @@ from typing import Any
 import httpx
 
 from app.config import settings
+
+log = logging.getLogger("x402.mn_compliance")
+
+CANONICAL_MN_DATA_BASE_URL = (
+    "https://services.arcgis.com/afSMGVsC7QlRK1kZ/ArcGIS/rest/services"
+)
+# Render/env typos that fail fast with ArcGIS "Invalid URL" — override to canonical.
+_STALE_MN_BASE_URL_MARKERS = ("afSMGVsArcGISTools",)
+
+_QUERY_ATTEMPTS = 3
+_QUERY_BACKOFF_SECONDS = (0.4, 1.0, 2.0)
 
 # ---- TTL cache for ArcGIS responses ----------------------------------------
 # Avoids re-hitting the city endpoint for repeated queries within the window.
@@ -95,24 +108,82 @@ def _iso(epoch_ms: Any) -> str | None:
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).date().isoformat()
 
 
+def effective_mn_data_base_url() -> str:
+    """Return the ArcGIS services root, correcting known stale env overrides."""
+    configured = (settings.mn_data_base_url or "").strip().rstrip("/")
+    lowered = configured.lower()
+    if configured and any(m.lower() in lowered for m in _STALE_MN_BASE_URL_MARKERS):
+        log.warning(
+            "mn_data_base_url looks stale (%s); using canonical Minneapolis host",
+            configured,
+        )
+        return CANONICAL_MN_DATA_BASE_URL
+    return configured or CANONICAL_MN_DATA_BASE_URL
+
+
+def _require_feature_server_json(
+    response: httpx.Response, dataset: str
+) -> dict[str, Any]:
+    ctype = (response.headers.get("content-type") or "").lower()
+    if "json" not in ctype and "javascript" not in ctype:
+        raise ValueError(
+            f"{dataset} returned non-JSON ({ctype or 'missing content-type'})"
+        )
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"{dataset} FeatureServer JSON is not an object")
+    if "error" in payload:
+        err = payload["error"]
+        message = err.get("message") if isinstance(err, dict) else err
+        raise ValueError(f"{dataset} query error: {message}")
+    if "features" not in payload:
+        raise ValueError(f"{dataset} FeatureServer response missing features")
+    return payload
+
+
+def _http_headers() -> dict[str, str]:
+    return {
+        "Accept": "application/json",
+        "User-Agent": f"x402-mcp-mn-compliance/1.0 ({settings.contact_email})",
+    }
+
+
 async def _query(
     client: httpx.AsyncClient, dataset: str, where: str, out_fields: str, limit: int
 ) -> list[dict]:
-    response = await client.get(
-        f"{settings.mn_data_base_url}/{dataset}/FeatureServer/0/query",
-        params={
-            "where": where,
-            "outFields": out_fields,
-            "resultRecordCount": limit,
-            "returnGeometry": "false",
-            "f": "json",
-        },
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if "error" in payload:
-        raise ValueError(f"{dataset} query error: {payload['error']}")
-    return [f["attributes"] for f in payload.get("features", [])]
+    base = effective_mn_data_base_url()
+    url = f"{base}/{dataset}/FeatureServer/0/query"
+    params = {
+        "where": where,
+        "outFields": out_fields,
+        "resultRecordCount": limit,
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    last_exc: Exception | None = None
+    for attempt in range(_QUERY_ATTEMPTS):
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            payload = _require_feature_server_json(response, dataset)
+            return [f["attributes"] for f in payload.get("features", [])]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            last_exc = exc
+            if attempt + 1 < _QUERY_ATTEMPTS:
+                await asyncio.sleep(_QUERY_BACKOFF_SECONDS[attempt])
+    raise RuntimeError(
+        f"{dataset} open-data query failed after {_QUERY_ATTEMPTS} attempts"
+    ) from last_exc
+
+
+async def _query_optional(
+    client: httpx.AsyncClient, dataset: str, where: str, out_fields: str, limit: int
+) -> list[dict]:
+    try:
+        return await _query(client, dataset, where, out_fields, limit)
+    except Exception:
+        log.warning("MN optional join %s failed (degraded response)", dataset, exc_info=True)
+        return []
 
 
 async def check_property(address: str) -> dict[str, Any]:
@@ -123,7 +194,11 @@ async def check_property(address: str) -> dict[str, Any]:
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient(timeout=25.0) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0, read=40.0),
+        follow_redirects=True,
+        headers=_http_headers(),
+    ) as client:
         licenses = await _query(
             client,
             "Active_Rental_Licenses",
@@ -136,7 +211,6 @@ async def check_property(address: str) -> dict[str, Any]:
         violations: list[dict] = []
         condemned: list[dict] = []
         if apns:
-            import asyncio
             apn_list = ", ".join(f"'{_escape(a)}'" for a in apns)
             violations, condemned = await asyncio.gather(
                 _query(
@@ -146,18 +220,16 @@ async def check_property(address: str) -> dict[str, Any]:
                     VIOLATION_FIELDS,
                     200,
                 ),
-                _query(
+                _query_optional(
                     client,
                     "Condemned_by_Boarding",
                     f"APN IN ({apn_list})",
                     CONDEMNED_FIELDS,
                     10,
-                )
+                ),
             )
         else:
-            # No license found — still check condemned/boarded by address so a
-            # completely unlicensed problem property is not reported as clean.
-            condemned = await _query(
+            condemned = await _query_optional(
                 client,
                 "Condemned_by_Boarding",
                 f"UPPER(Address) LIKE '{needle}%'",
@@ -237,13 +309,15 @@ async def check_property(address: str) -> dict[str, Any]:
             ],
         },
         "sources": [
-            f"{settings.mn_data_base_url}/Active_Rental_Licenses/FeatureServer/0",
-            f"{settings.mn_data_base_url}/CaseViolations/FeatureServer/0",
-            f"{settings.mn_data_base_url}/Condemned_by_Boarding/FeatureServer/0",
+            f"{effective_mn_data_base_url()}/Active_Rental_Licenses/FeatureServer/0",
+            f"{effective_mn_data_base_url()}/CaseViolations/FeatureServer/0",
+            f"{effective_mn_data_base_url()}/Condemned_by_Boarding/FeatureServer/0",
         ],
         "disclaimer": (
             "Public records from City of Minneapolis Open Data, served as-is; "
-            "not legal advice. Verify with the city before acting."
+            "not legal advice. Verify with the city before acting. "
+            "Condemned/boarded join may be omitted when that ArcGIS layer is "
+            "temporarily unavailable."
         ),
         "generated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }

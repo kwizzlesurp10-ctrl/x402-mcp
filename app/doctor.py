@@ -315,7 +315,7 @@ def run_checks() -> dict[str, Any]:
         )
     )
 
-    ok, detail = _ping_url(settings.cdp_discovery_url)
+    ok, detail = _ping_url(f"{settings.cdp_discovery_search_url}?limit=1")
     checks.append(
         _check(
             "discovery",

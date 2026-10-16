@@ -105,6 +105,9 @@ class Settings(BaseSettings):
     cdp_discovery_url: str = (
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
+    cdp_discovery_search_url: str = (
+        "https://api.cdp.coinbase.com/platform/v2/x402/discovery/search"
+    )
 
     # Bazaar discoverability: when a 402 challenge is built with a resource_url,
     # embed the bazaar discovery extension + service metadata so a settled

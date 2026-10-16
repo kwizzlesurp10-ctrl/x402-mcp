@@ -316,6 +316,7 @@ class _MockArcGIS(BaseHTTPRequestHandler):
 
 @pytest.fixture()
 def mock_arcgis(monkeypatch: pytest.MonkeyPatch) -> str:
+    mn_compliance._cache.clear()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _MockArcGIS)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
