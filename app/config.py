@@ -220,6 +220,10 @@ class Settings(BaseSettings):
     mailrail_admin_recipient: str | None = None
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
+    # Only these agent ids may use MailRail HTTP/MCP (comma-separated).
+    mailrail_allowed_agent_ids: str = "x402-mailrail-postmaster"
+    github_token: str | None = None
+    github_repo: str = "kwizzlesurp10-ctrl/x402-mcp"
 
     # Autonomous Cache Warmer & Pulse Auto-Freshness Engine
     cache_warmer_enabled: bool = True

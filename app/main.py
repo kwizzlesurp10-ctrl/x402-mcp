@@ -707,19 +707,10 @@ async def stats_snapshot() -> dict:
 
 
 def _mailrail_operator_guard(request: Request) -> None:
-    """Fail closed: MailRail message surfaces need OPERATOR_TOKEN bearer auth."""
-    token = settings.operator_token
-    if not token:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error": "unauthorized",
-                "detail": "MailRail send/inbound/ledgers require OPERATOR_TOKEN",
-            },
-        )
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {token}":
-        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+    """Fail closed: OPERATOR_TOKEN plus the MailRail postmaster agent id."""
+    from app.mailrail_agent import authorize_http
+
+    authorize_http(request)
 
 
 @app.get("/mailrail/health")
@@ -729,7 +720,17 @@ async def mailrail_health() -> dict:
         "ok": True,
         "enabled": settings.mailrail_enabled,
         "provider": settings.mailrail_provider,
+        "agent_id": "x402-mailrail-postmaster",
+        "public": False,
     }
+
+
+@app.get("/agent/mailrail")
+async def mailrail_agent_card() -> dict:
+    """Public card for the dedicated MailRail postmaster agent (no ledgers)."""
+    from app.mailrail_agent import agent_card
+
+    return agent_card()
 
 
 @app.get("/mailrail/ledger")

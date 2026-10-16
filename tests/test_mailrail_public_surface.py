@@ -57,13 +57,31 @@ def test_wrong_bearer_is_401(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def test_operator_bearer_without_mailrail_agent_is_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "operator_token", "s3cret")
+    client = TestClient(app)
+    res = client.get("/mailrail/ledger", headers={"Authorization": "Bearer s3cret"})
+    assert res.status_code == 403
+    detail = res.json().get("detail") or {}
+    assert detail.get("error") == "forbidden"
+    assert detail.get("required_agent_id") == "x402-mailrail-postmaster"
+
+
 def test_operator_bearer_can_read_empty_ledger(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     monkeypatch.setattr(settings, "operator_token", "s3cret")
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", tmp_path / "mailrail.jsonl")
     client = TestClient(app)
-    res = client.get("/mailrail/ledger", headers={"Authorization": "Bearer s3cret"})
+    res = client.get(
+        "/mailrail/ledger",
+        headers={
+            "Authorization": "Bearer s3cret",
+            "X-Agent-Id": "x402-mailrail-postmaster",
+        },
+    )
     assert res.status_code == 200
     assert res.json()["count"] == 0
 

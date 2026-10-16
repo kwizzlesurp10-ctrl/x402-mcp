@@ -100,25 +100,31 @@ def _dispatch_webhook(to: str, subject: str, body: str) -> bool:
 
 
 def send_agent_mail(
-    to: str,
+    to: str | None,
     subject: str,
     body: str,
     event_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    notify_operator_after: bool = False,
 ) -> dict[str, Any]:
     """Send an email / notification via MailRail.
 
     Returns dict containing status ('sent', 'deduplicated', 'disabled', or 'failed'),
     message_id, and delivery timestamp.
     """
-    key = event_id or event_key(to, subject, body[:100])
+    from app.mailrail_agent import AGENT_ID, operator_notify_email
+
+    recipient = to or operator_notify_email()
+    meta = dict(metadata or {})
+    meta.setdefault("agent_id", AGENT_ID)
+    key = event_id or event_key(recipient, subject, body[:100])
 
     if key in _SEEN_KEYS:
         log.info("MailRail dedup hit for key %s; suppressing.", key)
         return {
             "status": "deduplicated",
             "event_id": key,
-            "to": to,
+            "to": recipient,
             "subject": subject,
             "delivered": False,
         }
@@ -132,34 +138,49 @@ def send_agent_mail(
 
     if settings.mailrail_enabled:
         if provider == "resend":
-            live_success = _dispatch_resend(to, clean_subject, clean_body)
+            live_success = _dispatch_resend(recipient, clean_subject, clean_body)
         elif provider == "webhook":
-            live_success = _dispatch_webhook(to, clean_subject, clean_body)
+            live_success = _dispatch_webhook(recipient, clean_subject, clean_body)
 
     record = {
         "ts": now_iso,
         "event_id": key,
-        "to": to,
+        "to": recipient,
         "from": settings.mailrail_from_address,
         "subject": clean_subject,
         "body": clean_body,
         "provider": provider,
-        "metadata": metadata or {},
+        "metadata": meta,
         "status": "sent" if live_success else "dispatch_failed",
     }
 
     _record_mail_ledger(record)
     _SEEN_KEYS.add(key)
 
-    log.info("MailRail dispatched mail to %s via %s (event_id=%s)", to, provider, key)
-    return {
+    log.info("MailRail dispatched mail to %s via %s (event_id=%s)", recipient, provider, key)
+    result = {
         "status": "sent" if live_success else "dispatch_failed",
         "event_id": key,
-        "to": to,
+        "to": recipient,
         "subject": clean_subject,
         "delivered": live_success,
         "timestamp": now_iso,
+        "agent_id": meta.get("agent_id"),
     }
+    if notify_operator_after:
+        try:
+            from app.mailrail_agent import notify_operator
+
+            already = recipient.lower() == operator_notify_email().lower()
+            result["operator_notify"] = notify_operator(
+                clean_subject,
+                clean_body,
+                event_id=key,
+                already_emailed=already,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("operator notify after send failed: %s", exc)
+    return result
 
 
 def format_settlement_receipt(
@@ -195,6 +216,10 @@ def process_inbound_mail(
     clean_body = defuse_mentions(body)
     inbound_id = event_key("inbound", sender, clean_subject, clean_body[:50])
 
+    from app.mailrail_agent import AGENT_ID
+
+    inbound_meta = dict(metadata or {})
+    inbound_meta.setdefault("agent_id", AGENT_ID)
     record = {
         "ts": now_iso,
         "inbound_id": inbound_id,
@@ -202,20 +227,33 @@ def process_inbound_mail(
         "to": settings.mailrail_from_address,
         "subject": clean_subject,
         "body": clean_body,
-        "metadata": metadata or {},
+        "metadata": inbound_meta,
         "status": "received",
     }
 
     _record_inbound_ledger(record)
     log.info("MailRail ingested inbound mail from %s (inbound_id=%s)", sender, inbound_id)
-    return {
+    result = {
         "status": "received",
         "inbound_id": inbound_id,
         "from": sender,
         "to": settings.mailrail_from_address,
         "subject": clean_subject,
         "timestamp": now_iso,
+        "agent_id": inbound_meta.get("agent_id"),
     }
+    try:
+        from app.mailrail_agent import notify_operator
+
+        result["operator_notify"] = notify_operator(
+            f"[MailRail inbound] {clean_subject}",
+            f"From: {sender}\n\n{clean_body}",
+            event_id=inbound_id,
+            already_emailed=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("operator notify after inbound failed: %s", exc)
+    return result
 
 
 def get_inbox_messages(limit: int = 50) -> list[dict[str, Any]]:

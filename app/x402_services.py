@@ -9,6 +9,13 @@ from typing import Any
 import httpx
 
 from app.commerce import quota_store
+from app.commerce_payment import (
+    credits_to_grant,
+    resolve_credits_authoritative_header,
+    resolve_pro_authoritative_header,
+    store_credits_challenge,
+    store_pro_challenge,
+)
 from app.config import settings
 from app.models import (
     BuildSellerRequirementsInput,
@@ -878,6 +885,7 @@ def build_pro_upgrade_requirements(agent_id: str) -> dict[str, Any]:
         "monthly_quota": settings.pro_tier_monthly_quota,
         "rate_limit_per_min": settings.pro_tier_rate_limit_per_min,
     }
+    store_pro_challenge(agent_id, result)
     return result
 
 
@@ -1084,20 +1092,27 @@ def build_tool_credits_requirements(agent_id: str, credits: int) -> dict[str, An
     result["purpose"] = "tool_credits"
     result["agent_id"] = agent_id
     result["credits"] = credits
+    store_credits_challenge(agent_id, credits, result)
     return result
 
 
 async def purchase_tool_credits(
     payment_signature: str,
-    payment_required: str,
+    payment_required: str,  # noqa: ARG001 — ignored; server challenge is authoritative
     agent_id: str,
     credits: int,
 ) -> dict[str, Any]:
     """Verify + settle x402 payment, then credit agent balance (per-use revenue)."""
+    challenge = resolve_credits_authoritative_header(
+        agent_id,
+        credits,
+        rebuild=lambda: build_tool_credits_requirements(agent_id, credits),
+    )
+    credits_paid = credits_to_grant(challenge, credits)
     payment = await _verify_and_settle_payment(
         VerifyPaymentInput(
             payment_signature=payment_signature,
-            payment_required=payment_required,
+            payment_required=challenge.payment_required_header,
         )
     )
     if not payment["is_valid"]:
@@ -1110,13 +1125,13 @@ async def purchase_tool_credits(
             f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
-    balance = quota_store.add_credits(agent_id, credits)
+    balance = quota_store.add_credits(agent_id, credits_paid)
     snapshot = quota_store.peek(agent_id)
 
     return {
         "credited": True,
         "agent_id": agent_id,
-        "credits_purchased": credits,
+        "credits_purchased": credits_paid,
         "tool_credits_remaining": balance,
         "tier": snapshot.tier,
         "payment_settled": payment["payment_settled"],
@@ -1126,14 +1141,18 @@ async def purchase_tool_credits(
 
 async def activate_pro_tier(
     payment_signature: str,
-    payment_required: str,
+    payment_required: str,  # noqa: ARG001 — ignored; server challenge is authoritative
     agent_id: str,
 ) -> dict[str, Any]:
     """Verify + settle x402 pro-tier payment and unlock pro quota."""
+    challenge = resolve_pro_authoritative_header(
+        agent_id,
+        rebuild=lambda: build_pro_upgrade_requirements(agent_id),
+    )
     payment = await _verify_and_settle_payment(
         VerifyPaymentInput(
             payment_signature=payment_signature,
-            payment_required=payment_required,
+            payment_required=challenge.payment_required_header,
         )
     )
     if not payment["is_valid"]:
