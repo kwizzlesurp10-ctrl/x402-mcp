@@ -33,6 +33,113 @@ async def test_discover_services_structure() -> None:
     assert "services" in result
     assert "count" in result
     assert isinstance(result["services"], list)
+    assert result["count"] == len(result["services"])
+    assert "partial_results" in result
+
+
+@pytest.mark.asyncio
+async def test_discover_services_search_query_uses_cdp_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: server-side search must not empty-filter a non-empty CDP page."""
+    from app.config import settings
+
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "partialResults": False,
+                "resources": [
+                    {
+                        "description": "Weather forecast",
+                        "accepts": [{"amount": "2000", "network": "eip155:8453"}],
+                    }
+                ],
+                "searchMethod": "keyword",
+            }
+
+    async def fake_get(self, url: str, params=None, **kwargs):  # noqa: ANN001
+        captured["url"] = url
+        captured["params"] = dict(params or {})
+        return _FakeResponse()
+
+    monkeypatch.setattr(settings, "cdp_discovery_search_url", "https://discovery.test/search")
+    monkeypatch.setattr(
+        x402_services,
+        "_facilitator_client",
+        lambda network=None: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    params = DiscoverServicesInput(query="weather", limit=5)
+    result = await x402_services.discover_services(params)
+
+    assert captured["url"] == "https://discovery.test/search"
+    assert captured["params"]["query"] == "weather"
+    assert captured["params"]["limit"] == 5
+    assert result["count"] == 1
+    assert result["services"][0]["description"] == "Weather forecast"
+    assert result["facilitator_supported"] is None
+
+
+@pytest.mark.asyncio
+async def test_discover_services_does_not_filter_by_seller_pay_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Buyer catalog search must not scope to this storefront's cashier payTo."""
+    from app.config import settings
+
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"partialResults": False, "resources": []}
+
+    async def fake_get(self, url: str, params=None, **kwargs):  # noqa: ANN001
+        captured["params"] = dict(params or {})
+        return _FakeResponse()
+
+    monkeypatch.setattr(
+        settings,
+        "x402_pay_to_address",
+        "0x05e1720bB82F86B5bc7940a99FDC702E32256357",
+    )
+    monkeypatch.setattr(settings, "cdp_discovery_search_url", "https://discovery.test/search")
+    monkeypatch.setattr(
+        x402_services,
+        "_facilitator_client",
+        lambda network=None: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    monkeypatch.setattr("httpx.AsyncClient.get", fake_get)
+
+    await x402_services.discover_services(DiscoverServicesInput(query="weather", limit=5))
+
+    params = captured["params"]
+    assert "payTo" not in params
+
+
+def test_effective_mn_data_base_url_rejects_stale_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import mn_compliance
+    from app.config import settings
+
+    monkeypatch.setattr(
+        settings,
+        "mn_data_base_url",
+        "https://services.arcgis.com/afSMGVsArcGISTools/ArcGIS/rest/services",
+    )
+    assert (
+        mn_compliance.effective_mn_data_base_url()
+        == mn_compliance.CANONICAL_MN_DATA_BASE_URL
+    )
 
 
 @pytest.mark.asyncio

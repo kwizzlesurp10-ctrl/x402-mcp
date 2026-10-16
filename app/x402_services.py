@@ -295,26 +295,39 @@ def parse_amount_atomic(value: Any) -> int | None:
 
 
 async def discover_services(params: DiscoverServicesInput) -> dict[str, Any]:
-    """Query Bazaar via public facilitator.get_supported + httpx discovery fetch."""
-    facilitator = _facilitator_client()
-    supported = facilitator.get_supported()
+    """Query the CDP Bazaar discovery **search** API (server-side query/filter)."""
+    page_limit = min(params.limit, 20)
+    query_params: dict[str, str | int | float] = {"limit": page_limit}
+    if params.query and params.query.strip():
+        query_params["query"] = params.query.strip()
+    network = primary_caip2_network(settings.x402_default_network)
+    if network:
+        query_params["network"] = network
+    if params.max_price_usdc is not None:
+        query_params["maxUsdPrice"] = params.max_price_usdc
+    # Do not send seller X402_PAY_TO_ADDRESS as payTo — that filters the Bazaar
+    # catalog to this merchant's listings only (use /discovery/merchant for that).
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": (
+            f"x402-mcp-discovery/1.0 (operator; {settings.contact_email})"
+        ),
+    }
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, headers=headers) as client:
         response = await client.get(
-            settings.cdp_discovery_url,
-            params={"type": "http", "limit": params.limit},
+            settings.cdp_discovery_search_url,
+            params=query_params,
         )
         response.raise_for_status()
         payload = response.json()
 
-    items = payload.get("items", payload.get("resources", []))
-    if params.query:
-        needle = params.query.lower()
-        items = [i for i in items if needle in json.dumps(i).lower()]
+    items = list(payload.get("resources") or [])
+    partial = bool(payload.get("partialResults"))
 
     if params.max_price_usdc is not None:
         max_atomic = int(params.max_price_usdc * 1_000_000)
-        items = [
+        filtered = [
             i
             for i in items
             if any(
@@ -323,14 +336,37 @@ async def discover_services(params: DiscoverServicesInput) -> dict[str, Any]:
                 for amount in (parse_amount_atomic(r.get("amount", 0)),)
             )
         ]
+        if filtered or not items:
+            items = filtered
+
+    facilitator_supported: dict[str, Any] | None = None
+    try:
+        facilitator = _facilitator_client()
+        supported = facilitator.get_supported()
+        facilitator_supported = supported.model_dump()
+    except Exception as exc:
+        logger.warning("discover_services: facilitator get_supported skipped: %s", exc)
+
+    note: str | None = None
+    if params.query and not items and not partial:
+        note = "No Bazaar matches for this query on the configured network/filters."
+    elif partial:
+        note = (
+            "CDP reported partialResults=true; increase specificity or paginate "
+            "with a narrower query — do not treat an empty page as an empty catalog."
+        )
 
     return {
         "count": len(items),
-        "services": items[: params.limit],
-        "discovery_url": settings.cdp_discovery_url,
-        "facilitator_url": settings.x402_facilitator_url,
-        "facilitator_supported": supported.model_dump(),
-        "sdk": "x402.HTTPFacilitatorClient.get_supported + httpx.AsyncClient",
+        "services": items[:page_limit],
+        "partial_results": partial,
+        "discovery_url": settings.cdp_discovery_search_url,
+        "discovery_query_params": query_params,
+        "facilitator_url": _facilitator_url_for(network),
+        "facilitator_supported": facilitator_supported,
+        "search_method": payload.get("searchMethod"),
+        "note": note,
+        "sdk": "httpx.AsyncClient → CDP /discovery/search",
     }
 
 

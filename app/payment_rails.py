@@ -36,7 +36,7 @@ def build_payment_rails() -> dict:
                 ],
             },
             "facilitator_url": settings.x402_facilitator_url,
-            "discovery_url": settings.cdp_discovery_url,
+            "discovery_url": settings.cdp_discovery_search_url,
             "requires_env": ["X402_PAY_TO_ADDRESS"],
             "configured": bool(settings.x402_pay_to_address),
         },

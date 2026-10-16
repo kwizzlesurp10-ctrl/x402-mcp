@@ -1237,7 +1237,7 @@ async def upgrade_info() -> dict:
         "x402_coinbase": {
             "status": "primary_rail",
             "facilitator_url": settings.x402_facilitator_url,
-            "discovery_url": settings.cdp_discovery_url,
+            "discovery_url": settings.cdp_discovery_search_url,
             "flow": [
                 "1. Call commerce.pro_requirements or commerce.credits_requirements (MCP)",
                 "2. Pay via x402 wallet using returned requirements",
@@ -1407,7 +1407,46 @@ async def mn_property_check(
             },
         )
 
-    report = await mn_compliance.check_property(address)
+    try:
+        report = await mn_compliance.check_property(address)
+    except Exception:
+        log.warning("mn/property-check join failed after settle", exc_info=True)
+        settlement = result.get("settlement") or {}
+        tx = settlement.get("transaction") or settlement.get("txHash")
+        from app.city_compliance import agentmail, registry
+
+        mn_spec = registry.get_city("mn").SPEC
+        agentmail.notify_city_call(
+            "error",
+            city_code="mn",
+            city_name=mn_spec.name,
+            state=mn_spec.state,
+            channel="http",
+            address=address.strip(),
+            price=settings.mn_property_check_price,
+            paid=True,
+            tx_hash=str(tx) if tx else None,
+            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+            detail="upstream_open_data_unavailable",
+        )
+        import base64
+        import json as _json
+
+        receipt = base64.b64encode(_json.dumps(settlement).encode()).decode()
+        return JSONResponse(
+            status_code=502,
+            headers={"PAYMENT-RESPONSE": receipt},
+            content={
+                "error": "upstream_open_data_unavailable",
+                "city": "mn",
+                "detail": (
+                    "Payment settled but Minneapolis open-data join failed; "
+                    "retry this address shortly or contact support with PAYMENT-RESPONSE."
+                ),
+                "payment_settled": True,
+            },
+        )
+
     latency = round((time.monotonic() - t0) * 1000)
     log.info("mn/property-check settled", extra={"address": address, "status_code": 200, "latency_ms": latency})
 

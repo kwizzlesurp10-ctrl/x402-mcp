@@ -82,12 +82,26 @@ a wallet-enabled client against `paid_url`.
 
 ```text
 list_us_cities
-  → pick code (e.g. mn)
+  → pick code (e.g. mn, lax for Los Angeles — not `la`)
 get_us_city_property_sample(city_code="mn")
   → validate JSON shape
 check_us_city_property(city_code="mn", address="1700 Penn Ave N")
   → settle + report  (or pay_and_fetch url=<paid_url>?address=…)
 ```
+
+MCP tools use the argument name **`city_code`** (not `code`).
+
+## Minneapolis upstream (ArcGIS)
+
+Live joins read three City of Minneapolis FeatureServer layers under
+`https://services.arcgis.com/afSMGVsC7QlRK1kZ/ArcGIS/rest/services/`.
+The seller retries license and violation lookups and degrades only the
+condemned/boarded join when that layer flakes; a settled payment that still
+cannot load licenses or violations returns
+**502** with `PAYMENT-RESPONSE` (same as `/us/{code}/property-check`). If
+`MN_DATA_BASE_URL` points at a stale host (for example a typo’d ArcGIS org id),
+the code falls back to the canonical URL above — set the env var to that URL on
+Render after deploy.
 
 A2A Agent Card skills under `/.well-known/agent.json` (see `app/agent_surface.py`)
 advertise the same HTTP interfaces; MCP tool names are the Cursor/stdio entry.
