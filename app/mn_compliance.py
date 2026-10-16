@@ -18,6 +18,7 @@ Owner phone/email exist in the source data but are intentionally not served.
 from __future__ import annotations
 
 import asyncio
+import copy
 import re
 import time
 from datetime import datetime, timezone
@@ -48,6 +49,26 @@ def _cache_get(key: str) -> dict[str, Any] | None:
 
 def _cache_set(key: str, data: dict[str, Any]) -> None:
     _cache[key] = (time.monotonic(), data)
+
+
+def _report_for_query(report: dict[str, Any], query: str) -> dict[str, Any]:
+    """Bind cache-shared ArcGIS bytes to this caller's query string."""
+    bound = copy.deepcopy(report)
+    bound["address_queried"] = query
+    match = bound.get("match")
+    if isinstance(match, dict):
+        match["query"] = query
+    return bound
+
+
+def _stored_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Drop caller-specific fields so the TTL cache cannot leak a query string."""
+    stored = copy.deepcopy(report)
+    stored.pop("address_queried", None)
+    match = stored.get("match")
+    if isinstance(match, dict):
+        match.pop("query", None)
+    return stored
 
 LICENSE_FIELDS = (
     "address,apn,licenseNumber,category,tier,status,issueDate,expirationDate,"
@@ -128,24 +149,71 @@ def normalize_street_query(address: str) -> str:
     return " ".join(_STREET_TOKEN_MAP.get(token, token) for token in cleaned.split())
 
 
+def _distinct_parcels(
+    rows: list[dict], *, apn_field: str, address_field: str
+) -> set[str]:
+    """Identity for `match.ambiguous`: APN, else normalized address."""
+    parcels: set[str] = set()
+    for row in rows:
+        apn = str(row.get(apn_field) or "").strip()
+        if apn:
+            parcels.add(apn)
+            continue
+        addr = normalize_street_query(str(row.get(address_field) or ""))
+        if addr:
+            parcels.add(f"addr:{addr}")
+    return parcels
+
+
+def _prefer_exact_normalized(
+    rows: list[dict], *, field: str, normalized: str
+) -> tuple[list[dict], str]:
+    """Keep exact USPS-normalized rows; otherwise leave the prefix set."""
+    if not rows:
+        return [], "none"
+    exact = [
+        row
+        for row in rows
+        if normalize_street_query(str(row.get(field) or "")) == normalized
+    ]
+    if exact:
+        return exact, "exact"
+    return rows, "prefix"
+
+
+def _record_unlicensed_prefix(
+    match: dict[str, Any], violations: list[dict], condemned: list[dict]
+) -> None:
+    """Prefix-fallback unlicensed joins must surface parcel ambiguity."""
+    parcels = _distinct_parcels(
+        violations, apn_field="APN", address_field="Display"
+    ) | _distinct_parcels(condemned, apn_field="APN", address_field="Address")
+    match["mode"] = "prefix"
+    match["ambiguous"] = len(parcels) > 1
+    match["hit_count"] = len(parcels)
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for row in violations:
+        display = str(row.get("Display") or "")
+        if display and display not in seen:
+            seen.add(display)
+            addresses.append(display)
+    for row in condemned:
+        addr = str(row.get("Address") or "")
+        if addr and addr not in seen:
+            seen.add(addr)
+            addresses.append(addr)
+    if addresses:
+        match["matched_addresses"] = addresses
+
+
 def _select_license_matches(
     licenses: list[dict], *, normalized: str, query: str
 ) -> tuple[list[dict], dict[str, Any]]:
     """Prefer an exact normalized address over a prefix mash of other parcels."""
-    exact = [
-        row
-        for row in licenses
-        if normalize_street_query(str(row.get("address") or "")) == normalized
-    ]
-    if exact:
-        chosen = exact
-        mode = "exact"
-    elif licenses:
-        chosen = licenses
-        mode = "prefix"
-    else:
-        chosen = []
-        mode = "none"
+    chosen, mode = _prefer_exact_normalized(
+        licenses, field="address", normalized=normalized
+    )
     matched_addresses = [str(row.get("address") or "") for row in chosen]
     too_broad = bool(normalized) and not any(ch.isalpha() for ch in normalized)
     return chosen, {
@@ -153,7 +221,10 @@ def _select_license_matches(
         "normalized": normalized,
         "mode": mode,
         "hit_count": len(chosen),
-        "ambiguous": len(chosen) > 1,
+        "ambiguous": len(
+            _distinct_parcels(chosen, apn_field="apn", address_field="address")
+        )
+        > 1,
         "too_broad": too_broad,
         "matched_addresses": matched_addresses,
     }
@@ -193,7 +264,7 @@ async def check_property(address: str) -> dict[str, Any]:
 
     cached = _cache_get(cache_key)
     if cached is not None:
-        return cached
+        return _report_for_query(cached, query)
 
     sql_needle = _escape(normalized)
     licenses: list[dict] = []
@@ -238,7 +309,7 @@ async def check_property(address: str) -> dict[str, Any]:
         elif sql_needle:
             # No license APN — still join violations + condemned by address so a
             # completely unlicensed problem property is not reported as clean.
-            violations, condemned = await asyncio.gather(
+            violations_raw, condemned_raw = await asyncio.gather(
                 _query(
                     client,
                     "CaseViolations",
@@ -254,6 +325,14 @@ async def check_property(address: str) -> dict[str, Any]:
                     10,
                 ),
             )
+            violations, violation_mode = _prefer_exact_normalized(
+                violations_raw, field="Display", normalized=normalized
+            )
+            condemned, condemned_mode = _prefer_exact_normalized(
+                condemned_raw, field="Address", normalized=normalized
+            )
+            if violation_mode == "prefix" or condemned_mode == "prefix":
+                _record_unlicensed_prefix(match, violations, condemned)
 
     recent_violations = sorted(
         violations, key=lambda v: v.get("Start_Date") or 0, reverse=True
@@ -343,8 +422,8 @@ async def check_property(address: str) -> dict[str, Any]:
         "generated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }
 
-    _cache_set(cache_key, report)
-    return report
+    _cache_set(cache_key, _stored_report(report))
+    return _report_for_query(report, query)
 
 
 # ---- x402 seller gate -------------------------------------------------------

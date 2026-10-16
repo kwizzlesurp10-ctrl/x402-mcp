@@ -324,7 +324,20 @@ _UNLICENSED_VIOLATIONS = {
                 "Start_Date": 1735689600000,
                 "Completed_Date": None,
             }
-        }
+        },
+        {
+            "attributes": {
+                "APN": "0102824230099",
+                "Display": "3201 20TH AVE SE",
+                "Violation_Case_Number": "CE-UNLIC-SE",
+                "Case_Type": "Nuisance",
+                "Case_Group": "Nuisance",
+                "Inspection_Result": "Open",
+                "Inspection_Type_Desc": "Initial Inspection",
+                "Start_Date": 1735689600000,
+                "Completed_Date": None,
+            }
+        },
     ]
 }
 
@@ -442,7 +455,87 @@ async def test_unlicensed_address_still_joins_violations_by_display(
     assert report["compliance_verdict"] == "unlicensed"
     assert report["violation_cases"]["total"] == 1
     assert report["violation_cases"]["open_total"] == 1
-    assert report["violation_cases"]["recent"][0]["case_number"] == "CE-UNLIC-1"
+    cases = {row["case_number"] for row in report["violation_cases"]["recent"]}
+    assert cases == {"CE-UNLIC-1"}
+    assert report["match"]["ambiguous"] is False
+    assert report["match"]["mode"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_unlicensed_prefix_does_not_join_directional_siblings(
+    mock_arcgis: str,
+) -> None:
+    """LIKE '3201 20TH AVE S%' also matches SE; exact Display must win."""
+    mn_compliance._cache.clear()
+    report = await mn_compliance.check_property("3201 20th Ave S")
+    cases = {row["case_number"] for row in report["violation_cases"]["recent"]}
+    assert "CE-UNLIC-SE" not in cases
+    assert cases == {"CE-UNLIC-1"}
+    assert report["match"]["ambiguous"] is False
+
+
+@pytest.mark.asyncio
+async def test_unlicensed_prefix_fallback_reports_parcel_ambiguity(
+    mock_arcgis: str,
+) -> None:
+    mn_compliance._cache.clear()
+    report = await mn_compliance.check_property("3201 20th Ave")
+    cases = {row["case_number"] for row in report["violation_cases"]["recent"]}
+    assert cases == {"CE-UNLIC-1", "CE-UNLIC-SE"}
+    assert report["match"]["mode"] == "prefix"
+    assert report["match"]["ambiguous"] is True
+    assert report["match"]["hit_count"] == 2
+
+
+def test_two_licenses_on_one_apn_are_not_ambiguous() -> None:
+    chosen, match = mn_compliance._select_license_matches(
+        [
+            {
+                "address": "1700 PENN AVE N",
+                "apn": "1602924320087",
+                "licenseNumber": "LIC1",
+            },
+            {
+                "address": "1700 PENN AVE N",
+                "apn": "1602924320087",
+                "licenseNumber": "LIC2",
+            },
+        ],
+        normalized="1700 PENN AVE N",
+        query="1700 Penn Ave N",
+    )
+    assert len(chosen) == 2
+    assert match["mode"] == "exact"
+    assert match["hit_count"] == 2
+    assert match["ambiguous"] is False
+
+
+def test_ambiguity_falls_back_to_normalized_address_without_apn() -> None:
+    _chosen, match = mn_compliance._select_license_matches(
+        [
+            {"address": "1700 PENN AVE N", "apn": "", "licenseNumber": "LIC1"},
+            {"address": "1700 3RD AVE N", "apn": None, "licenseNumber": "LIC2"},
+        ],
+        normalized="1700",
+        query="1700",
+    )
+    assert match["mode"] == "prefix"
+    assert match["ambiguous"] is True
+
+
+@pytest.mark.asyncio
+async def test_cache_does_not_leak_caller_query(mock_arcgis: str) -> None:
+    mn_compliance._cache.clear()
+    first = await mn_compliance.check_property("1700 Penn Avenue North")
+    second = await mn_compliance.check_property("1700 Penn Ave N")
+    assert first["address_queried"] == "1700 Penn Avenue North"
+    assert first["match"]["query"] == "1700 Penn Avenue North"
+    assert second["address_queried"] == "1700 Penn Ave N"
+    assert second["match"]["query"] == "1700 Penn Ave N"
+    assert first["rental_licenses"] == second["rental_licenses"]
+    first["address_queried"] = "MUTATED"
+    third = await mn_compliance.check_property("1700 Penn Ave N")
+    assert third["address_queried"] == "1700 Penn Ave N"
 
 
 def test_normalize_street_query_maps_usps_tokens() -> None:

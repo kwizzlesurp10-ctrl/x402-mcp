@@ -27,6 +27,7 @@ verification instead of a repo-wide `git status` of the parent tree.
 - Discovery/OpenAPI example APN aligned to the live sample parcel `1602924320087`
 - `/llms.txt` and `/.well-known/x402` `what` text document sample-vs-paid and ambiguous prefix hits
 - Guards in `tests/test_mn_compliance.py`, `tests/test_city_compliance.py`, `tests/test_agent_surface.py`
+- `match.ambiguous` is distinct APNs (else normalized address), not license-row count; unlicensed `Display` prefers exact before prefix; cache rebinds `address_queried` / `match.query` per caller
 
 ## Sole cashier pin (2026-09-13)
 
