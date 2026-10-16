@@ -305,8 +305,8 @@ async def discover_services(params: DiscoverServicesInput) -> dict[str, Any]:
         query_params["network"] = network
     if params.max_price_usdc is not None:
         query_params["maxUsdPrice"] = params.max_price_usdc
-    if settings.x402_pay_to_address:
-        query_params["payTo"] = settings.x402_pay_to_address
+    # Do not send seller X402_PAY_TO_ADDRESS as payTo — that filters the Bazaar
+    # catalog to this merchant's listings only (use /discovery/merchant for that).
 
     headers = {
         "Accept": "application/json",
