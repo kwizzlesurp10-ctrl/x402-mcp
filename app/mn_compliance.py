@@ -17,6 +17,9 @@ Owner phone/email exist in the source data but are intentionally not served.
 
 from __future__ import annotations
 
+import asyncio
+import copy
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -47,14 +50,64 @@ def _cache_get(key: str) -> dict[str, Any] | None:
 def _cache_set(key: str, data: dict[str, Any]) -> None:
     _cache[key] = (time.monotonic(), data)
 
+
+def _report_for_query(report: dict[str, Any], query: str) -> dict[str, Any]:
+    """Bind cache-shared ArcGIS bytes to this caller's query string."""
+    bound = copy.deepcopy(report)
+    bound["address_queried"] = query
+    match = bound.get("match")
+    if isinstance(match, dict):
+        match["query"] = query
+    return bound
+
+
+def _stored_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Drop caller-specific fields so the TTL cache cannot leak a query string."""
+    stored = copy.deepcopy(report)
+    stored.pop("address_queried", None)
+    match = stored.get("match")
+    if isinstance(match, dict):
+        match.pop("query", None)
+    return stored
+
 LICENSE_FIELDS = (
     "address,apn,licenseNumber,category,tier,status,issueDate,expirationDate,"
     "licensedUnits,ownerName,ward,neighborhoodDesc,communityDesc,shortTermRental"
 )
 VIOLATION_FIELDS = (
-    "APN,Violation_Case_Number,Case_Type,Case_Group,Inspection_Result,"
+    "APN,Display,Violation_Case_Number,Case_Type,Case_Group,Inspection_Result,"
     "Inspection_Type_Desc,Start_Date,Completed_Date"
 )
+
+# City ArcGIS stores USPS abbreviations (AVE, ST, N). Paying agents often send
+# Avenue / North / dotted "Ave." and used to get a false `unlicensed` after
+# settlement. Token map is word-boundary only so STREET does not become STreet.
+# Collapse N.E./S.E./N.W./S.W. *before* '.' → space; otherwise "N.E." becomes
+# tokens "N" "E" and misses the city row stored as NE.
+_DOTTED_QUADRANT_RE = re.compile(r"\b([NS])\s*\.\s*([EW])\.?(?![A-Z])")
+_STREET_TOKEN_MAP = {
+    "NORTHEAST": "NE",
+    "NORTHWEST": "NW",
+    "SOUTHEAST": "SE",
+    "SOUTHWEST": "SW",
+    "AVENUE": "AVE",
+    "STREET": "ST",
+    "BOULEVARD": "BLVD",
+    "DRIVE": "DR",
+    "ROAD": "RD",
+    "LANE": "LN",
+    "COURT": "CT",
+    "PLACE": "PL",
+    "TERRACE": "TER",
+    "PARKWAY": "PKWY",
+    "HIGHWAY": "HWY",
+    "NORTH": "N",
+    "SOUTH": "S",
+    "EAST": "E",
+    "WEST": "W",
+    "APARTMENT": "APT",
+    "SUITE": "STE",
+}
 CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 
 # Written query-shaped, and this matters more here than anywhere else in the
@@ -89,6 +142,98 @@ def _escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+def normalize_street_query(address: str) -> str:
+    """USPS-abbreviate a Minneapolis street query to match city ArcGIS rows."""
+    cleaned = address.strip().upper()
+    cleaned = _DOTTED_QUADRANT_RE.sub(r"\1\2", cleaned)
+    cleaned = cleaned.replace(".", " ").replace(",", " ").replace("#", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return ""
+    return " ".join(_STREET_TOKEN_MAP.get(token, token) for token in cleaned.split())
+
+
+def _distinct_parcels(
+    rows: list[dict], *, apn_field: str, address_field: str
+) -> set[str]:
+    """Identity for `match.ambiguous`: APN, else normalized address."""
+    parcels: set[str] = set()
+    for row in rows:
+        apn = str(row.get(apn_field) or "").strip()
+        if apn:
+            parcels.add(apn)
+            continue
+        addr = normalize_street_query(str(row.get(address_field) or ""))
+        if addr:
+            parcels.add(f"addr:{addr}")
+    return parcels
+
+
+def _prefer_exact_normalized(
+    rows: list[dict], *, field: str, normalized: str
+) -> tuple[list[dict], str]:
+    """Keep exact USPS-normalized rows; otherwise leave the prefix set."""
+    if not rows:
+        return [], "none"
+    exact = [
+        row
+        for row in rows
+        if normalize_street_query(str(row.get(field) or "")) == normalized
+    ]
+    if exact:
+        return exact, "exact"
+    return rows, "prefix"
+
+
+def _record_unlicensed_prefix(
+    match: dict[str, Any], violations: list[dict], condemned: list[dict]
+) -> None:
+    """Prefix-fallback unlicensed joins must surface parcel ambiguity."""
+    parcels = _distinct_parcels(
+        violations, apn_field="APN", address_field="Display"
+    ) | _distinct_parcels(condemned, apn_field="APN", address_field="Address")
+    match["mode"] = "prefix"
+    match["ambiguous"] = len(parcels) > 1
+    match["hit_count"] = len(parcels)
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for row in violations:
+        display = str(row.get("Display") or "")
+        if display and display not in seen:
+            seen.add(display)
+            addresses.append(display)
+    for row in condemned:
+        addr = str(row.get("Address") or "")
+        if addr and addr not in seen:
+            seen.add(addr)
+            addresses.append(addr)
+    if addresses:
+        match["matched_addresses"] = addresses
+
+
+def _select_license_matches(
+    licenses: list[dict], *, normalized: str, query: str
+) -> tuple[list[dict], dict[str, Any]]:
+    """Prefer an exact normalized address over a prefix mash of other parcels."""
+    chosen, mode = _prefer_exact_normalized(
+        licenses, field="address", normalized=normalized
+    )
+    matched_addresses = [str(row.get("address") or "") for row in chosen]
+    too_broad = bool(normalized) and not any(ch.isalpha() for ch in normalized)
+    return chosen, {
+        "query": query,
+        "normalized": normalized,
+        "mode": mode,
+        "hit_count": len(chosen),
+        "ambiguous": len(
+            _distinct_parcels(chosen, apn_field="apn", address_field="address")
+        )
+        > 1,
+        "too_broad": too_broad,
+        "matched_addresses": matched_addresses,
+    }
+
+
 def _iso(epoch_ms: Any) -> str | None:
     if not isinstance(epoch_ms, (int, float)):
         return None
@@ -117,26 +262,37 @@ async def _query(
 
 async def check_property(address: str) -> dict[str, Any]:
     """Compose the compliance report for a Minneapolis street address."""
-    needle = _escape(address.strip().upper())
+    query = address.strip()
+    normalized = normalize_street_query(query)
+    cache_key = normalized or query.upper()
 
-    cached = _cache_get(needle)
+    cached = _cache_get(cache_key)
     if cached is not None:
-        return cached
+        return _report_for_query(cached, query)
+
+    sql_needle = _escape(normalized)
+    licenses: list[dict] = []
+    match: dict[str, Any]
+    violations: list[dict] = []
+    condemned: list[dict] = []
 
     async with httpx.AsyncClient(timeout=25.0) as client:
-        licenses = await _query(
-            client,
-            "Active_Rental_Licenses",
-            f"UPPER(address) LIKE '{needle}%'",
-            LICENSE_FIELDS,
-            10,
+        if sql_needle:
+            licenses_raw = await _query(
+                client,
+                "Active_Rental_Licenses",
+                f"UPPER(address) LIKE '{sql_needle}%'",
+                LICENSE_FIELDS,
+                10,
+            )
+        else:
+            licenses_raw = []
+        licenses, match = _select_license_matches(
+            licenses_raw, normalized=normalized, query=query
         )
 
-        apns = sorted({l["apn"] for l in licenses if l.get("apn")})
-        violations: list[dict] = []
-        condemned: list[dict] = []
+        apns = sorted({row["apn"] for row in licenses if row.get("apn")})
         if apns:
-            import asyncio
             apn_list = ", ".join(f"'{_escape(a)}'" for a in apns)
             violations, condemned = await asyncio.gather(
                 _query(
@@ -152,18 +308,35 @@ async def check_property(address: str) -> dict[str, Any]:
                     f"APN IN ({apn_list})",
                     CONDEMNED_FIELDS,
                     10,
-                )
+                ),
             )
-        else:
-            # No license found — still check condemned/boarded by address so a
+        elif sql_needle:
+            # No license APN — still join violations + condemned by address so a
             # completely unlicensed problem property is not reported as clean.
-            condemned = await _query(
-                client,
-                "Condemned_by_Boarding",
-                f"UPPER(Address) LIKE '{needle}%'",
-                CONDEMNED_FIELDS,
-                10,
+            violations_raw, condemned_raw = await asyncio.gather(
+                _query(
+                    client,
+                    "CaseViolations",
+                    f"UPPER(Display) LIKE '{sql_needle}%'",
+                    VIOLATION_FIELDS,
+                    200,
+                ),
+                _query(
+                    client,
+                    "Condemned_by_Boarding",
+                    f"UPPER(Address) LIKE '{sql_needle}%'",
+                    CONDEMNED_FIELDS,
+                    10,
+                ),
             )
+            violations, violation_mode = _prefer_exact_normalized(
+                violations_raw, field="Display", normalized=normalized
+            )
+            condemned, condemned_mode = _prefer_exact_normalized(
+                condemned_raw, field="Address", normalized=normalized
+            )
+            if violation_mode == "prefix" or condemned_mode == "prefix":
+                _record_unlicensed_prefix(match, violations, condemned)
 
     recent_violations = sorted(
         violations, key=lambda v: v.get("Start_Date") or 0, reverse=True
@@ -172,9 +345,12 @@ async def check_property(address: str) -> dict[str, Any]:
     licensed = bool(licenses)
     condemned_flagged = bool(condemned)
     violation_total = len(violations)
+    open_total = sum(1 for row in violations if row.get("Completed_Date") is None)
     # One-token decision for agent buyers. Severity order: condemned >
-    # unlicensed > licensed-with-open-history > clean. Derived only from the
-    # three ArcGIS joins above — no scoring model.
+    # unlicensed > licensed-with-history > clean. Derived only from the
+    # three ArcGIS joins above — no scoring model. Historical (completed)
+    # cases still flag licensed_with_violations; buyers use open_total to
+    # separate live inspections from closed history.
     if condemned_flagged:
         compliance_verdict = "condemned_or_boarded"
     elif not licensed:
@@ -185,30 +361,32 @@ async def check_property(address: str) -> dict[str, Any]:
         compliance_verdict = "licensed_clean"
 
     report = {
-        "address_queried": address.strip(),
+        "address_queried": query,
         "compliance_verdict": compliance_verdict,
+        "match": match,
         "rental_licenses": [
             {
-                "address": l.get("address"),
-                "apn": l.get("apn"),
-                "license_number": l.get("licenseNumber"),
-                "status": l.get("status"),
-                "tier": l.get("tier"),
-                "category": l.get("category"),
-                "licensed_units": l.get("licensedUnits"),
-                "owner_name": l.get("ownerName"),
-                "issue_date": _iso(l.get("issueDate")),
-                "expiration_date": _iso(l.get("expirationDate")),
-                "ward": l.get("ward"),
-                "neighborhood": l.get("neighborhoodDesc"),
-                "community": l.get("communityDesc"),
-                "short_term_rental": l.get("shortTermRental"),
+                "address": row.get("address"),
+                "apn": row.get("apn"),
+                "license_number": row.get("licenseNumber"),
+                "status": row.get("status"),
+                "tier": row.get("tier"),
+                "category": row.get("category"),
+                "licensed_units": row.get("licensedUnits"),
+                "owner_name": row.get("ownerName"),
+                "issue_date": _iso(row.get("issueDate")),
+                "expiration_date": _iso(row.get("expirationDate")),
+                "ward": row.get("ward"),
+                "neighborhood": row.get("neighborhoodDesc"),
+                "community": row.get("communityDesc"),
+                "short_term_rental": row.get("shortTermRental"),
             }
-            for l in licenses
+            for row in licenses
         ],
         "licensed": licensed,
         "violation_cases": {
             "total": violation_total,
+            "open_total": open_total,
             "recent": [
                 {
                     "case_number": v.get("Violation_Case_Number"),
@@ -248,8 +426,8 @@ async def check_property(address: str) -> dict[str, Any]:
         "generated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }
 
-    _cache_set(needle, report)
-    return report
+    _cache_set(cache_key, _stored_report(report))
+    return _report_for_query(report, query)
 
 
 # ---- x402 seller gate -------------------------------------------------------
@@ -273,10 +451,19 @@ DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "address_queried": "1700 Penn Ave N",
     "compliance_verdict": "licensed_with_violations",
     "licensed": True,
+    "match": {
+        "query": "1700 Penn Ave N",
+        "normalized": "1700 PENN AVE N",
+        "mode": "exact",
+        "hit_count": 1,
+        "ambiguous": False,
+        "too_broad": False,
+        "matched_addresses": ["1700 PENN AVE N"],
+    },
     "rental_licenses": [
         {
             "address": "1700 PENN AVE N",
-            "apn": "1602924310042",
+            "apn": "1602924320087",
             "license_number": "LIC394217",
             "status": "Active",
             "tier": "Tier 1",
@@ -289,12 +476,13 @@ DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     ],
     "violation_cases": {
         "total": 1,
+        "open_total": 0,
         "recent": [
             {
-                "case_number": "RS-2025-01",
-                "case_type": "Rental License",
-                "inspection_result": "Violations Found",
-                "start_date": "2025-01-01",
+                "case_number": "CE1263963",
+                "case_type": "HIS",
+                "inspection_result": "AdminMon",
+                "start_date": "2021-05-03",
             }
         ],
     },

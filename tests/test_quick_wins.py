@@ -20,20 +20,27 @@ client = TestClient(app)
 
 @pytest.mark.asyncio
 async def test_cache_returns_same_object(mock_arcgis: str) -> None:
-    """Second call for the same address should return cached data (no ArcGIS hit)."""
+    """Second call for the same address should return cached ArcGIS bytes."""
     mn_compliance._cache.clear()
     first = await mn_compliance.check_property("1700 Penn Ave N")
     second = await mn_compliance.check_property("1700 Penn Ave N")
-    assert first is second  # exact same dict object from cache
+    assert first["rental_licenses"] == second["rental_licenses"]
+    assert first["generated_at"] == second["generated_at"]
+    assert first is not second
 
 
 @pytest.mark.asyncio
 async def test_cache_key_is_normalised(mock_arcgis: str) -> None:
-    """Lookups differing only in case / whitespace share the cache."""
+    """Lookups differing only in case / whitespace share the ArcGIS cache."""
     mn_compliance._cache.clear()
     first = await mn_compliance.check_property("1700 penn ave n")
     second = await mn_compliance.check_property("  1700 PENN AVE N  ")
-    assert first is second
+    assert first["rental_licenses"] == second["rental_licenses"]
+    assert first["generated_at"] == second["generated_at"]
+    assert first["address_queried"] == "1700 penn ave n"
+    assert second["address_queried"] == "1700 PENN AVE N"
+    assert first["match"]["query"] == "1700 penn ave n"
+    assert second["match"]["query"] == "1700 PENN AVE N"
 
 
 @pytest.mark.asyncio
@@ -111,7 +118,7 @@ _LICENSES = {
         {
             "attributes": {
                 "address": "1700 PENN AVE N",
-                "apn": "1602924310042",
+                "apn": "1602924320087",
                 "licenseNumber": "LIC394217",
                 "category": "CONV",
                 "tier": "Tier 1",
@@ -132,7 +139,7 @@ _VIOLATIONS = {
     "features": [
         {
             "attributes": {
-                "APN": "1602924310042",
+                "APN": "1602924320087",
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
                 "Case_Group": "Housing",

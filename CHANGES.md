@@ -21,6 +21,15 @@ verification instead of a repo-wide `git status` of the parent tree.
 - Private key files removed from git tracking; `.gitignore` keeps `.keys/**` local (README exception only)
 - Prior receive/buyer addresses retired in `tests/test_payto_single_cashier.py`
 
+## MN property-check buyer match accuracy (2026-09-18)
+
+- `app/mn_compliance.py` USPS-normalizes street queries (Avenue→AVE, North→N), prefers an exact parcel over a prefix mash, joins unlicensed violations via CaseViolations.`Display`, and exposes `match` + `violation_cases.open_total`
+- Discovery/OpenAPI example APN aligned to the live sample parcel `1602924320087`
+- `/llms.txt` and `/.well-known/x402` `what` text document sample-vs-paid and ambiguous prefix hits
+- Guards in `tests/test_mn_compliance.py`, `tests/test_city_compliance.py`, `tests/test_agent_surface.py`
+- `match.ambiguous` is distinct APNs (else normalized address), not license-row count; unlicensed `Display` prefers exact before prefix; cache rebinds `address_queried` / `match.query` per caller
+- Dotted compass tokens (`N.E.` / `S.E.` / `N.W.` / `S.W.`) collapse to `NE|SE|NW|SW` before remaining dots are stripped, so those queries do not 200 as `unlicensed`
+
 ## Sole cashier pin (2026-09-13)
 
 - `smithery.yaml` default + exampleConfig and `render.yaml` `X402_PAY_TO_ADDRESS` pin the sole cashier

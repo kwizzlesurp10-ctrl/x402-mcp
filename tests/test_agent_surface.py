@@ -61,7 +61,7 @@ def test_llms_txt_is_plain_text_with_live_prices() -> None:
 def test_llms_txt_documents_failure_modes_not_just_the_happy_path() -> None:
     text = client.get("/llms.txt").text
 
-    for signal in ("502", "payment_invalid", "422", "staleness"):
+    for signal in ("502", "payment_invalid", "422", "staleness", "ambiguous"):
         assert signal in text, f"missing failure-mode coverage: {signal}"
 
 

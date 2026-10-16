@@ -195,3 +195,22 @@ because it manufactures confidence. `/demand` now splits `sales_external` /
 only, with `conversion_including_operator` retained so this correction stays
 auditable. Before trusting any conversion number from this repo, check which of
 the two you are reading.
+
+## 2026-09-18 checkpoint — reverse clause does not fire; invest in MN match accuracy
+
+Read live `GET /demand` with `x-demand-ignore: 1` (2026-09-18T03:15Z). Ignore
+synthetic catalog rows (`tx` like `0xcatalog*` / `0xfeed`, padded
+`0x67ffc9…0000…ab`). Confirmed external weekly sales on this SKU/network:
+
+| Resource | Weekly external (real tx) | Distinct payers | Lifetime `sales_external` (ledger class) | Challenges |
+|---|---:|---:|---:|---:|
+| `mn-property-check` | 2 | 2 | 56 (54 of those are the padded catalog address) | 21,071 |
+| `us-city-mn-property-check` | 2 | 2 | 2 | 6,652 |
+| `us-city-sea-property-check` | 1 | 1 | 1 | 6,140 |
+
+Conversion on the canonical path is **0.27%** (`sales_external` / challenges)
+including the padded catalog payer the ledger still marks `is_operator_settle:
+false`. Real weekly demand is small ($0.05 across MN+SEA) but **not zero**, so
+the reverse clause stays **unfired**. Do not polish Pulse / free-RPC. Public
+`/health.wallet_configured` remains `false`.
+
