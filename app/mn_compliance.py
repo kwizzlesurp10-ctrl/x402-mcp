@@ -213,7 +213,7 @@ async def check_property(address: str) -> dict[str, Any]:
         if apns:
             apn_list = ", ".join(f"'{_escape(a)}'" for a in apns)
             violations, condemned = await asyncio.gather(
-                _query_optional(
+                _query(
                     client,
                     "CaseViolations",
                     f"APN IN ({apn_list})",
@@ -316,8 +316,8 @@ async def check_property(address: str) -> dict[str, Any]:
         "disclaimer": (
             "Public records from City of Minneapolis Open Data, served as-is; "
             "not legal advice. Verify with the city before acting. "
-            "Violation/condemned joins may be omitted when a secondary ArcGIS "
-            "layer is temporarily unavailable."
+            "Condemned/boarded join may be omitted when that ArcGIS layer is "
+            "temporarily unavailable."
         ),
         "generated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }

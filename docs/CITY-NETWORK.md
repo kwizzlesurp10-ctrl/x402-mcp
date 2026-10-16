@@ -95,8 +95,9 @@ MCP tools use the argument name **`city_code`** (not `code`).
 
 Live joins read three City of Minneapolis FeatureServer layers under
 `https://services.arcgis.com/afSMGVsC7QlRK1kZ/ArcGIS/rest/services/`.
-The seller retries license lookups and degrades violation/condemned joins when a
-secondary layer flakes; a settled payment that still cannot load licenses returns
+The seller retries license and violation lookups and degrades only the
+condemned/boarded join when that layer flakes; a settled payment that still
+cannot load licenses or violations returns
 **502** with `PAYMENT-RESPONSE` (same as `/us/{code}/property-check`). If
 `MN_DATA_BASE_URL` points at a stale host (for example a typo’d ArcGIS org id),
 the code falls back to the canonical URL above — set the env var to that URL on
