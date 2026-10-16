@@ -82,6 +82,9 @@ VIOLATION_FIELDS = (
 # City ArcGIS stores USPS abbreviations (AVE, ST, N). Paying agents often send
 # Avenue / North / dotted "Ave." and used to get a false `unlicensed` after
 # settlement. Token map is word-boundary only so STREET does not become STreet.
+# Collapse N.E./S.E./N.W./S.W. *before* '.' → space; otherwise "N.E." becomes
+# tokens "N" "E" and misses the city row stored as NE.
+_DOTTED_QUADRANT_RE = re.compile(r"\b([NS])\s*\.\s*([EW])\.?(?![A-Z])")
 _STREET_TOKEN_MAP = {
     "NORTHEAST": "NE",
     "NORTHWEST": "NW",
@@ -142,6 +145,7 @@ def _escape(value: str) -> str:
 def normalize_street_query(address: str) -> str:
     """USPS-abbreviate a Minneapolis street query to match city ArcGIS rows."""
     cleaned = address.strip().upper()
+    cleaned = _DOTTED_QUADRANT_RE.sub(r"\1\2", cleaned)
     cleaned = cleaned.replace(".", " ").replace(",", " ").replace("#", " ")
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if not cleaned:

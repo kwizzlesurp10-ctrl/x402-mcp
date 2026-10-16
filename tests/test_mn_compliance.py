@@ -277,7 +277,25 @@ _THIRD_LICENSE = {
     "neighborhoodDesc": "Near North",
 }
 
+_NE_LICENSE = {
+    **_PENN_LICENSE,
+    "address": "221 13TH AVE NE",
+    "apn": "0102924320001",
+    "licenseNumber": "LIC-NE-1",
+    "neighborhoodDesc": "Logan Park",
+}
+
+_SE_LICENSE = {
+    **_PENN_LICENSE,
+    "address": "221 13TH AVE SE",
+    "apn": "0102924320002",
+    "licenseNumber": "LIC-SE-1",
+    "neighborhoodDesc": "Prospect Park",
+}
+
 _LICENSES = {"features": [{"attributes": _PENN_LICENSE}, {"attributes": _THIRD_LICENSE}]}
+_NE_LICENSES = {"features": [{"attributes": _NE_LICENSE}]}
+_SE_LICENSES = {"features": [{"attributes": _SE_LICENSE}]}
 
 _VIOLATIONS = {
     "features": [
@@ -349,7 +367,14 @@ class _MockArcGIS(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         where = parse_qs(parsed.query).get("where", [""])[0]
         if "Active_Rental_Licenses" in parsed.path:
-            body = _LICENSES if "1700" in where else {"features": []}
+            if "1700" in where:
+                body = _LICENSES
+            elif "13TH AVE NE" in where:
+                body = _NE_LICENSES
+            elif "13TH AVE SE" in where:
+                body = _SE_LICENSES
+            else:
+                body = {"features": []}
         elif "CaseViolations" in parsed.path:
             if "1602924320087" in where or "1700 PENN" in where:
                 body = _VIOLATIONS
@@ -546,6 +571,37 @@ def test_normalize_street_query_maps_usps_tokens() -> None:
     assert mn_compliance.normalize_street_query("  1700 penn ave n  ") == (
         "1700 PENN AVE N"
     )
+    assert mn_compliance.normalize_street_query("221 13th Ave N.E.") == (
+        "221 13TH AVE NE"
+    )
+    assert mn_compliance.normalize_street_query("221 13th Ave S.E.") == (
+        "221 13TH AVE SE"
+    )
+    assert mn_compliance.normalize_street_query("221 13th Ave N. E.") == (
+        "221 13TH AVE NE"
+    )
+    assert mn_compliance.normalize_street_query("221 13th Ave N.W.") == (
+        "221 13TH AVE NW"
+    )
+    assert mn_compliance.normalize_street_query("221 13th Ave S.W.") == (
+        "221 13TH AVE SW"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dotted_quadrant_queries_match_city_rows(mock_arcgis: str) -> None:
+    """N.E./S.E. used to normalize to N E / S E and 200 as unlicensed."""
+    mn_compliance._cache.clear()
+    northeast = await mn_compliance.check_property("221 13th Ave N.E.")
+    assert northeast["licensed"] is True
+    assert northeast["match"]["normalized"] == "221 13TH AVE NE"
+    assert northeast["match"]["mode"] == "exact"
+    assert northeast["rental_licenses"][0]["license_number"] == "LIC-NE-1"
+    southeast = await mn_compliance.check_property("221 13th Ave S.E.")
+    assert southeast["licensed"] is True
+    assert southeast["match"]["normalized"] == "221 13TH AVE SE"
+    assert southeast["match"]["mode"] == "exact"
+    assert southeast["rental_licenses"][0]["license_number"] == "LIC-SE-1"
 
 
 def test_discovery_example_apn_matches_the_live_sample_parcel() -> None:
