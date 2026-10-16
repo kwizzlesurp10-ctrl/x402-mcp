@@ -72,15 +72,33 @@ async def test_stdio_get_supported_networks() -> None:
 
 @pytest.mark.asyncio
 async def test_stdio_get_agent_card_compat_alias() -> None:
-    payload = await _call_stdio_tool(
-        "x402.agent_card",
-        {"agent_id": "stdio-agent-card-alias"},
-    )
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
 
-    assert "data" in payload
-    assert "meta" in payload
-    assert payload["data"]["agent_id"] == "stdio-agent-card-alias"
-    assert "card" in payload["data"]
+    agent_id = "stdio-agent-card-alias"
+    async with stdio_client(_stdio_server_params()) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            listed_tools = await session.list_tools()
+            tool_names = {tool.name for tool in listed_tools.tools}
+            payload_alias = await _call_stdio_tool(
+                "get_agent_card",
+                {"agent_id": agent_id},
+                session=session,
+            )
+            payload_canonical = await _call_stdio_tool(
+                "x402.agent_card",
+                {"agent_id": agent_id},
+                session=session,
+            )
+
+    assert "get_agent_card" not in tool_names
+    assert "x402.agent_card" in tool_names
+    assert set(payload_alias) == set(payload_canonical) == {"data", "meta"}
+    assert payload_alias["data"] == payload_canonical["data"]
+    assert set(payload_alias["meta"]) == set(payload_canonical["meta"])
+    assert payload_alias["data"]["agent_id"] == agent_id
+    assert "card" in payload_alias["data"]
 
 
 @pytest.mark.asyncio
