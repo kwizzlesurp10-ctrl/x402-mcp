@@ -1,12 +1,14 @@
 # x402 Micropayments MCP
 
 [![smithery badge](https://smithery.ai/badge/kwizzlesurp10/x402-mcp)](https://smithery.ai/server/kwizzlesurp10/x402-mcp)
-<a href="https://24klabs.ai/listing/us-city-open-data-compliance-network"><img src="https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"></a>
+[![US City Open-Data Compliance Network on the 24K Labs curated list](https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402)](https://24klabs.ai/listing/us-city-open-data-compliance-network)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Mainnet](https://img.shields.io/badge/Network-Base%20Mainnet%20(8453)-0052FF.svg)](https://base.org)
 [![A2A Protocol](https://img.shields.io/badge/Identity-A2A%20v1.0%20Agent%20Card-green.svg)](https://x402-mcp.onrender.com/.well-known/agent-card.json)
 
 Production MCP server for the [x402](https://x402.org) HTTP micropayment protocol — **live on Base mainnet, selling real data products to AI agents for USDC today**. Agents discover paid services, probe `402 Payment Required` responses, pay with stablecoins, and build/verify seller payment configs; the server runs both sides of that market.
+
+[![US City Open-Data Compliance Network on the 24K Labs curated list](https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402)](https://24klabs.ai/listing/us-city-open-data-compliance-network)
 
 ## Discover (public + A2A)
 
@@ -35,8 +37,8 @@ Payment for delivered products / documentation artifacts, or a voluntary tip. **
 |-------|-------|
 | Network | Base `eip155:8453` |
 | Asset | USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| payTo | `0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e` |
-| Explorer | https://basescan.org/address/0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e |
+| payTo | `0x05e1720bB82F86B5bc7940a99FDC702E32256357` |
+| Explorer | https://basescan.org/address/0x05e1720bB82F86B5bc7940a99FDC702E32256357 |
 | Machine cashier | buy any live paid endpoint (e.g. $0.01 property-check) |
 | Bounties protocol | [docs/BOUNTIES.md](docs/BOUNTIES.md) · [open a bounty](https://github.com/kwizzlesurp10-ctrl/x402-mcp/issues/new?template=paid-bounty.md) |
 | GitHub FUNDING.yml | [.github/FUNDING.yml](.github/FUNDING.yml) |
@@ -50,17 +52,17 @@ Fiat Sponsors (GitHub Sponsors / Polar / thanks.dev) do **not** credit `payTo` o
 | Product | Price | What you get |
 |---------|-------|--------------|
 | `GET /mn/property-check?address=…` | $0.01 USDC | Minneapolis rental-compliance snapshot composed from 3 live City of Minneapolis open datasets — the first machine-payable housing-compliance data for agents |
-| `GET /us/{code}/property-check?address=…` | $0.01 USDC | **US City Open-Data Compliance Network** (14 jurisdictions) — same wire protocol; free catalog `/us/cities` + free `/sample`; MCP: `city.list` → `city.sample` → `city.check` |
+| `GET /us/{code}/property-check?address=…` | $0.01 USDC | **US City Open-Data Compliance Network** (public catalog; see `/us/cities`) — same wire protocol; free catalog `/us/cities` + free `/sample`; MCP: `city.list` → `city.sample` → `city.check` |
 | `GET /swarm/products/d22bbf5f3c4b4666a6f80980c7bc7c50/purchase` | $0.05 USDC | Base Network Pulse: live settlement-conditions intelligence (EIP-1559 math + real RPC + ETH spot), pinned listing with the x402 Bazaar discovery extension |
 
 The public seller host holds **no spend key** — it only verifies and settles inbound payments ([docs/SELLER-STOREFRONT.md](docs/SELLER-STOREFRONT.md)). Roadmap: [ROADMAP.md](ROADMAP.md).
 
 ## Features
 
-- **23 MCP tools** for buyer, seller, x402 commerce, swarm-agency, US city compliance, MailRail messaging, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`
+- **20 MCP tools** for buyer, seller, x402 commerce, swarm-agency, US city compliance, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`. MailRail send/inbound is operator-only ([docs/MAILRAIL-PUBLIC-SURFACE.md](docs/MAILRAIL-PUBLIC-SURFACE.md)).
 - **4 MCP prompts** (`onboarding_flow`, `x402_tool_selector`, `generate_quote`, `troubleshoot_payment`) for LLM orchestrators
 - **4 MCP resources** (`x402://agent-card`, `x402://server-card`, `x402://tools-manifest`, `x402://pricing-table`) exposing live machine descriptors
-- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `x402.agent_card` (back-compat alias: `get_agent_card`) / `x402://agent-card` with per-`agent_id` quota isolation
+- **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `x402.agent_card` / `x402://agent-card` with per-`agent_id` quota isolation
 - **x402/Coinbase rail** (primary): x402 v2 wire format end to end — challenge generation, verify + settle via the CDP facilitator on Base mainnet, Bazaar discoverability on listings
 - **Stripe payment rail** (fiat alternative, HTTP only): `POST /stripe/checkout` + `POST /stripe/webhook` for card/bank payments (not exposed as an MCP tool)
 - **Commerce overlay:** 500 calls/month, 10/min rate limit, `meta` envelope on every response
@@ -135,10 +137,12 @@ data are intentionally never served. Public records, as-is; not legal advice.
 
 ## MCP Tools
 
-Tool names use domain.action trees so clients can route `x402.*`, `commerce.*`, `swarm.*`, `pulse.*`, `ops.*`, and `city.*`.
+Tool names use domain.action trees so clients can route `x402.*`, `a2a.*`, `commerce.*`, `swarm.*`, `pulse.*`, `ops.*`, and `city.*`.
 
 | Tool | Description |
 |------|-------------|
+| `x402.agent_card` | Return the A2A Agent ID Card and MCP server card |
+| `a2a.resolve_card` | Discover and inspect an external A2A Agent Card by domain or URL |
 | `x402.discover` | Query x402 Bazaar for paid HTTP APIs |
 | `x402.probe` | Probe URL for `PAYMENT-REQUIRED` on 402 |
 | `x402.pay_and_fetch` | Auto-pay and fetch protected resource |
@@ -157,9 +161,7 @@ Tool names use domain.action trees so clients can route `x402.*`, `commerce.*`, 
 | `city.list` | Free US City Open-Data Compliance catalog (codes, paid_url, sample_url, MCP golden path) |
 | `city.sample` | Free fixed-address property compliance sample for one city code |
 | `city.check` | Paid city property compliance via x402 (same HTTP resource external buyers use) |
-| `mailrail.send` | Dispatch transactional receipts, alert notifications, or agent communication over MailRail |
-| `mailrail.status` | Inspect MailRail provider status, active sender address, and dispatch capabilities |
-| `mailrail.inbound` | Ingest or route an inbound message to the MailRail Postmaster agent with mention defusing and inbox ledger recording |
+
 
 ## Installation
 
@@ -256,7 +258,7 @@ Cost-effective multi-agent operating group (scout, warden, treasurer, archivist,
 `x402-mcp` implements the **Agent-to-Agent (A2A) Protocol v1.0** and MCP machine identity for autonomous discovery.
 
 1. **HTTP:** `GET https://x402-mcp.onrender.com/.well-known/agent-card.json` (legacy: `/.well-known/agent.json`)
-2. **MCP tool:** `x402.agent_card` (back-compat alias: `get_agent_card`; optional `target_id` for a skill; implemented by server handler `get_agent_card`)
+2. **MCP tool:** `x402.agent_card` (optional `target_id` for a skill)
 3. **MCP resource:** `x402://agent-card`
 4. **Registry:** `/.well-known/agents.json` · **payTo:** `/.well-known/funding.json`
 

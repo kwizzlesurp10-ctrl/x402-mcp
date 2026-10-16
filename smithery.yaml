@@ -1,129 +1,75 @@
-# Smithery Configuration (https://smithery.ai)
+# Smithery configuration: https://smithery.ai/docs/build/project-config
 name: x402-mcp
-displayName: "x402-mcp"
+displayName: x402-mcp
+description: >
+  Pay for HTTP APIs and charge for your own with x402 USDC micropayments on Base.
+  Discover Bazaar services, probe 402 terms, pay-and-fetch protected resources,
+  and run US city open-data property compliance. Public tools need no API key.
 version: 0.1.0
-description: "Autonomous crypto commerce, property compliance, Base gas optimization, and Agent ID cards MCP server over x402 on Base mainnet."
-homepage: "https://x402-mcp.onrender.com"
-repository: "https://github.com/kwizzlesurp10-ctrl/x402-mcp"
-license: "MIT"
-iconUrl: "https://x402-mcp.onrender.com/favicon.ico"
-
+license: MIT
+homepage: https://x402-mcp.onrender.com
+repository: https://github.com/kwizzlesurp10-ctrl/x402-mcp
+documentation: https://github.com/kwizzlesurp10-ctrl/x402-mcp/blob/master/README.md
 categories:
   - payments
   - crypto
-  - blockchain
-  - base
-  - micropayments
-  - compliance
-  - real-estate
-  - agents
-
+  - developer-tools
+  - data
 tags:
-  - mcp
   - x402
-  - crypto
-  - ai-agents
-  - agent-cards
-  - compliance
-  - base
-  - blockchain
-  - fastmcp
-  - micropayments
   - usdc
-  - real-estate
-  - gas-optimizer
-  - agent-economy
-
-remote:
-  url: "https://x402-mcp.onrender.com/mcp/mcp"
-  transport: "streamable-http"
-  capabilities:
-    tools: true
-    resources: true
-    prompts: true
-
-startCommand:
-  type: stdio
-  command: python
-  args: ["run_stdio.py"]
-
+  - base
+  - micropayments
+  - mcp
+  - coinbase
+  - bazaar
+  - compliance
+runtime: container
+build:
+  dockerfile: Dockerfile
+  dockerBuildPath: "."
+# Top-level schema kept in sync for registry/payTo tests (canonical cashier).
 configSchema:
   type: object
+  required: []
   properties:
     X402_PAY_TO_ADDRESS:
       type: string
-      title: "x402 Pay-To Address"
-      description: "Base mainnet wallet address (0x...) to receive x402 USDC micropayments for seller endpoints and service sales."
-      default: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e"
+      title: Seller pay-to address
+      description: >
+        Optional 0x USDC address on Base for inbound x402 sales.
+        Public discover/probe/city.sample tools work without this.
+      default: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
     EVM_PRIVATE_KEY:
       type: string
-      title: "EVM Private Key"
-      description: "Optional buyer EVM private key (0x...) for signing automatic EIP-3009 micropayments when calling pay_and_fetch or check_us_city_property."
-    X402_FACILITATOR_URL:
-      type: string
-      title: "x402 Facilitator URL"
-      description: "Facilitator endpoint URL for payment verification and settlement."
-      default: "https://x402.org/facilitator"
-    X402_NETWORK:
-      type: string
-      title: "Default x402 Network"
-      description: "Default CAIP-2 network identifier for payments (e.g., eip155:8453 for Base mainnet, eip155:84532 for Base Sepolia)."
-      default: "eip155:84532"
-    DEFAULT_AGENT_ID:
-      type: string
-      title: "Default Agent ID"
-      description: "Identifier for tracking agent tool usage, quota allocation, and rate-limit state."
-      default: "smithery-agent"
-    DYNAMIC_QUOTA_MODE:
-      type: string
-      title: "Dynamic Quota Mode"
-      description: "Mode for dynamic quota calculation and tier management (standard, strict, relaxed)."
-      default: "standard"
-    COINMARKETCAP_API_KEY:
-      type: string
-      title: "CoinMarketCap API Key"
-      description: "Optional API key for live crypto asset pricing feeds."
-    CDP_API_KEY_ID:
-      type: string
-      title: "Coinbase CDP API Key ID"
-      description: "Optional Coinbase CDP API Key ID for Base mainnet facilitator verification and settlement."
-    CDP_API_KEY_SECRET:
-      type: string
-      title: "Coinbase CDP API Key Secret"
-      description: "Optional Coinbase CDP API Key Secret (Ed25519 private key) for Base mainnet settlement."
-    STRIPE_SECRET_KEY:
-      type: string
-      title: "Stripe Secret Key"
-      description: "Optional Stripe Secret Key (sk_...) for fiat checkout session creation (Pro tier and credit packs)."
-    BASE_RPC_URL:
-      type: string
-      title: "Base RPC URL"
-      description: "JSON-RPC endpoint URL for live Base network pulse telemetry and gas estimations."
-      default: "https://mainnet.base.org"
-
-commandFunction: |-
-  (config) => ({
-    command: 'python',
-    args: ['run_stdio.py'],
-    env: {
-      X402_PAY_TO_ADDRESS: config?.X402_PAY_TO_ADDRESS || config?.x402PayToAddress || '',
-      EVM_PRIVATE_KEY: config?.EVM_PRIVATE_KEY || config?.evmPrivateKey || '',
-      X402_FACILITATOR_URL: config?.X402_FACILITATOR_URL || config?.x402FacilitatorUrl || 'https://x402.org/facilitator',
-      X402_DEFAULT_NETWORK: config?.X402_NETWORK || config?.x402Network || 'eip155:84532',
-      DEFAULT_AGENT_ID: config?.DEFAULT_AGENT_ID || config?.defaultAgentId || 'smithery-agent',
-      DYNAMIC_QUOTA_MODE: config?.DYNAMIC_QUOTA_MODE || config?.dynamicQuotaMode || 'standard',
-      COINMARKETCAP_API_KEY: config?.COINMARKETCAP_API_KEY || config?.coinmarketcapApiKey || '',
-      CDP_API_KEY_ID: config?.CDP_API_KEY_ID || config?.cdpApiKeyId || '',
-      CDP_API_KEY_SECRET: config?.CDP_API_KEY_SECRET || config?.cdpApiKeySecret || '',
-      STRIPE_SECRET_KEY: config?.STRIPE_SECRET_KEY || config?.stripeSecretKey || '',
-      BASE_RPC_URL: config?.BASE_RPC_URL || config?.baseRpcUrl || 'https://mainnet.base.org'
-    }
-  })
-
+      title: Buyer wallet private key
+      description: >
+        Optional dedicated burner key for x402.pay_and_fetch and city.check.
+        Never use a main wallet. Leave blank on public seller hosts.
+      x-from:
+        header: x-evm-private-key
 exampleConfig:
-  X402_PAY_TO_ADDRESS: "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e"
-  X402_FACILITATOR_URL: "https://x402.org/facilitator"
-  X402_NETWORK: "eip155:84532"
-  DEFAULT_AGENT_ID: "smithery-agent"
-  DYNAMIC_QUOTA_MODE: "standard"
-  BASE_RPC_URL: "https://mainnet.base.org"
+  X402_PAY_TO_ADDRESS: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+startCommand:
+  type: http
+  configSchema:
+    type: object
+    required: []
+    properties:
+      X402_PAY_TO_ADDRESS:
+        type: string
+        title: Seller pay-to address
+        description: >
+          Optional 0x USDC address on Base for inbound x402 sales.
+          Public discover/probe/city.sample tools work without this.
+        default: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+      EVM_PRIVATE_KEY:
+        type: string
+        title: Buyer wallet private key
+        description: >
+          Optional dedicated burner key for x402.pay_and_fetch and city.check.
+          Never use a main wallet. Leave blank on public seller hosts.
+        x-from:
+          header: x-evm-private-key
+  exampleConfig:
+    X402_PAY_TO_ADDRESS: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"

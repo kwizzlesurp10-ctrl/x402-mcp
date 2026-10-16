@@ -36,11 +36,16 @@ def test_memory_lists_every_paid_catalog_path_and_price() -> None:
     memory = (ROOT / "MEMORY.md").read_text(encoding="utf-8")
     paid = _paid()
     assert paid, "catalog generator emitted no paid resources"
+    catalog_paths = {_path(r["url"]) for r in paid}
     for r in paid:
         path = _path(r["url"])
         assert path in memory, f"MEMORY.md missing catalog path {path} ({r['name']})"
         assert r["price"] in memory, f"MEMORY.md missing catalog price {r['price']} for {r['name']}"
         assert r["name"] in memory, f"MEMORY.md missing catalog name {r['name']}"
+    for code in ("mia", "atl"):
+        stub = f"/us/{code}/property-check"
+        if stub not in catalog_paths:
+            assert stub not in memory, f"MEMORY.md lists unpublished stub {stub} as a live paid SKU"
 
 
 def test_docs_do_not_treat_live_products_as_open_work() -> None:

@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     key_provider: str = "env"
 
     # Seller (cold receive) — on-chain payTo for revenue. Prefer separate from buyer.
-    # Live cashier is 0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e (DEFAULT_PAY_TO).
+    # Live cashier is 0x05e1720bB82F86B5bc7940a99FDC702E32256357 (DEFAULT_PAY_TO).
     x402_pay_to_address: str | None = None
 
     @field_validator("x402_pay_to_address", mode="before")
@@ -217,6 +217,10 @@ class Settings(BaseSettings):
     mailrail_admin_recipient: str | None = None
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
+    # Only these agent ids may use MailRail HTTP/MCP (comma-separated).
+    mailrail_allowed_agent_ids: str = "x402-mailrail-postmaster"
+    github_token: str | None = None
+    github_repo: str = "kwizzlesurp10-ctrl/x402-mcp"
 
     # Autonomous Cache Warmer & Pulse Auto-Freshness Engine
     cache_warmer_enabled: bool = True

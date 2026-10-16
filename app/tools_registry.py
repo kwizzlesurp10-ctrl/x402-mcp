@@ -22,14 +22,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "tier": "free",
     },
     {
-        "name": "get_agent_card",
-        "description": (
-            "Back-compat alias for x402.agent_card. Returns the A2A Protocol v1.0 "
-            "Agent ID Card and MCP server card."
-        ),
-        "tier": "free",
-    },
-    {
         "name": "x402.discover",
         "description": (
             "Discover paid HTTP APIs in the x402 Bazaar via the facilitator catalog. "
@@ -183,25 +175,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "requires_env": ["EVM_PRIVATE_KEY"],
     },
     {
-        "name": "mailrail.send",
+        "name": "a2a.resolve_card",
         "description": (
-            "Dispatch transactional receipts, alert notifications, or agent communication over MailRail. "
-            "Supports mock ledger, Resend API, SMTP, or Webhooks."
-        ),
-        "tier": "free",
-    },
-    {
-        "name": "mailrail.status",
-        "description": (
-            "Inspect MailRail provider status, active sender address, and dispatch capabilities. "
-            "Call to verify communication rail readiness before dispatching receipts or alerts."
-        ),
-        "tier": "free",
-    },
-    {
-        "name": "mailrail.inbound",
-        "description": (
-            "Ingest or route an inbound message to the MailRail Postmaster agent with mention defusing and inbox ledger recording."
+            "Discover and inspect an external Agent-to-Agent (A2A) node by domain or URL. "
+            "Fetches .well-known/agent-card.json, validates protocol compatibility, checks for "
+            "a2a-x402 and AP2 payment extensions, and extracts callable skills with pricing."
         ),
         "tier": "free",
     },
@@ -209,3 +187,20 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 
 EXPECTED_TOOL_NAMES: frozenset[str] = frozenset(spec["name"] for spec in TOOL_SPECS)
 TOOL_COUNT = len(TOOL_SPECS)
+
+# Operator-only MailRail send/inbound stay implemented, but never on the
+# public MCP catalog Smithery scans.
+OPERATOR_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
+    {"mailrail.send", "mailrail.status", "mailrail.inbound"}
+)
+
+
+def is_public_mcp_tool(name: str) -> bool:
+    """True for dotted public x402/commerce/city/pulse/ops/swarm tools."""
+    if not name or name in OPERATOR_ONLY_MCP_TOOLS:
+        return False
+    if name.startswith("mailrail."):
+        return False
+    if name == "get_agent_card":
+        return False
+    return "." in name

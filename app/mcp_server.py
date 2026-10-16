@@ -133,6 +133,7 @@ def _transport_security() -> TransportSecuritySettings:
 mcp = FastMCP(
     "x402-micropayments",
     instructions=INSTRUCTIONS,
+    website_url=settings.public_base_url,
     transport_security=_transport_security(),
     # JSON bodies (not SSE) so Smithery Connect and other HTTP gateways can
     # parse initialize/tools/list. Stateless so proxies that drop
@@ -221,15 +222,6 @@ async def get_agent_card(
     )
 
 
-@mcp.tool(
-    name="get_agent_card",
-    title="A2A Agent ID Card (compat)",
-    description=(
-        "Back-compat alias for x402.agent_card. "
-        "Returns the A2A Protocol v1.0 Agent ID Card and MCP server card."
-    ),
-    annotations=READONLY,
-)
 async def get_agent_card_compat(
     target_id: Desc[
         str | None,
@@ -951,14 +943,39 @@ async def check_us_city_property(
 
 
 @mcp.tool(
-    name="mailrail.send",
-    title="Send agent notification via MailRail",
+    name="a2a.resolve_card",
+    title="Resolve external A2A Agent Card",
     description=(
-        "Dispatch transactional receipts, alert notifications, or agent communication over MailRail. "
-        "Supports mock ledger, Resend API, SMTP, or Webhooks."
+        "Discover and inspect an external Agent-to-Agent (A2A) node by domain or URL. "
+        "Fetches .well-known/agent-card.json, validates protocol compatibility, checks for "
+        "a2a-x402 and AP2 payment extensions, and extracts callable skills with pricing."
     ),
-    annotations=WRITE_IDEMPOTENT,
+    annotations=READONLY_EXTERNAL,
 )
+async def resolve_external_agent_card(
+    target: Desc[
+        str,
+        Field(
+            description=(
+                "Host domain or full URL of the agent (e.g. 'agent.example.com' "
+                "or 'https://agent.example.com/.well-known/agent-card.json')"
+            )
+        ),
+    ],
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional calling agent identifier for quota tracking."),
+    ] = None,
+) -> str:
+    from app.a2a_discovery import resolve_agent_card
+
+    return await _execute_tool(
+        "a2a.resolve_card",
+        agent_id,
+        lambda resolved: resolve_agent_card(target),
+    )
+
+
 async def mailrail_send(
     to: Desc[
         str,
@@ -982,6 +999,11 @@ async def mailrail_send(
     ] = None,
 ) -> str:
     from app import mailrail
+    from app.mailrail_agent import refuse_if_not_mailrail_agent
+
+    refused = refuse_if_not_mailrail_agent(agent_id)
+    if refused:
+        return json.dumps(refused, indent=2)
 
     return await _execute_tool(
         "mailrail.send",
@@ -1000,14 +1022,6 @@ async def mailrail_send(
     )
 
 
-@mcp.tool(
-    name="mailrail.status",
-    title="Check MailRail health and configuration",
-    description=(
-        "Inspect MailRail provider status, active sender address, and dispatch capabilities."
-    ),
-    annotations=READONLY,
-)
 async def mailrail_status(
     agent_id: Desc[
         str | None,
@@ -1015,6 +1029,11 @@ async def mailrail_status(
     ] = None,
 ) -> str:
     from app.config import settings
+    from app.mailrail_agent import refuse_if_not_mailrail_agent
+
+    refused = refuse_if_not_mailrail_agent(agent_id)
+    if refused:
+        return json.dumps(refused, indent=2)
 
     return await _execute_tool(
         "mailrail.status",
@@ -1034,14 +1053,6 @@ async def mailrail_status(
     )
 
 
-@mcp.tool(
-    name="mailrail.inbound",
-    title="Ingest inbound agent message or webhook",
-    description=(
-        "Ingest an incoming message or webhook to the MailRail Postmaster agent with mention defusing and inbox ledger recording."
-    ),
-    annotations=WRITE_IDEMPOTENT,
-)
 async def mailrail_inbound(
     sender: Desc[
         str,
@@ -1061,6 +1072,11 @@ async def mailrail_inbound(
     ] = None,
 ) -> str:
     from app import mailrail
+    from app.mailrail_agent import refuse_if_not_mailrail_agent
+
+    refused = refuse_if_not_mailrail_agent(agent_id)
+    if refused:
+        return json.dumps(refused, indent=2)
 
     return await _execute_tool(
         "mailrail.inbound",
@@ -1102,6 +1118,30 @@ def prompt_buy_paid_api(
         "and this host has EVM_PRIVATE_KEY, call x402.pay_and_fetch with "
         "max_price_usdc set to your ceiling. If there is no spend key, return "
         "the 402 probe and how_to_pay instead of paying."
+    )
+
+
+@mcp.prompt(
+    name="x402.sell_api",
+    title="Sell an HTTP API over x402",
+    description="Walk an agent through building seller PAYMENT-REQUIRED terms and listing an endpoint in Bazaar.",
+)
+def prompt_sell_api(
+    resource_url: Desc[
+        str,
+        Field(description="Public URL of the HTTP resource to sell. Example: https://example.com/data"),
+    ],
+    price: Desc[
+        str,
+        Field(description="List price string. Example: '$0.01'."),
+    ] = "$0.01",
+) -> str:
+    return (
+        f"Call x402.networks to pick a CAIP-2 network, then x402.build_seller "
+        f"with resource_url={resource_url!r} and price={price!r}. "
+        "Set discoverable=true plus discovery_method/input/output examples so Bazaar "
+        "can catalog the endpoint after a settled payment. Use x402.verify on inbound "
+        "PAYMENT-SIGNATURE before releasing paid content."
     )
 
 

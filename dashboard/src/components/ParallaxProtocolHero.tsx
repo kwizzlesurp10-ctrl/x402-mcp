@@ -112,7 +112,7 @@ export function ParallaxProtocolHero({ telemetry }: { telemetry: TelemetryRespon
               }}
             >
               <span className="dot dot-cyan" aria-hidden="true" />
-              x402 Micropayment Standard • V2.0 Active
+              x402 V2.0 • A2A v0.1 • AP2 v1 Commerce
             </div>
             <h1
               style={{
@@ -128,9 +128,10 @@ export function ParallaxProtocolHero({ telemetry }: { telemetry: TelemetryRespon
               Accountless Micropayments for the Agent Economy
             </h1>
             <p style={{ margin: "8px 0 0 0", color: "#9CA3AF", fontSize: "14px", maxWidth: "680px" }}>
-              HTTP 402 native payment standard. Linux Foundation at the protocol layer; this node is
-              independent and is not certified by the Linux Foundation. Instant, settled stablecoin
-              micropayments for AI agents and HTTP resources with zero account friction.
+              HTTP 402 native payment standard & Google Agent-to-Agent (A2A) / AP2 protocol extension.
+              Linux Foundation at the protocol layer; this node is independent and is not certified
+              by the Linux Foundation. Instant settled stablecoin micropayments, cross-agent card discovery,
+              and merchant checkout for autonomous agents.
             </p>
           </div>
 
@@ -171,9 +172,9 @@ export function ParallaxProtocolHero({ telemetry }: { telemetry: TelemetryRespon
           {[
             {
               step: "01",
-              title: "HTTP Request",
-              desc: "Agent requests resource URL with keyless GET/POST",
-              tag: "Client Request",
+              title: "A2A Discovery & Request",
+              desc: "Agents discover cards via agent-card.json or direct GET/POST",
+              tag: "A2A Discovery",
               color: "#3B82F6",
             },
             {
@@ -185,9 +186,9 @@ export function ParallaxProtocolHero({ telemetry }: { telemetry: TelemetryRespon
             },
             {
               step: "03",
-              title: "EIP-712 Sign",
-              desc: "Agent signs payment payload via wallet / facilitator",
-              tag: "Agent Spend",
+              title: "AP2 Mandate & Sign",
+              desc: "Agent authorizes AP2 cart checkout or signs EIP-712 payload",
+              tag: "AP2 & Spend",
               color: "#8B5CF6",
             },
             {

@@ -1,17 +1,5 @@
 {
   "type": "object",
   "required": [],
-  "properties": {
-    "X402_PAY_TO_ADDRESS": {
-      "type": "string",
-      "title": "Seller pay-to address",
-      "description": "Optional 0x USDC address on Base for inbound x402 sales. Public discover/probe tools work without this."
-    },
-    "EVM_PRIVATE_KEY": {
-      "type": "string",
-      "title": "Buyer wallet private key",
-      "description": "Optional dedicated burner key for x402.pay_and_fetch. Never use a main wallet. Leave blank on public seller hosts.",
-      "x-from": { "header": "x-evm-private-key" }
-    }
-  }
+  "properties": {}
 }

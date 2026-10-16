@@ -111,6 +111,21 @@ async def rebuild_pinned_product(agent_id: str = _PINNED_SELLER_AGENT_ID) -> Com
     return product
 
 
+async def pulse_refresh_loop() -> None:
+    """Republish the pinned Pulse on a schedule so the cataloged URL stays live.
+
+    Interval follows ``pinned_pulse_max_age_seconds`` (minimum 60s). Failures are
+    logged and swallowed — a facilitator blip must never take down ``/health``.
+    """
+    while True:
+        interval = max(60, int(settings.pinned_pulse_max_age_seconds or 900))
+        await asyncio.sleep(interval)
+        try:
+            await restore_pinned_listing()
+        except Exception:
+            log.exception("scheduled pulse refresh failed; /health stays up")
+
+
 async def restore_pinned_listing() -> CompositeProduct | None:
     """Make sure PINNED_PULSE_PRODUCT_ID is listed and sellable, republishing if not.
 

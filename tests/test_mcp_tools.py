@@ -32,8 +32,9 @@ async def test_get_agent_card_compat_alias_delegates_to_canonical() -> None:
     payload_alias = json.loads(await mcp_server.get_agent_card_compat(agent_id="compat-agent"))
     payload_canonical = json.loads(await mcp_server.get_agent_card(agent_id="compat-agent"))
 
-    assert "get_agent_card" in manifest_names
-    assert "get_agent_card" in registered_names
+    assert "get_agent_card" not in manifest_names
+    assert "get_agent_card" not in registered_names
+    assert "x402.agent_card" in registered_names
     assert payload_alias["data"] == payload_canonical["data"]
     assert payload_alias["meta"]["agent_id"] == "compat-agent"
     assert payload_canonical["meta"]["agent_id"] == "compat-agent"

@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from app.config import settings
 
+# Solana mainnet CAIP-2 (SVM). Seller-only boxes never hold SVM_PRIVATE_KEY.
+SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+
 
 def build_payment_rails() -> dict:
     """Document available payment rails for manifest and /upgrade."""
+    from app import x402_services
+
+    svm_registered = x402_services.svm_available()
     return {
         "stripe": {
             "primary": True,
@@ -33,6 +39,30 @@ def build_payment_rails() -> dict:
             "discovery_url": settings.cdp_discovery_url,
             "requires_env": ["X402_PAY_TO_ADDRESS"],
             "configured": bool(settings.x402_pay_to_address),
+        },
+        "x402_svm": {
+            "primary": False,
+            "description": (
+                "Solana (SVM) exact scheme for seller listings. Public host "
+                "registers solana:* when x402[svm] is installed; no spend key "
+                "on this box."
+            ),
+            "network": SOLANA_MAINNET,
+            "pattern": "solana:*",
+            "scheme": "exact",
+            "requires_env": ["X402_PAY_TO_ADDRESS"],
+            "configured": bool(settings.x402_pay_to_address),
+            "registered": svm_registered,
+            "settle": (
+                "live-scheme-registered"
+                if svm_registered
+                else "unavailable-x402-svm-extra-missing"
+            ),
+            "facilitator_note": (
+                "CDP/x402 facilitator settle on Solana mainnet is not claimed "
+                "until the facilitator advertises SVM support. Listings may "
+                "include solana:* accepts; settlement can fail until then."
+            ),
         },
         "mailrail": {
             "primary": False,

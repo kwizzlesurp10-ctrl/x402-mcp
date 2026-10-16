@@ -16,13 +16,15 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
+from app.payment_rails import build_payment_rails
 from app.tools_registry import TOOL_COUNT
 
 # Base mainnet native USDC (canonical cashier asset for this storefront).
 BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-DEFAULT_PAY_TO = "0x8A897D546c22d726b45Fa25F0EBB56207E63fF4e"
+DEFAULT_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
 # A2A × x402 extension URI (x402 foundation transport + google-a2a a2a-x402).
 A2A_X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
+AP2_EXTENSION_URI = "https://github.com/google-agentic-commerce/ap2/v1"
 REPO_URL = "https://github.com/kwizzlesurp10-ctrl/x402-mcp"
 BOUNTIES_DOC_URL = f"{REPO_URL}/blob/master/docs/BOUNTIES.md"
 FUNDING_LEGAL = (
@@ -57,6 +59,7 @@ def funding() -> dict[str, Any]:
         "asset": BASE_USDC,
         "assetSymbol": "USDC",
         "payTo": pay_to,
+        "payment_rails": build_payment_rails(),
         "explorer": f"https://basescan.org/address/{pay_to}",
         "tokenExplorer": f"https://basescan.org/token/{BASE_USDC}?a={pay_to}",
         "machineCashier": {
@@ -316,6 +319,7 @@ def llms_txt() -> str:
     lines = [
         "# x402-mcp storefront",
         "",
+        "> MCP listing: https://smithery.ai/servers/kwizzlesurp10/x402-mcp",
         "> Pay-per-call HTTP APIs over x402: USDC on Base, no API key, no signup.",
         "> A 402 response IS the price quote — read the PAYMENT-REQUIRED header,",
         "> sign an EIP-3009 USDC transfer authorization, retry with",
@@ -440,7 +444,7 @@ def agent_card() -> dict[str, Any]:
             "name": "A2A Agent Card & Capabilities Inspector",
             "description": (
                 "Inspect this host's A2A Protocol v1.0 Agent ID Card, MCP server card, "
-                "skills, and payment rails. Free. MCP tool: get_agent_card. "
+                "skills, and payment rails. Free. MCP tool: x402.agent_card. "
                 f"Resource: x402://agent-card. HTTP: GET {base}/.well-known/agent-card.json."
             ),
             "tags": [
@@ -611,15 +615,33 @@ def agent_card() -> dict[str, Any]:
             ],
             "inputModes": ["application/json"],
             "outputModes": ["application/json"],
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "city_code": {"type": "string", "description": "City code (e.g. mn, sea, chi, nyc, atx, bna, phx)"},
+                                "address": {"type": "string", "description": "Street address string"},
+                            },
+                            "required": ["city_code", "address"],
+                        },
+                        "description": "List of city codes and street addresses to screen",
+                    },
+                    "include_base_pulse_context": {"type": "boolean", "default": False},
+                },
+                "required": ["properties"],
+            },
         },
         {
             "id": "mailrail-postmaster",
             "name": "MailRail Postmaster & In/Out Dispatcher",
             "description": (
-                "Dedicated agent communications gateway for transactional notifications, "
-                "inbound webhook routing, settlement receipts, and mention defusing. "
-                f"HTTP: POST {base}/mailrail/inbound, GET {base}/mailrail/inbox, GET {base}/mailrail/stats. "
-                "MCP tools: mailrail.send, mailrail.status, mailrail.inbound."
+                "Operator-only communications rail for settlement receipts and inbound "
+                "postmaster ingest. Not a public MCP tool. HTTP inbound/ledger/inbox/stats "
+                f"require Authorization Bearer OPERATOR_TOKEN. Health: GET {base}/mailrail/health."
             ),
             "tags": [
                 "mailrail",
@@ -761,6 +783,7 @@ def agent_card() -> dict[str, Any]:
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
+            "stateTransitionHistory": True,
             "extensions": [
                 {
                     "uri": A2A_X402_EXTENSION_URI,
@@ -769,7 +792,12 @@ def agent_card() -> dict[str, Any]:
                         f"USDC settlement on {network} to payTo {pay_to}."
                     ),
                     "required": False,
-                }
+                },
+                {
+                    "uri": AP2_EXTENSION_URI,
+                    "description": "Google Agent Payments Protocol (AP2) mandate and authorization layer",
+                    "required": False,
+                },
             ],
         },
         "defaultInputModes": ["text/plain", "application/json"],
@@ -1091,20 +1119,61 @@ def mcp_server_card() -> dict[str, Any]:
 
     mcp_manifest = build_mcp_manifest()
     tools = list(mcp_manifest["tools"])
+    prompts: list[dict[str, Any]] = []
+    resources: list[dict[str, Any]] = []
     try:
-        from app.mcp_server import mcp as _mcp
+        from app.mcp_server import _simplify_schema, mcp as _mcp
+        from app.tools_registry import is_public_mcp_tool
 
         live = []
         for tool in _mcp._tool_manager._tools.values():
-            live.append(
-                {
-                    "name": getattr(tool, "name", None) or getattr(tool, "key", ""),
-                    "description": getattr(tool, "description", "") or "",
-                    "inputSchema": getattr(tool, "parameters", None) or {"type": "object"},
-                }
+            name = getattr(tool, "name", None) or getattr(tool, "key", "")
+            if not is_public_mcp_tool(name):
+                continue
+            ann = getattr(tool, "annotations", None)
+            if hasattr(ann, "model_dump"):
+                ann_dict = ann.model_dump(exclude_none=True)
+            elif isinstance(ann, dict):
+                ann_dict = ann
+            else:
+                ann_dict = {}
+            entry = {
+                "name": name,
+                "description": getattr(tool, "description", "") or "",
+                "inputSchema": _simplify_schema(
+                    getattr(tool, "parameters", None) or {"type": "object"}
+                ),
+                "annotations": {
+                    "readOnlyHint": ann_dict.get("readOnlyHint"),
+                    "destructiveHint": ann_dict.get("destructiveHint"),
+                    "openWorldHint": ann_dict.get("openWorldHint"),
+                },
+            }
+            out = getattr(tool, "output_schema", None) or getattr(
+                tool, "outputSchema", None
             )
+            if out:
+                entry["outputSchema"] = _simplify_schema(out)
+            live.append(entry)
         if live:
             tools = live
+        for prompt in _mcp._prompt_manager.list_prompts():
+            prompts.append(
+                {
+                    "name": prompt.name,
+                    "description": prompt.description or "",
+                }
+            )
+        for resource in _mcp._resource_manager.list_resources():
+            resources.append(
+                {
+                    "uri": str(resource.uri),
+                    "name": resource.name,
+                    "description": resource.description or "",
+                    "mimeType": getattr(resource, "mime_type", None)
+                    or getattr(resource, "mimeType", None),
+                }
+            )
     except Exception:
         pass
 
@@ -1123,7 +1192,6 @@ def mcp_server_card() -> dict[str, Any]:
         "transport": {
             "type": "streamable-http",
             "url": f"{base}/mcp/mcp",
-            "sse_url": f"{base}/mcp/sse",
         },
         "authentication": {
             "type": "x402",
@@ -1140,6 +1208,7 @@ def mcp_server_card() -> dict[str, Any]:
         },
         "configSchema": {
             "type": "object",
+            "required": [],
             "properties": {
                 "X402_PAY_TO_ADDRESS": {
                     "type": "string",
@@ -1158,8 +1227,8 @@ def mcp_server_card() -> dict[str, Any]:
             }
         ],
         "tools": tools,
-        "prompts": True,
-        "resources": True,
+        "prompts": prompts,
+        "resources": resources,
         "homepage": base,
         "repository": {
             "type": "git",
@@ -1302,6 +1371,7 @@ def agentic_market_json() -> dict[str, Any]:
             "asset_address": BASE_USDC,
             "pay_to": pay_to,
             "facilitator_url": settings.cdp_facilitator_url if network == "eip155:8453" else settings.x402_facilitator_url,
+            "payment_rails": build_payment_rails(),
         },
         "services": services,
         "swarm": {

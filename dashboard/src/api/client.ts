@@ -273,6 +273,10 @@ export const api = {
     getJson<Record<string, unknown>>(
       `/probe?url=${encodeURIComponent(url)}&method=${encodeURIComponent(method)}`,
     ),
+  a2aResolve: (url: string) =>
+    getJson<Record<string, unknown>>(
+      `/a2a/resolve?url=${encodeURIComponent(url)}`,
+    ),
   sellerRequirements: (body: {
     network: string;
     price: string;

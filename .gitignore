@@ -24,3 +24,7 @@ secrets/
 # Teamwork Agent Logs
 .agents/
 .claude/worktrees/
+
+# Wallet key material — addresses live in docs; private keys stay local
+.keys/**
+!.keys/README.txt
