@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     env:
-      RPC: https://mainnet.base.org
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
       USDC: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
       PAY_TO: '0x05e1720bB82F86B5bc7940a99FDC702E32256357'
       # Comma-separated, lowercase. Every wallet WE settle from. Anything else
@@ -37,62 +37,38 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PYTHONPATH: scripts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Scan Base for stranger payments and alert
         run: |
           python3 - <<'PY'
-          import json, os, urllib.error, urllib.request
+          import os
+          import sys
 
           from alerts import Alerter, event_key
+          from sale_watch_base import RpcInfrastructureError, fetch_transfer_logs, latest_block_number, rpc_call
 
-          RPC = os.environ["RPC"]
           USDC = os.environ["USDC"]
           PAY_TO = os.environ["PAY_TO"].lower()
           OURS = {w.strip().lower() for w in os.environ["OUR_WALLETS"].split(",") if w.strip()}
           REPO = os.environ["GH_REPO"]
-          XFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
-          def rpc(method, params):
-              req = urllib.request.Request(
-                  RPC,
-                  data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
-                  # public Base RPC 403s the default urllib User-Agent.
-                  headers={"content-type": "application/json", "user-agent": "x402-sale-watch/1.0"},
+          try:
+              latest = latest_block_number(rpc_call)
+              # ~2s blocks; cron every 30 min. Scan the last ~2 hours (3600 blocks)
+              # every run so a delayed/skipped run cannot miss a sale. The event key
+              # in the alert title keeps the overlap harmless.
+              start = max(0, latest - 3600)
+              logs = fetch_transfer_logs(
+                  rpc_call,
+                  usdc=USDC,
+                  pay_to=PAY_TO,
+                  start_block=start,
+                  end_block=latest,
               )
-              return json.loads(urllib.request.urlopen(req, timeout=45).read())["result"]
-
-          latest = int(rpc("eth_blockNumber", []), 16)
-          # ~2s blocks; cron every 30 min. Scan the last ~2 hours (3600 blocks)
-          # every run so a delayed/skipped run cannot miss a sale. The event key
-          # in the alert title keeps the overlap harmless.
-          start = max(0, latest - 3600)
-          topic_to = "0x" + "0" * 24 + PAY_TO[2:]
-
-          def fetch_transfer_logs(start_block: int, end_block: int, chunk_size: int = 900):
-              logs = []
-              current = start_block
-              while current <= end_block:
-                  to_block = min(end_block, current + chunk_size - 1)
-                  try:
-                      chunk = rpc("eth_getLogs", [{
-                          "fromBlock": hex(current), "toBlock": hex(to_block),
-                          "address": USDC, "topics": [XFER, None, topic_to],
-                      }])
-                  except urllib.error.HTTPError as exc:
-                      if exc.code == 413 and chunk_size > 25:
-                          chunk_size = max(25, chunk_size // 2)
-                          print(
-                              f"eth_getLogs 413 for {current}-{to_block}; "
-                              f"retrying with chunk_size={chunk_size}"
-                          )
-                          continue
-                      raise
-                  logs.extend(chunk)
-                  current = to_block + 1
-              return logs
-
-          logs = fetch_transfer_logs(start, latest)
+          except RpcInfrastructureError as exc:
+              print(f"::warning::Base RPC rate-limited or unavailable; skipping scan this run: {exc}")
+              sys.exit(0)
 
           strangers = []
           for lg in logs:
