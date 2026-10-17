@@ -52,7 +52,7 @@ def _pays_project(rc: dict) -> bool:
     for lg in rc.get("logs", []):
         t = lg.get("topics", [])
         if lg.get("address", "").lower() == USDC and len(t) == 3 and t[0] == TRANSFER:
-            if "0x" + t[2][-40:].lower() in ledger_quality.PROJECT_PAYTO_ADDRESSES:
+            if ledger_quality.is_project_payto("0x" + t[2][-40:]):
                 return True
     return False
 

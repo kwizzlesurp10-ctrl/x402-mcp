@@ -26,6 +26,7 @@ Only ``verified_external`` counts toward revenue.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Iterable
@@ -38,14 +39,24 @@ BASE_MAINNET = "eip155:8453"
 TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
 # Every address this project has used as payTo (current + retired cashiers).
-# A sale "from" one of these is the operator paying itself.
-PROJECT_PAYTO_ADDRESSES = frozenset(
+# A sale "from" one of these is the operator paying itself. Stored as sha256 of
+# the lowercase address so retired cashiers are not re-advertised in the tree
+# (tests/test_payto_single_cashier.py); the live one is also matched directly.
+_PROJECT_PAYTO_SHA256 = frozenset(
     {
-        "0x0d25a44f74868ece53b305c97139cf4b62963410",  # current Coinbase Wallet
-        "0x05e1720bb82f86b5bc7940a99fdc702e32256357",  # retired sole cashier
-        "0xab745e5f576667037696e78ba7da28e193e4423d",  # retired oracle payTo
+        "8502e6fa0dae465a69d91f10666c893b68c2f69d34804ea66669de0b4c4c27fc",  # current Coinbase Wallet
+        "6d2a78f45386d0f92fcc64b9463563f6fd91331dd1b22a19e66d11620a5bd803",  # retired cashier (rotated 2026-10-17)
+        "df880fc802b194970e70bbff86e16ab0e61862d389a74870dddf0859313cfe9c",  # retired oracle payTo
     }
 )
+
+
+def is_project_payto(address: object) -> bool:
+    text = str(address or "").strip().lower()
+    if not text:
+        return False
+    return hashlib.sha256(text.encode()).hexdigest() in _PROJECT_PAYTO_SHA256
+
 
 COUNTED_QUALITY = "verified_external"
 QUALITIES = (
@@ -128,7 +139,7 @@ def classify_revenue_row(
             return "duplicate"
         seen_txs.add(tx_l)
     payer = str(row.get("payer") or "").strip().lower()
-    if payer and payer in PROJECT_PAYTO_ADDRESSES:
+    if payer and is_project_payto(payer):
         return "self_payment"
     try:
         is_operator = ledger_io.classify_operator_settle(row, operator_wallets)
