@@ -15,7 +15,7 @@ from app.swarm import ledger_writer
 # The demand suite's external payer. Zero-padded, and still a buyer.
 _STRANGER = "0x7e81988b710000000000000000000000000000cd"
 # Live cashier only. The rotated-out payer must not become a customer.
-_CURRENT_CASHIER = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+_CURRENT_CASHIER = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 
 
 def test_abate_and_closed_are_not_open() -> None:
