@@ -53,14 +53,19 @@ jobs:
           OURS = {w.strip().lower() for w in os.environ["OUR_WALLETS"].split(",") if w.strip()}
           REPO = os.environ["GH_REPO"]
 
+          _rpc_pin: list[str] = []
+
+          def rpc(method, params):
+              return rpc_call(method, params, pin=_rpc_pin)
+
           try:
-              latest = latest_block_number(rpc_call)
+              latest = latest_block_number(rpc)
               # ~2s blocks; cron every 30 min. Scan the last ~2 hours (3600 blocks)
               # every run so a delayed/skipped run cannot miss a sale. The event key
               # in the alert title keeps the overlap harmless.
               start = max(0, latest - 3600)
               logs = fetch_transfer_logs(
-                  rpc_call,
+                  rpc,
                   usdc=USDC,
                   pay_to=PAY_TO,
                   start_block=start,

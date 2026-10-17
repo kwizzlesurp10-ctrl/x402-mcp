@@ -22,6 +22,7 @@ DEFAULT_RPCS: tuple[str, ...] = (
 )
 
 MAX_ATTEMPTS_PER_URL = 5
+MAX_RETRY_AFTER_SECONDS = 5.0
 USER_AGENT = "x402-sale-watch/1.0"
 MIN_LOG_CHUNK = 25
 DEFAULT_LOG_CHUNK = 900
@@ -37,6 +38,10 @@ class RpcInfrastructureError(Exception):
 
 class RpcClientError(Exception):
     """Non-retryable RPC or HTTP failure (bad request, auth, malformed response)."""
+
+    def __init__(self, message: str, *, url: str | None = None) -> None:
+        super().__init__(message)
+        self.url = url
 
 
 def rpc_endpoint_urls() -> list[str]:
@@ -66,7 +71,7 @@ def _retry_after_seconds(headers: Any) -> float | None:
 def _backoff_seconds(attempt: int, headers: Any = None) -> float:
     honored = _retry_after_seconds(headers)
     if honored is not None:
-        return honored
+        return min(MAX_RETRY_AFTER_SECONDS, honored)
     return min(60.0, (2 ** attempt) + random.uniform(0.0, 1.0))
 
 
@@ -82,14 +87,34 @@ def _json_rpc_is_rate_limited(error: dict[str, Any]) -> bool:
     return "rate" in message or "too many" in message
 
 
+def _json_rpc_is_missing_header(error: dict[str, Any]) -> bool:
+    message = str(error.get("message", "")).lower()
+    if "header not found" in message or "block not found" in message:
+        return True
+    if error.get("code") == -32000 and ("header" in message or "block" in message):
+        return True
+    return False
+
+
+def _ordered_rpc_urls(
+    endpoints: list[str] | None, pin: list[str] | None
+) -> list[str]:
+    urls = list(endpoints or rpc_endpoint_urls())
+    if pin and pin[0] in urls:
+        pinned = pin[0]
+        return [pinned] + [u for u in urls if u != pinned]
+    return urls
+
+
 def rpc_call(
     method: str,
     params: list[Any],
     *,
     endpoints: list[str] | None = None,
     timeout: float = 45.0,
+    pin: list[str] | None = None,
 ) -> Any:
-    urls = endpoints or rpc_endpoint_urls()
+    urls = _ordered_rpc_urls(endpoints, pin)
     if not urls:
         raise RpcClientError("no RPC endpoints configured")
 
@@ -122,7 +147,8 @@ def rpc_call(
                     f"rpc {method} {url} -> {exc.code}; "
                     f"attempt {attempt + 1}/{MAX_ATTEMPTS_PER_URL}; sleep {delay:.1f}s"
                 )
-                time.sleep(delay)
+                if attempt < MAX_ATTEMPTS_PER_URL - 1:
+                    time.sleep(delay)
                 continue
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 if isinstance(exc, json.JSONDecodeError):
@@ -133,7 +159,8 @@ def rpc_call(
                     f"rpc {method} {url} -> {last_error}; "
                     f"attempt {attempt + 1}/{MAX_ATTEMPTS_PER_URL}; sleep {delay:.1f}s"
                 )
-                time.sleep(delay)
+                if attempt < MAX_ATTEMPTS_PER_URL - 1:
+                    time.sleep(delay)
                 continue
 
             if "error" in payload and payload["error"]:
@@ -145,12 +172,18 @@ def rpc_call(
                         f"rpc {method} {url} -> rate limited; "
                         f"attempt {attempt + 1}/{MAX_ATTEMPTS_PER_URL}; sleep {delay:.1f}s"
                     )
-                    time.sleep(delay)
+                    if attempt < MAX_ATTEMPTS_PER_URL - 1:
+                        time.sleep(delay)
                     continue
-                raise RpcClientError(f"RPC error from {url}: {err}")
+                raise RpcClientError(f"RPC error from {url}: {err}", url=url)
 
+            if pin is not None:
+                pin.clear()
+                pin.append(url)
             return payload["result"]
 
+        if pin and pin and pin[0] == url:
+            pin.clear()
         print(f"exhausted {MAX_ATTEMPTS_PER_URL} attempts on {url}; rotating endpoint")
 
     raise RpcInfrastructureError(f"all RPC endpoints failed ({last_error})")
@@ -200,14 +233,24 @@ def fetch_transfer_logs(
                 )
                 continue
             raise
-        except RpcInfrastructureError:
-            if size > MIN_LOG_CHUNK:
-                size = max(MIN_LOG_CHUNK, size // 2)
-                print(
-                    f"eth_getLogs rate limited for blocks {current}-{to_block}; "
-                    f"retrying with chunk_size={size}"
+        except RpcClientError as exc:
+            if exc.url and _json_rpc_is_missing_header({"message": str(exc)}):
+                head = int(
+                    rpc_call("eth_blockNumber", [], endpoints=[exc.url]),
+                    16,
                 )
-                continue
+                if head < current:
+                    raise RpcClientError(
+                        f"RPC node {exc.url} behind scan cursor "
+                        f"(head {head} < from {current})"
+                    )
+                if head < to_block:
+                    print(
+                        f"eth_getLogs header not found for blocks {current}-{to_block}; "
+                        f"clamping to_block to node head {head}"
+                    )
+                    to_block = head
+                    continue
             raise
 
         if chunk is None:
