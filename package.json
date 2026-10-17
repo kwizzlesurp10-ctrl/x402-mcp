@@ -33,6 +33,6 @@
   "scripts": {
     "start": "python run_stdio.py",
     "test": "pytest",
-    "build": "cd dashboard && pnpm install && pnpm run build && cd .. && node -e \"require('fs').copyFileSync('dashboard/dist/index.html', 'index.html'); require('fs').cpSync('dashboard/dist/assets', 'assets', {recursive: true})\""
+    "build": "cd dashboard && pnpm install && pnpm run build && cd .. && node -e \"const fs = require('fs'); fs.rmSync('app/static/mission_control', {recursive: true, force: true}); fs.cpSync('dashboard/dist', 'app/static/mission_control', {recursive: true}); fs.copyFileSync('dashboard/dist/index.html', 'index.html'); fs.rmSync('assets', {recursive: true, force: true}); fs.cpSync('dashboard/dist/assets', 'assets', {recursive: true});\""
   }
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { isValidApiBase, writeStoredApiBase } from "../config";
+import { isValidApiBase, readStoredOperatorToken, writeStoredApiBase, writeStoredOperatorToken } from "../config";
 import { setApiBase } from "../api/client";
 
 type SettingsDialogProps = {
@@ -17,6 +17,7 @@ const PRESETS = [
 
 export function SettingsDialog({ open, apiBase, onClose, onSaved }: SettingsDialogProps) {
   const [draft, setDraft] = useState(apiBase);
+  const [token, setToken] = useState(readStoredOperatorToken);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
@@ -28,6 +29,7 @@ export function SettingsDialog({ open, apiBase, onClose, onSaved }: SettingsDial
       return;
     }
     writeStoredApiBase(trimmed);
+    writeStoredOperatorToken(token);
     setApiBase(trimmed);
     onSaved(trimmed);
     onClose();
@@ -69,6 +71,20 @@ export function SettingsDialog({ open, apiBase, onClose, onSaved }: SettingsDial
             placeholder="http://127.0.0.1:8402"
           />
         </label>
+        <label style={{ display: "block", marginBottom: 8 }}>
+          <span style={{ fontSize: 13 }}>Operator token</span>
+          <input
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            style={{ width: "100%", marginTop: 4 }}
+            placeholder="Unlocks MailRail ledger, inbox, and stats"
+          />
+        </label>
+        <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 0 }}>
+          Stored in this browser only. Sent as Bearer plus the MailRail postmaster id. Leave blank to lock the ledger again. Live send stays off on the server.
+        </p>
         {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
           {PRESETS.map((p) => (

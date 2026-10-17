@@ -508,24 +508,28 @@ def _landing_page_html(request: Request) -> str:
 """
 
 
+_MISSION_CONTROL_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
+    "img-src 'self' data: blob: android-webview-video-poster:; "
+    "connect-src 'self' ws: wss: https://*.render.com; "
+    "frame-src 'self'; "
+    "object-src 'none';"
+)
+_MISSION_CONTROL_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": _MISSION_CONTROL_CSP,
+}
+
+
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)
 async def root(request: Request) -> HTMLResponse:
     """Serve the React Mission Control Dashboard."""
     return HTMLResponse(
         _mission_control_html(),
-        headers={
-            "Cache-Control": "no-store",
-            "Content-Security-Policy": (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
-                "font-src 'self' data: https://fonts.gstatic.com; "
-                "img-src 'self' data: blob: android-webview-video-poster:; "
-                "connect-src 'self' ws: wss: https://*.render.com; "
-                "frame-src 'self'; "
-                "object-src 'none';"
-            )
-        }
+        headers=_MISSION_CONTROL_HEADERS,
     )
 
 
@@ -575,7 +579,7 @@ async def dashboard() -> HTMLResponse:
     """React Mission Control SPA (Vercel layout), same-origin API."""
     return HTMLResponse(
         _mission_control_html(),
-        headers={"Cache-Control": "no-store"},
+        headers=_MISSION_CONTROL_HEADERS,
     )
 
 
@@ -711,11 +715,15 @@ async def stats_snapshot() -> dict:
     return data
 
 
-def _mailrail_operator_guard(request: Request) -> None:
-    """Fail closed: OPERATOR_TOKEN plus the MailRail postmaster agent id."""
+def _mailrail_operator_guard(request: Request) -> str:
+    """Fail closed: OPERATOR_TOKEN plus an allowlisted MailRail agent.
+
+    Missing or wrong bearer is 401. A bearer with no agent, or the wrong
+    agent, is 403. Health stays public and does not use this guard.
+    """
     from app.mailrail_agent import authorize_http
 
-    authorize_http(request)
+    return authorize_http(request)
 
 
 @app.get("/mailrail/health")
@@ -751,15 +759,17 @@ async def mailrail_ledger(request: Request, limit: int = 50) -> dict:
 @app.post("/mailrail/inbound")
 async def mailrail_inbound(request: Request, payload: models.InboundMailInput) -> dict:
     """Ingest inbound postmaster mail. Operator-only."""
-    _mailrail_operator_guard(request)
+    agent_id = _mailrail_operator_guard(request)
     from app.mailrail import process_inbound_mail
 
-    return process_inbound_mail(
+    received = process_inbound_mail(
         sender=payload.sender,
         subject=payload.subject,
         body=payload.body,
         metadata=payload.metadata,
     )
+    received["agent_id"] = agent_id
+    return received
 
 
 @app.get("/mailrail/inbox")
@@ -984,6 +994,92 @@ async def a2a_resolve_endpoint(
         raise HTTPException(
             status_code=502, detail="upstream a2a target unreachable"
         ) from exc
+
+
+# ============================================================================
+# Standard x402 Facilitator Routes (/verify, /settle, /supported, /facilitator)
+# ============================================================================
+
+
+@app.get("/supported")
+@app.get("/facilitator/supported")
+async def facilitator_supported_endpoint() -> dict:
+    """Standard x402 Facilitator supported mechanisms & networks discovery."""
+    return x402_services.facilitator_supported()
+
+
+@app.get("/facilitator")
+async def facilitator_info_endpoint(request: Request) -> dict:
+    """Facilitator catalog & health endpoint.
+
+    Prevents 404s when developers or user agents probe the facilitator root URL.
+    """
+    base = _public_base_from_request(request)
+    return {
+        "service": "x402-facilitator",
+        "status": "ok",
+        "version": "v2",
+        "default_network": settings.x402_default_network,
+        "endpoints": {
+            "supported": f"{base}/supported",
+            "verify": f"{base}/verify",
+            "settle": f"{base}/settle",
+        },
+        "docs": "https://docs.x402.org",
+    }
+
+
+@app.post("/verify")
+@app.post("/facilitator/verify")
+async def facilitator_verify_endpoint(request: Request) -> JSONResponse:
+    """Standard x402 Facilitator verify endpoint.
+
+    Validates buyer signature against payment requirements before content release.
+    Accepts:
+      - Standard JSON: { "x402Version": 2, "paymentPayload": ..., "paymentRequirements": ... }
+      - Base64 / Header: { "payment_signature": "...", "payment_required": "..." }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "isValid": False,
+                "is_valid": False,
+                "invalidReason": "malformed_request: invalid JSON",
+                "invalid_reason": "malformed_request: invalid JSON",
+            },
+        )
+    result = await x402_services.facilitator_verify(body)
+    return JSONResponse(status_code=200, content=result)
+
+
+@app.post("/settle")
+@app.post("/facilitator/settle")
+async def facilitator_settle_endpoint(request: Request) -> JSONResponse:
+    """Standard x402 Facilitator settle endpoint.
+
+    Broadcasts on-chain settlement via the configured relayer / CDP.
+    Accepts:
+      - Standard JSON: { "x402Version": 2, "paymentPayload": ..., "paymentRequirements": ... }
+      - Base64 / Header: { "payment_signature": "...", "payment_required": "..." }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "malformed_request: invalid JSON",
+                "txHash": None,
+                "transaction": None,
+            },
+        )
+    result = await x402_services.facilitator_settle(body)
+    status_code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=status_code, content=result)
 
 
 @app.post("/seller/requirements")

@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "ledger"
+
+# Placeholder ids written while cataloging a resource. They are not settlements.
+# After the cashier rotation these rows no longer matched OPERATOR_WALLETS, and
+# /demand counted every copy as an external sale.
+_CATALOG_TX = re.compile(r"^0xcatalog\d+$", re.IGNORECASE)
+
+# This project's own spend key. A wallet rotation must not turn it into a buyer.
+# Lowercase so it is a payer prefix, not a cashier advertisement.
+_KNOWN_OPERATOR_PAYER_PREFIXES = ("0x9138fea6",)
 
 
 def read_ledger_rows(name: str, *, limit: int | None = 1000) -> list[dict]:
@@ -51,6 +61,19 @@ def operator_wallet_set() -> set[str]:
     return {w.strip().lower() for w in settings.operator_wallets.split(",") if w.strip()}
 
 
+def _catalog_placeholder(row: dict) -> bool:
+    tx = row.get("tx")
+    return isinstance(tx, str) and bool(_CATALOG_TX.match(tx.strip()))
+
+
+def _known_operator_payer(payer: object) -> bool:
+    try:
+        text = str(payer).strip().lower()
+    except Exception:  # a malformed payer is not a known operator key
+        return False
+    return any(text.startswith(prefix) for prefix in _KNOWN_OPERATOR_PAYER_PREFIXES)
+
+
 def classify_operator_settle(
     row: dict, operator_wallets: set[str] | None = None
 ) -> bool | None:
@@ -62,12 +85,18 @@ def classify_operator_settle(
     operator wallets are configured — rows written before the field existed,
     or a settlement whose facilitator didn't report one.
 
+    Two cases are operator even after a wallet rotation dropped them out of
+    OPERATOR_WALLETS: a `0xcatalogN` placeholder tx, and the project's own
+    buyer-hot key. Counting those as customers is what reported
+    mn-property-check at dozens of external sales when the real stranger
+    count was two one-shot payments to the development burner cashier.
+
     Treat None as "unknown", never as "external": most of this project's
     revenue history is self-settled, and the honest default is not to
-    overclaim a sale. Counting operator settles as sales is what reported
-    mn-property-check at 4% conversion when its confirmed external sales
-    were zero.
+    overclaim a sale.
     """
+    if _catalog_placeholder(row) or _known_operator_payer(row.get("payer")):
+        return True
     wallets = operator_wallet_set() if operator_wallets is None else operator_wallets
     payer = row.get("payer")
     if not payer or not wallets:

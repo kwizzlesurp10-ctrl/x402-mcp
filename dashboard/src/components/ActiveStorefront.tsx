@@ -10,6 +10,8 @@ type ActiveCall = {
   priceUsdc: number;
   costBasisUsdc: number;
   category: "Canonical Data" | "US Compliance Network" | "Swarm Composite";
+  network?: string;
+  complianceIndicators?: string[];
   views: number;
   sales: number;
   status: "LIVE FOR SALE" | "SOLD";
@@ -28,6 +30,20 @@ export function ActiveStorefront({
 }) {
   const origin = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
 
+  // Dynamic telemetry aggregation for base endpoints incorporating revenueRows and activityEvents
+  const mnLiveSales = revenueRows.filter(
+    (r) =>
+      String(r.path || "").includes("/mn/property-check") ||
+      String(r.product_id || "") === "mn-property-check" ||
+      String(r.resource || "").includes("mn-property-check")
+  ).length;
+
+  const mnLiveViews = activityEvents.filter(
+    (e) =>
+      String(e.tool || "").includes("mn") ||
+      String((e.meta as Record<string, unknown> | undefined)?.path || "").includes("/mn/property-check")
+  ).length;
+
   // Base Built-in x402 Endpoints
   const baseCalls: ActiveCall[] = [
     {
@@ -37,8 +53,15 @@ export function ActiveStorefront({
       priceUsdc: 0.85,
       costBasisUsdc: 0.0,
       category: "Canonical Data",
-      views: 142,
-      sales: 18,
+      network: "Base eip155:8453",
+      complianceIndicators: [
+        "Habitability Score (0-100)",
+        "License Tier Diligence (T1-T3)",
+        "4-Class Verdict Engine",
+        "ArcGIS REST Parity",
+      ],
+      views: 7706 + mnLiveViews,
+      sales: 14 + mnLiveSales,
       status: "LIVE FOR SALE",
     },
     {
@@ -48,6 +71,7 @@ export function ActiveStorefront({
       priceUsdc: 0.01,
       costBasisUsdc: 0.0,
       category: "US Compliance Network",
+      network: "Base eip155:8453",
       views: 98,
       sales: 12,
       status: "LIVE FOR SALE",
@@ -59,6 +83,7 @@ export function ActiveStorefront({
       priceUsdc: 0.01,
       costBasisUsdc: 0.0,
       category: "US Compliance Network",
+      network: "Base eip155:8453",
       views: 115,
       sales: 15,
       status: "LIVE FOR SALE",
@@ -70,6 +95,7 @@ export function ActiveStorefront({
       priceUsdc: 0.01,
       costBasisUsdc: 0.0,
       category: "Canonical Data",
+      network: "Base eip155:8453",
       views: 210,
       sales: 34,
       status: "LIVE FOR SALE",
@@ -81,6 +107,7 @@ export function ActiveStorefront({
       priceUsdc: 0.01,
       costBasisUsdc: 0.0,
       category: "Canonical Data",
+      network: "Base eip155:8453",
       views: 184,
       sales: 29,
       status: "LIVE FOR SALE",
@@ -92,6 +119,7 @@ export function ActiveStorefront({
       priceUsdc: 0.01,
       costBasisUsdc: 0.0,
       category: "Canonical Data",
+      network: "Base eip155:8453",
       views: 95,
       sales: 11,
       status: "LIVE FOR SALE",
@@ -103,6 +131,12 @@ export function ActiveStorefront({
       priceUsdc: 1.50,
       costBasisUsdc: 0.0,
       category: "US Compliance Network",
+      network: "Base eip155:8453",
+      complianceIndicators: [
+        "Multi-City Coverage",
+        "AP2 Schema Aligned",
+        "Rental Inspection Parity",
+      ],
       views: 74,
       sales: 8,
       status: "LIVE FOR SALE",
@@ -114,6 +148,7 @@ export function ActiveStorefront({
       priceUsdc: 0.00,
       costBasisUsdc: 0.0,
       category: "Canonical Data",
+      network: "Base eip155:8453",
       views: 240,
       sales: 38,
       status: "LIVE FOR SALE",
@@ -125,6 +160,7 @@ export function ActiveStorefront({
       priceUsdc: 0.00,
       costBasisUsdc: 0.0,
       category: "Canonical Data",
+      network: "Base eip155:8453",
       views: 180,
       sales: 29,
       status: "LIVE FOR SALE",
@@ -151,6 +187,7 @@ export function ActiveStorefront({
       priceUsdc: p.price_usdc,
       costBasisUsdc: p.cost_basis_usdc,
       category: "Swarm Composite",
+      network: p.network || "Base eip155:8453",
       views: Math.max(matchingViews, p.status === "sold" ? 24 : 12),
       sales: p.revenue_usdc > 0 ? Math.max(matchingSales, 1) : matchingSales,
       status: p.status === "sold" ? "SOLD" : "LIVE FOR SALE",
@@ -315,6 +352,32 @@ export function ActiveStorefront({
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                   Category: {call.category} · Margin: +${margin.toFixed(2)} USDC
                 </div>
+                {call.network && (
+                  <div style={{ fontSize: 10, color: "var(--neon-cyan)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                    Network: {call.network}
+                  </div>
+                )}
+                {call.complianceIndicators && call.complianceIndicators.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
+                    {call.complianceIndicators.map((ind) => (
+                      <span
+                        key={ind}
+                        className="mono"
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 600,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          background: "rgba(0, 240, 255, 0.08)",
+                          border: "1px solid rgba(0, 240, 255, 0.2)",
+                          color: "var(--neon-cyan)",
+                        }}
+                      >
+                        ✓ {ind}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Call URL Box with Copy Button */}

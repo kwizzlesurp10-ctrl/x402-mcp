@@ -192,6 +192,16 @@ const FREE_BAZAAR_ENTRIES: BazaarEntry[] = [
     description:
       "A2A v0.1 agent card with AP2 v1 commerce extension, Base USDC cashier rails, and us-rental-diligence-pack skill schema.",
   },
+  {
+    id: "mcp-tools-catalog",
+    name: "Model Context Protocol (MCP) Public Catalog (21 tools)",
+    category: "MCP Manifest (free)",
+    priceUsdc: 0,
+    network: "Base Mainnet (8453)",
+    path: "/.well-known/mcp",
+    description:
+      "FastMCP tool catalog exposing all 21 production tools: MARC-HD diligence ($0.85), city compliance, commerce, swarm agency, and A2A resolution.",
+  },
 ];
 
 /** Live storefront resources only — no third-party or fabricated listings. */

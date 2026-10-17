@@ -136,10 +136,12 @@ _VIOLATIONS = {
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
                 "Case_Group": "Housing",
-                "Inspection_Result": "Violations Found",
-                "Inspection_Type_Desc": "Initial Inspection",
-                "Start_Date": 1735689600000,
-                "Completed_Date": 1738368000000,
+                "Status_Violation_Case": "Closed",
+                "Violation_Code": "HIS180",
+                "Violation_Code_Description": "Obtain Rental License; MCO 244.1810",
+                "Status_Violation": "Abate",
+                "Processed_Date": 1735689600000,
+                "Resolved_Date": 1738368000000,
             }
         }
     ]

@@ -989,6 +989,268 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
     }
 
 
+def facilitator_supported() -> dict[str, Any]:
+    """Return standard facilitator supported schemes, networks, and kinds."""
+    facilitator = _facilitator_client()
+    try:
+        supported = facilitator.get_supported()
+        raw_kinds = supported.model_dump().get("kinds", [])
+    except Exception as exc:
+        logger.warning("Facilitator get_supported fallback: %s", exc)
+        raw_kinds = [
+            {
+                "x402Version": 2,
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "extra": None,
+            },
+            {
+                "x402Version": 2,
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "extra": None,
+            },
+        ]
+
+    return {
+        "kinds": raw_kinds,
+        "networks": [
+            {"id": "eip155:8453", "name": "Base Mainnet", "asset": "USDC"},
+            {"id": "eip155:84532", "name": "Base Sepolia (testnet)", "asset": "USDC"},
+            {"id": "eip155:137", "name": "Polygon", "asset": "USDC"},
+            {"id": "solana:mainnet", "name": "Solana Mainnet", "asset": "USDC"},
+        ],
+        "default_network": settings.x402_default_network,
+        "facilitator": {
+            "name": "x402-mcp-facilitator",
+            "url": settings.public_base_url,
+            "version": "v2",
+        },
+    }
+
+
+def _parse_facilitator_input(data: dict[str, Any]) -> tuple[Any, Any]:
+    """Parse payment payload and requirements from JSON dict or base64 headers.
+
+    Supports:
+    1. Standard x402 JSON payload:
+       - paymentPayload / payment_payload
+       - paymentRequirements / payment_requirements
+    2. Header/Base64 strings:
+       - payment_signature / paymentSignature
+       - payment_required / paymentRequired
+    """
+    import base64
+    from x402.schemas import PaymentPayload, PaymentRequirements
+
+    if not isinstance(data, dict):
+        raise ValueError("Request body must be a JSON object")
+
+    sig = (
+        data.get("payment_signature")
+        or data.get("paymentSignature")
+        or data.get("payment_sig")
+    )
+    req_str = (
+        data.get("payment_required")
+        or data.get("paymentRequired")
+        or data.get("payment_req")
+    )
+
+    if sig and req_str:
+        return _decode_payment_inputs(str(sig), str(req_str))
+
+    raw_payload = (
+        data.get("paymentPayload")
+        or data.get("payment_payload")
+        or data.get("payload")
+    )
+    raw_req = (
+        data.get("paymentRequirements")
+        or data.get("payment_requirements")
+        or data.get("requirements")
+        or data.get("payment_required")
+    )
+
+    if raw_payload is None or raw_req is None:
+        raise ValueError("Missing paymentPayload or paymentRequirements in request body")
+
+    if isinstance(raw_payload, str):
+        try:
+            raw_payload = json.loads(raw_payload)
+        except Exception:
+            raw_payload = json.loads(base64.b64decode(raw_payload).decode("utf-8"))
+
+    if isinstance(raw_req, str):
+        try:
+            raw_req = json.loads(raw_req)
+        except Exception:
+            raw_req = json.loads(base64.b64decode(raw_req).decode("utf-8"))
+
+    payload = (
+        PaymentPayload.model_validate(raw_payload)
+        if isinstance(raw_payload, dict)
+        else raw_payload
+    )
+
+    if isinstance(raw_req, dict) and "accepts" in raw_req:
+        accepts = raw_req.get("accepts") or []
+        bare = accepts[0] if accepts else raw_req
+    elif isinstance(raw_req, list):
+        bare = raw_req[0] if raw_req else {}
+    else:
+        bare = raw_req
+
+    requirements = (
+        PaymentRequirements.model_validate(bare)
+        if isinstance(bare, dict)
+        else bare
+    )
+    return payload, requirements
+
+
+async def facilitator_verify(data: dict[str, Any]) -> dict[str, Any]:
+    """Facilitator verify route handler — validates signature against terms."""
+    try:
+        payload, requirements = _parse_facilitator_input(data)
+    except Exception as exc:
+        return {
+            "isValid": False,
+            "is_valid": False,
+            "invalidReason": f"malformed_request: {exc}",
+            "invalid_reason": f"malformed_request: {exc}",
+            "payer": None,
+            "network": None,
+        }
+
+    network = _network_of(requirements)
+    server = _resource_server(network)
+    try:
+        verify_result = await server.verify_payment(payload, requirements)
+        is_valid = bool(getattr(verify_result, "is_valid", False))
+        invalid_reason = getattr(verify_result, "invalid_reason", None)
+
+        payer = getattr(payload, "address", None)
+        if not payer and hasattr(payload, "payload") and isinstance(payload.payload, dict):
+            payer = payload.payload.get("from") or payload.payload.get("owner")
+
+        return {
+            "isValid": is_valid,
+            "is_valid": is_valid,
+            "invalidReason": invalid_reason,
+            "invalid_reason": invalid_reason,
+            "payer": str(payer) if payer else None,
+            "network": network,
+        }
+    except Exception as exc:
+        logger.warning("facilitator_verify failed: %s", exc)
+        return {
+            "isValid": False,
+            "is_valid": False,
+            "invalidReason": f"verify_error: {exc}",
+            "invalid_reason": f"verify_error: {exc}",
+            "payer": None,
+            "network": network,
+        }
+
+
+async def facilitator_settle(data: dict[str, Any]) -> dict[str, Any]:
+    """Facilitator settle route handler — broadcasts on-chain settlement."""
+    try:
+        payload, requirements = _parse_facilitator_input(data)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"malformed_request: {exc}",
+            "txHash": None,
+            "transaction": None,
+            "network": None,
+        }
+
+    network = _network_of(requirements)
+    server = _resource_server(network)
+
+    try:
+        verify_result = await server.verify_payment(payload, requirements)
+        if not getattr(verify_result, "is_valid", False):
+            reason = getattr(verify_result, "invalid_reason", "payment_verification_failed")
+            return {
+                "success": False,
+                "error": str(reason),
+                "txHash": None,
+                "transaction": None,
+                "network": network,
+            }
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"verification_error: {exc}",
+            "txHash": None,
+            "transaction": None,
+            "network": network,
+        }
+
+    try:
+        settle_result = await server.settle_payment(payload, requirements)
+        settlement = (
+            settle_result.model_dump()
+            if hasattr(settle_result, "model_dump")
+            else (settle_result if isinstance(settle_result, dict) else {})
+        )
+        success = settlement.get("success", True)
+        tx_hash = (
+            settlement.get("transaction")
+            or settlement.get("tx_hash")
+            or settlement.get("txHash")
+            or settlement.get("hash")
+            or getattr(settle_result, "transaction", None)
+        )
+        error = settlement.get("error") if not success else None
+
+        if success and tx_hash:
+            try:
+                from app import mailrail
+
+                try:
+                    amt = float(settlement.get("amount") or 0.0)
+                except (ValueError, TypeError):
+                    amt = 0.0
+                sub, body = mailrail.format_settlement_receipt(
+                    payer=str(settlement.get("payer") or getattr(payload, "address", "unknown")),
+                    amount_usdc=amt,
+                    resource=str(getattr(requirements, "description", None) or "x402-resource"),
+                    tx_hash=str(tx_hash),
+                )
+                mailrail.send_agent_mail(
+                    to=settings.mailrail_admin_recipient,
+                    subject=sub,
+                    body=body,
+                    event_id=str(tx_hash),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "MailRail auto-receipt dispatch failed in facilitator_settle: %s",
+                    exc,
+                )
+
+        return {
+            "success": bool(success),
+            "txHash": str(tx_hash) if tx_hash else None,
+            "transaction": str(tx_hash) if tx_hash else None,
+            "network": network,
+            "error": str(error) if error else None,
+        }
+    except Exception as exc:
+        logger.warning("facilitator_settle failed: %s", exc)
+        return {
+            "success": False,
+            "error": f"settlement_error: {exc}",
+            "txHash": None,
+            "transaction": None,
+            "network": network,
+        }
+
+
 async def build_payment_required_for_resource(
     *,
     resource_url: str,

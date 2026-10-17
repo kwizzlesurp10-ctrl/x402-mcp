@@ -103,6 +103,7 @@ async def get_us_city_property_sample(
             "city": spec.code,
             "detail": "city open-data source timed out or refused; retry shortly",
             "exception_type": type(exc).__name__,
+            "upstream_error": f"{type(exc).__name__}: {exc}"[:240],
             "sample_url": gate.sample_url(spec),
             "paid_url": gate.resource_url(spec),
         }

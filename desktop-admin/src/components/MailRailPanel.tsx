@@ -12,26 +12,45 @@ export function MailRailPanel({ refreshKey }: MailRailPanelProps) {
   const [outbox, setOutbox] = useState<MailRailMessage[]>([]);
   const [inbox, setInbox] = useState<MailRailMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [ledgerNote, setLedgerNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [h, s, ledger, inboxRes] = await Promise.all([
-          api.mailrailHealth(),
+        const h = await api.mailrailHealth();
+        if (cancelled) return;
+        setHealth(h);
+        setError(null);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "MailRail status failed");
+        }
+        return;
+      }
+      try {
+        const [s, ledger, inboxRes] = await Promise.all([
           api.mailrailStats(),
           api.mailrailLedger(25),
           api.mailrailInbox(25),
         ]);
         if (cancelled) return;
-        setHealth(h);
         setStats(s);
         setOutbox(ledger.events);
         setInbox(inboxRes.inbox);
-        setError(null);
+        setLedgerNote(null);
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "MailRail fetch failed");
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : "MailRail ledger failed";
+        setStats(null);
+        setOutbox([]);
+        setInbox([]);
+        if (msg.includes("401") || msg.includes("403")) {
+          setLedgerNote(
+            "Ledger is locked. Save the operator token in API settings to unlock inbox and outbox. Live send stays off.",
+          );
+        } else {
+          setLedgerNote(msg);
         }
       }
     })();
@@ -44,14 +63,20 @@ export function MailRailPanel({ refreshKey }: MailRailPanelProps) {
     <section id="panel-mailrail" className="panel" style={{ gridColumn: "span 12" }}>
       <h3>AgentMail / MailRail</h3>
       {error && <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>}
+      {ledgerNote && <p style={{ color: "var(--amber)", fontSize: 13 }}>{ledgerNote}</p>}
+      {health && !health.enabled && (
+        <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 0 }}>
+          Live send is off. Provider {health.provider} records mail and does not call Resend or a webhook.
+        </p>
+      )}
       {health && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12, fontSize: 13 }}>
           <span style={{ color: health.enabled ? "var(--green)" : "var(--amber)" }}>
             {health.enabled ? "enabled" : "disabled"}
           </span>
           <span>provider: <strong>{health.provider}</strong></span>
-          <span>from: <span className="mono">{health.from_address || "—"}</span></span>
-          <span>admin: <span className="mono">{health.admin_recipient || "—"}</span></span>
+          <span>from: <span className="mono">{stats?.from_address || health.from_address || "—"}</span></span>
+          <span>admin: <span className="mono">{stats?.admin_recipient || health.admin_recipient || "—"}</span></span>
           {stats && (
             <span className="mono">
               outbox {stats.outbound_total ?? stats.outbox_count ?? outbox.length} · inbox{" "}
