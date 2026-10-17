@@ -21,7 +21,7 @@ from app.tools_registry import TOOL_COUNT
 
 # Base mainnet native USDC (canonical cashier asset for this storefront).
 BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-DEFAULT_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+DEFAULT_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 # A2A × x402 extension URI (x402 foundation transport + google-a2a a2a-x402).
 A2A_X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
 AP2_EXTENSION_URI = "https://github.com/google-agentic-commerce/ap2/v1"
