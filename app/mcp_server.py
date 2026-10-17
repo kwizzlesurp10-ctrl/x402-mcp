@@ -904,6 +904,7 @@ async def get_us_city_property_sample(
         "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def check_us_city_property(
     city_code: Desc[
@@ -1308,4 +1309,13 @@ for tool in mcp._tool_manager._tools.values():
 # wrapper's synthetic ctx: Context parameter does not break Pydantic arg models.
 _city_check_tool = mcp._tool_manager._tools.get("city.check")
 if _city_check_tool is not None:
+    from mcp.server.fastmcp.utilities.context_injection import find_context_parameter
+    from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+
     _city_check_tool.fn = city_check_payment_wrapper()(_city_check_tool.fn)
+    # Payment wrapper returns CallToolResult (PaymentRequired or settlement receipt).
+    # Keep unstructured output so FastMCP does not validate structuredContent as {result: str}.
+    _city_check_tool.fn_metadata = FuncMetadata(
+        arg_model=_city_check_tool.fn_metadata.arg_model
+    )
+    _city_check_tool.context_kwarg = find_context_parameter(_city_check_tool.fn)
