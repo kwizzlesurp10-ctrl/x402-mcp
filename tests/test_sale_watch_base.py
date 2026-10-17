@@ -29,7 +29,7 @@ def test_rpc_endpoint_urls_prefers_base_rpc_url(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_pay_to_transfer_topic() -> None:
-    pay_to = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+    pay_to = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
     topic = pay_to_transfer_topic(pay_to)
     assert topic.endswith(pay_to[2:].lower())
     assert len(topic) == 66
@@ -92,7 +92,7 @@ def test_fetch_transfer_logs_chunks_range() -> None:
     fetch_transfer_logs(
         fake_rpc,
         usdc="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-        pay_to="0x05e1720bB82F86B5bc7940a99FDC702E32256357",
+        pay_to="0x0d25A44f74868eCE53B305C97139CF4B62963410",
         start_block=0,
         end_block=2000,
         chunk_size=900,
