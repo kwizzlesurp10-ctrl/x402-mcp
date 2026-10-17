@@ -10,10 +10,13 @@ so tests can redirect storage via monkeypatch.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from app import ledger_io
+
+log = logging.getLogger("x402")
 
 
 def _atomic(amount_usdc: float) -> int:
@@ -26,6 +29,19 @@ def _append(name: str, row: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("ledger name must be spend or revenue")
 
     from app import ledger_store as store_module
+
+    if name == "revenue":
+        # Fake/test tx ids and non-mainnet rows never reach the production
+        # (Redis) ledger. The row is returned flagged instead of raising so a
+        # settled sale's response path is never broken by bookkeeping.
+        from app.ledger_quality import new_revenue_row_problem
+
+        problem = new_revenue_row_problem(
+            row, production_store=store_module.ledger_store is not None
+        )
+        if problem:
+            log.warning("revenue row rejected from production ledger: %s", problem)
+            return {**row, "rejected": problem}
 
     if store_module.ledger_store is not None:
         written = store_module.ledger_store.append(name, row)

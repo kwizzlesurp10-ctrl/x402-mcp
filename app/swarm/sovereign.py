@@ -162,6 +162,12 @@ def build_revenue_report() -> dict[str, Any]:
     swarm = _empty_revenue_bucket()
     by_product: dict[str, dict[str, float]] = {}
 
+    from app.ledger_quality import sales_rows
+
+    # Mainnet: test ids, testnet, excluded and duplicate rows are not sales at
+    # all; self-payments and unknown payers stay visible in their own buckets.
+    revenue_rows = sales_rows(revenue_rows, operator_wallets=operator_wallets)
+
     for row in revenue_rows:
         if not row.get("settled", True):
             continue

@@ -1150,15 +1150,33 @@ async def ledger_rows(name: Literal["spend", "revenue"]) -> list[dict]:
     if name != "revenue":
         return list(rows)
 
+    return _annotate_revenue(rows)
+
+
+def _annotate_revenue(rows: list[dict]) -> list[dict]:
+    """Add is_operator_settle + ledger_quality/counts_as_revenue (read-time only)."""
+    from app import ledger_quality
+
     operator_wallets = ledger_io.operator_wallet_set()
-    out: list[dict] = []
-    for row in rows:
-        annotated = dict(row)
+    out = ledger_quality.annotate_revenue_rows(rows, operator_wallets=operator_wallets)
+    for annotated in out:
         annotated["is_operator_settle"] = ledger_io.classify_operator_settle(
             annotated, operator_wallets
         )
-        out.append(annotated)
     return out
+
+
+@app.get("/ledger-summary/revenue")
+async def ledger_revenue_summary() -> dict:
+    """Raw vs verified revenue totals over the whole revenue ledger.
+
+    Only ledger_quality=verified_external (real tx hash, Base mainnet, external
+    payer, not excluded/duplicate) counts. Raw rows are never modified.
+    """
+    from app import ledger_quality
+
+    rows = read_ledger_rows("revenue", limit=None)
+    return ledger_quality.summarize(_annotate_revenue(rows))
 
 
 

@@ -32,6 +32,28 @@ export function sumLedgerAtomic(rows: LedgerRow[], mainnetOnly = false): number 
   }, 0);
 }
 
+const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
+
+/**
+ * Does this revenue row count as real revenue?
+ *
+ * The server annotates `counts_as_revenue` (ledger_quality=verified_external:
+ * real tx hash, Base mainnet, external payer, not excluded/duplicate). For an
+ * older server without the field, fall back to the same rules client-side and
+ * never count an unknown payer as external.
+ */
+export function isVerifiedRevenueRow(row: LedgerRow): boolean {
+  if (typeof row.counts_as_revenue === "boolean") return row.counts_as_revenue;
+  if (row.settled === false) return false;
+  if (!TX_HASH.test(String(row.tx ?? ""))) return false;
+  if (String(row.network ?? "") !== "eip155:8453") return false;
+  return row.is_operator_settle === false;
+}
+
+export function verifiedRevenueRows(rows: LedgerRow[]): LedgerRow[] {
+  return rows.filter(isVerifiedRevenueRow);
+}
+
 export function ledgerToCsv(rows: LedgerRow[]): string {
   if (rows.length === 0) return "ts,amount_usdc_atomic,network,agent_id\n";
   const keys = Array.from(

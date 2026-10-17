@@ -1,8 +1,12 @@
 import { type LedgerRow } from "../api/client";
-import { sumLedgerAtomic } from "./ledger";
+import { sumLedgerAtomic, verifiedRevenueRows } from "./ledger";
 
 export function calculateFinances(revenue: LedgerRow[], spend: LedgerRow[]) {
-  const grossRevenueAtomic = sumLedgerAtomic(revenue);
+  // Only verified external Base-mainnet settlements are revenue; test ids,
+  // testnet, self-payments and unknown payers are reported separately.
+  const verified = verifiedRevenueRows(revenue);
+  const grossRevenueAtomic = sumLedgerAtomic(verified);
+  const rawRevenueAtomic = sumLedgerAtomic(revenue);
   const spendAtomic = sumLedgerAtomic(spend, true);
   // Fees and Refunds are assumed not perfectly tracked or mapped yet, setting placeholders
   // We subtract spend from gross revenue to get net margin.
@@ -16,6 +20,9 @@ export function calculateFinances(revenue: LedgerRow[], spend: LedgerRow[]) {
     refundsAtomic,
     feesAtomic,
     netMarginAtomic,
-    settlementCount: revenue.length,
+    settlementCount: verified.length,
+    rawRevenueAtomic,
+    rawSettlementCount: revenue.length,
+    excludedRevenueAtomic: rawRevenueAtomic - grossRevenueAtomic,
   };
 }

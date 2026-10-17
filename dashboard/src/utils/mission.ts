@@ -1,6 +1,6 @@
 import type { DoctorCheck, LedgerRow, StatsResponse } from "../api/client";
 import type { StreamEvent } from "../hooks/useSSE";
-import { sumLedgerAtomic } from "./ledger";
+import { sumLedgerAtomic, verifiedRevenueRows } from "./ledger";
 
 export type MissionStep = {
   id: string;
@@ -22,7 +22,7 @@ export function deriveMissionSteps(input: {
 }): MissionStep[] {
   const tools = new Set(input.activity.map((e) => e.tool).filter(Boolean));
   const netAtomic =
-    sumLedgerAtomic(input.revenue) - sumLedgerAtomic(input.spend, true);
+    sumLedgerAtomic(verifiedRevenueRows(input.revenue)) - sumLedgerAtomic(input.spend, true);
   const discovered = tools.has("discover_services");
   const probed = tools.has("get_payment_requirements") || input.probeDone;
   const paid = tools.has("pay_and_fetch") || input.spend.length > 0;
