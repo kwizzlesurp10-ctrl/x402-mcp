@@ -148,6 +148,11 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+# Trust X-Forwarded-Proto/Host behind Render/nginx so slash redirects stay on https.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
 app.add_middleware(UpstashAnalyticsMiddleware)
 
 # Dashboard CORS: local Vite only + exact extras (no free-tunnel wildcards).
@@ -936,6 +941,36 @@ async def probe_url(
         raise HTTPException(
             status_code=502, detail="upstream probe target unreachable"
         ) from exc
+
+
+@app.post("/a2a")
+async def a2a_jsonrpc_endpoint(request: Request) -> JSONResponse:
+    """A2A JSON-RPC transport (message/send, tasks/get, tasks/cancel) with x402-a2a."""
+    from app.a2a_rpc import extension_activation_response_headers, handle_jsonrpc
+
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "parse error"},
+            },
+        )
+    ext_requested = request.headers.get("X-A2A-Extensions") or request.headers.get(
+        "x-a2a-extensions"
+    )
+    payload = await handle_jsonrpc(
+        body, user_agent=request.headers.get("user-agent")
+    )
+    return JSONResponse(
+        content=payload,
+        headers=extension_activation_response_headers(ext_requested),
+    )
 
 
 @app.get("/a2a/resolve")
