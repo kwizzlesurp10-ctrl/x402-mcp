@@ -4,7 +4,7 @@ import type { CityCatalogItem, DemandReport, DemandResource, SwarmProduct, Ledge
 /** Bazaar-indexed Pulse listing — must match render.yaml PINNED_PULSE_PRODUCT_ID. */
 export const PINNED_PULSE_PRODUCT_ID = "d22bbf5f3c4b4666a6f80980c7bc7c50";
 
-export const DEFAULT_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357";
+export const DEFAULT_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410";
 
 export type StorefrontCategory = "Canonical Data" | "US Compliance Network" | "Swarm Composite";
 

@@ -141,7 +141,7 @@ cd C:\Users\Keith\x402-mcp; .venv\Scripts\python.exe -m app.doctor          # fa
 cd C:\Users\Keith\x402-mcp; .venv\Scripts\python.exe -m pytest --collect-only -q   # import smoke; catches a lifted mcp/solana pin
 ```
 
-Reproduce CI exactly with `$env:X402_PAY_TO_ADDRESS='0x05e1720bB82F86B5bc7940a99FDC702E32256357'` — six middleware-gated tests 404 without it.
+Reproduce CI exactly with `$env:X402_PAY_TO_ADDRESS='0x0d25A44f74868eCE53B305C97139CF4B62963410'` — six middleware-gated tests 404 without it.
 
 After **any** edit to a `RESOURCE_DESCRIPTION` or `DISCOVERY_*_EXAMPLE`, the prompt must run:
 ```
