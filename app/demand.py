@@ -257,7 +257,9 @@ def build_report() -> dict[str, Any]:
     except Exception:  # never raise into a request path
         operator_wallets = set()
 
-    for row in read_ledger_rows("revenue", limit=None):
+    from app.ledger_quality import sales_rows
+
+    for row in sales_rows(read_ledger_rows("revenue", limit=None), operator_wallets=operator_wallets):
         if not row.get("settled", True):
             continue
         key = str(row.get("product_id") or "unknown")

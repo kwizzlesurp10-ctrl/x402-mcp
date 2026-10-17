@@ -188,3 +188,18 @@ def isolated_swarm_registry(tmp_path_factory):
     yield
     swarm_registry.persist_path = old_path
     swarm_registry._products = old_products
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_production_ledger_store():
+    """Tests never write to the Redis ledger, even if REDIS_URL is exported.
+
+    A developer shell with the production REDIS_URL used to append fixture rows
+    (0xdeadbeef, 0xabc, 0xcatalog0, …) to the live revenue ledger on every run.
+    """
+    from app import ledger_store as store_module
+
+    old = store_module.ledger_store
+    store_module.ledger_store = None
+    yield
+    store_module.ledger_store = old
