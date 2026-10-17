@@ -962,7 +962,7 @@ async def a2a_jsonrpc_endpoint(request: Request) -> JSONResponse:
             },
         )
     ext_requested = request.headers.get("X-A2A-Extensions") or request.headers.get(
-        "x-a2a-extensions"
+        "A2A-Extensions"
     )
     payload = await handle_jsonrpc(
         body, user_agent=request.headers.get("user-agent")

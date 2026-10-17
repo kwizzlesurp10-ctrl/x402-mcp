@@ -112,7 +112,8 @@ def test_agent_card_is_served_at_well_known() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["name"]
-    assert body["protocolVersion"] == "1.0"
+    assert body["protocolVersion"] == "0.3.0"
+    assert body["preferredTransport"] == "JSONRPC"
     assert body["capabilities"]["streaming"] is False
     assert body["capabilities"]["pushNotifications"] is False
     assert any(s["id"] == "us-cities-catalog" for s in body["skills"])
@@ -124,9 +125,14 @@ def test_agent_card_is_served_at_well_known() -> None:
         assert any(s["id"] == f"property-check-{code}" for s in body["skills"]), code
     for code in set(registry.known_codes()) - set(registry.public_codes()):
         assert not any(s["id"] == f"property-check-{code}" for s in body["skills"]), code
-    # Catalog URL is a supported interface.
-    urls = [i["url"] for i in body["supportedInterfaces"]]
-    assert any(u.endswith("/us/cities") for u in urls)
+    # Only the real A2A endpoint is a supported interface; the catalog is a link.
+    ifaces = body["supportedInterfaces"]
+    assert [i["url"] for i in ifaces] == [body["url"]]
+    assert ifaces[0]["protocolBinding"] == "JSONRPC"
+    assert ifaces[0]["protocolVersion"] == "0.3"
+    assert body["links"]["catalog"].endswith("/us/cities")
+    assert body["links"]["x402"].endswith("/.well-known/x402")
+    assert body["links"]["a2a"].endswith("/a2a")
     # x402 is the declared payment scheme.
     assert "x402" in body["securitySchemes"]
     assert body["securitySchemes"]["x402"]["name"] == "PAYMENT-SIGNATURE"
@@ -314,3 +320,48 @@ def test_cross_linking_to_agentic_market() -> None:
 
 
 
+
+
+def test_agent_card_paid_skills_carry_x402_terms_matching_catalog() -> None:
+    """Every paid catalog resource maps to a skill with price/network/asset/payTo/endpoint."""
+    from app import agent_surface
+
+    card = client.get("/.well-known/agent-card.json").json()
+    pay_to = settings.x402_pay_to_address or agent_surface.DEFAULT_PAY_TO
+    by_url = {}
+    for sk in card["skills"]:
+        x = sk.get("x402")
+        if not x:
+            continue
+        assert x["network"] == settings.x402_default_network
+        assert x["asset"] == agent_surface.BASE_USDC
+        assert x["assetSymbol"] == "USDC"
+        assert x["payTo"] == pay_to
+        assert x["endpoint"]["url"].startswith("https://") or x["endpoint"]["url"].startswith("http")
+        assert x["endpoint"]["method"] in {"GET", "POST"}
+        if x["paid"]:
+            assert int(x["amount"]) > 0
+            assert x["scheme"] == "exact"
+            assert sk["security"] == [{"x402": []}]
+            by_url[x["endpoint"]["url"]] = x
+        for field in ("id", "name", "description", "tags", "examples", "inputModes", "outputModes"):
+            assert sk.get(field), (sk["id"], field)
+    catalog = client.get("/.well-known/x402").json()
+    for r in catalog["resource_details"]:
+        if r["price"] == "free" or r["url"].endswith("/mn/property-check"):
+            continue  # legacy MN alias is the same product as property-check-mn
+        assert r["url"] in by_url, f"paid resource {r['url']} has no skill"
+        assert by_url[r["url"]]["price"] == r["price"]
+        assert by_url[r["url"]]["amount"] == str(agent_surface._price_to_atomic_usdc(r["price"]))
+
+
+def test_agent_card_declares_canonical_a2a_x402_extension() -> None:
+    from app import agent_surface
+
+    card = client.get("/.well-known/agent-card.json").json()
+    exts = {e["uri"]: e for e in card["capabilities"]["extensions"]}
+    ext = exts[agent_surface.A2A_X402_EXTENSION_URI]
+    assert ext["uri"].endswith("a2a-x402/blob/main/spec/v0.2")
+    assert ext["params"]["network"] == settings.x402_default_network
+    assert ext["params"]["asset"] == agent_surface.BASE_USDC
+    assert agent_surface.A2A_X402_LEGACY_EXTENSION_URI in exts

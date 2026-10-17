@@ -13,6 +13,7 @@ of their words there.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.config import settings
@@ -22,8 +23,18 @@ from app.tools_registry import TOOL_COUNT
 # Base mainnet native USDC (canonical cashier asset for this storefront).
 BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 DEFAULT_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
-# A2A × x402 extension URI (x402 foundation transport + google-a2a a2a-x402).
-A2A_X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
+# A2A × x402 extension URI. v0.2 is the canonical URI in
+# google-agentic-commerce/a2a-x402 (spec/v0.2 §2: "Implementations MUST use this
+# URI"). The pre-rename v0.1 URI is still declared and accepted on activation so
+# older clients keep matching.
+A2A_X402_EXTENSION_URI = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
+A2A_X402_LEGACY_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
+A2A_X402_EXTENSION_URIS = (A2A_X402_EXTENSION_URI, A2A_X402_LEGACY_EXTENSION_URI)
+# The /a2a JSON-RPC handler speaks A2A 0.3 wire shapes (method names
+# message/send + SendMessage aliases, kind-tagged objects, lowercase task
+# states), so the interface is declared as 0.3 rather than 1.0.
+A2A_INTERFACE_PROTOCOL_VERSION = "0.3"
+A2A_CARD_PROTOCOL_VERSION = "0.3.0"
 AP2_EXTENSION_URI = "https://github.com/google-agentic-commerce/ap2/v1"
 REPO_URL = "https://github.com/kwizzlesurp10-ctrl/x402-mcp"
 BOUNTIES_DOC_URL = f"{REPO_URL}/blob/master/docs/BOUNTIES.md"
@@ -504,6 +515,24 @@ def agent_card() -> dict[str, Any]:
             "inputModes": ["text/plain", "application/json"],
             "outputModes": ["application/json"],
         })
+        from app import property_due_diligence_agent as pdd_agent
+
+        skills.append({
+            "id": "property-due-diligence-agent",
+            "name": pdd_agent.SERVICE_NAME,
+            "description": (
+                f"{pdd_agent.RESOURCE_DESCRIPTION} "
+                f"Price: {pdd_agent.PRICE} USDC on {network} via x402. "
+                f"HTTP: GET {pdd_agent.resource_url()}?city_code={{code}}&address={{street}}."
+            ),
+            "tags": ["property", "due-diligence", "compliance", "rental", "x402", "usdc", "base"],
+            "examples": [
+                "Run property due diligence for 1700 Penn Ave N in Minneapolis (city_code=mn)",
+                f"GET {pdd_agent.resource_url()}?city_code=mn&address=1700%20Penn%20Ave%20N",
+            ],
+            "inputModes": ["text/plain", "application/json"],
+            "outputModes": ["application/json"],
+        })
     skills.extend([
         {
             "id": "us-cities-catalog",
@@ -703,6 +732,62 @@ def agent_card() -> dict[str, Any]:
 
     pay_to = _pay_to()
     fund = funding()
+
+    # Per-skill payment terms + endpoint, derived from the same live config as
+    # /.well-known/x402 so prices cannot drift from the 402 challenge.
+    city_price = {c["code"]: c["price"] for c in cities}
+    endpoints: dict[str, tuple[str | None, str, str]] = {
+        "x402-agent-card": (None, "GET", f"{base}/.well-known/agent-card.json"),
+        "base-tx-decision": (settings.tx_decision_price, "GET", f"{base}/base/tx-decision"),
+        "base-finality-check": (settings.finality_check_price, "GET", f"{base}/base/finality-check"),
+        "us-cities-catalog": (None, "GET", f"{base}/us/cities"),
+        "us-city-property-check": (price, "GET", f"{base}/us/{{city_code}}/property-check"),
+        "us-city-property-check-sample": (None, "GET", f"{base}/us/{{city_code}}/property-check/sample"),
+        "us-rental-diligence-pack": (
+            getattr(settings, "diligence_pack_price", "$1.50"),
+            "POST",
+            f"{base}/tasks/us-rental-diligence",
+        ),
+        "mailrail-postmaster": (None, "GET", f"{base}/mailrail/health"),
+    }
+    if settings.x402_pay_to_address:
+        from app import property_due_diligence_agent as pdd_agent
+
+        endpoints["property-due-diligence-agent"] = (pdd_agent.PRICE, "GET", pdd_agent.resource_url())
+    for code, cp in city_price.items():
+        endpoints[f"property-check-{code}"] = (cp, "GET", f"{base}/us/{code}/property-check")
+    a2a_skill_ids = {
+        "base-tx-decision",
+        "base-finality-check",
+        "us-cities-catalog",
+        "us-rental-diligence-pack",
+        "property-due-diligence-agent",
+        *(f"property-check-{code}" for code in city_price),
+    }
+    for sk in skills:
+        ep = endpoints.get(sk["id"])
+        if not ep:
+            continue
+        sk_price, method, url = ep
+        sk["x402"] = _skill_x402(
+            price=sk_price,
+            method=method,
+            url=url,
+            a2a=sk["id"] in a2a_skill_ids,
+            skill_id=sk["id"],
+            network=network,
+            pay_to=pay_to,
+            base=base,
+        )
+        if sk["x402"]["paid"]:
+            sk["security"] = [{"x402": []}]
+        if sk["id"] in a2a_skill_ids:
+            ex = {"skillId": sk["id"]}
+            sk["examples"] = list(sk.get("examples") or []) + [
+                f"A2A: POST {base}/a2a message/send with message.metadata="
+                + json.dumps(ex, separators=(",", ":"))
+            ]
+
     return {
         "name": "US City Open-Data Compliance & Base Intelligence (x402)",
         "description": (
@@ -714,8 +799,13 @@ def agent_card() -> dict[str, Any]:
             f"to payTo {pay_to} (see {base}/.well-known/funding.json)."
         ),
         "version": "0.1.0",
-        "protocolVersion": "1.0",
+        # A2A 0.3 top-level fields (url/preferredTransport/protocolVersion) and
+        # the 1.0 supportedInterfaces list are both present; each states the
+        # wire version the /a2a handler actually speaks.
+        "protocolVersion": A2A_CARD_PROTOCOL_VERSION,
         "url": f"{base}/a2a",
+        "preferredTransport": "JSONRPC",
+        "additionalInterfaces": [{"url": f"{base}/a2a", "transport": "JSONRPC"}],
         "provider": {
             "organization": "SEVTECH",
             "url": REPO_URL,
@@ -725,68 +815,29 @@ def agent_card() -> dict[str, Any]:
             "receiveAddress": pay_to,
         },
         "documentationUrl": f"{base}/llms.txt",
+        # Only real A2A endpoints belong here. The x402 HTTP resources are not
+        # A2A HTTP+JSON bindings (no /message:send); they are listed per skill
+        # under skills[].x402.endpoint and in `links` below.
         "supportedInterfaces": [
             {
                 "url": f"{base}/a2a",
                 "protocolBinding": "JSONRPC",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/us/cities",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/us/{{city_code}}/property-check",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/tasks/us-rental-diligence",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/base/tx-decision",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/base/finality-check",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/mn/property-check",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/pulse",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/.well-known/x402",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/.well-known/funding.json",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/.well-known/agents.json",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-            },
-            {
-                "url": f"{base}/.well-known/ai-plugin.json",
-                "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
+                "protocolVersion": A2A_INTERFACE_PROTOCOL_VERSION,
             },
         ],
+        "links": {
+            "a2a": f"{base}/a2a",
+            "x402": f"{base}/.well-known/x402",
+            "agentCard": f"{base}/.well-known/agent-card.json",
+            "mcp": f"{base}/mcp/mcp",
+            "mcpServerCard": f"{base}/.well-known/mcp/server-card.json",
+            "openapi": f"{base}/openapi.json",
+            "llms": f"{base}/llms.txt",
+            "catalog": f"{base}/us/cities",
+            "funding": f"{base}/.well-known/funding.json",
+            "agents": f"{base}/.well-known/agents.json",
+            "aiPlugin": f"{base}/.well-known/ai-plugin.json",
+        },
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
@@ -799,6 +850,21 @@ def agent_card() -> dict[str, Any]:
                         "Supports x402 HTTP 402 micropayments with on-chain "
                         f"USDC settlement on {network} to payTo {pay_to}."
                     ),
+                    "required": False,
+                    "params": {
+                        "x402Version": 2,
+                        "scheme": "exact",
+                        "network": network,
+                        "asset": BASE_USDC,
+                        "assetSymbol": "USDC",
+                        "payTo": pay_to,
+                        "catalog": f"{base}/.well-known/x402",
+                        "a2a": f"{base}/a2a",
+                    },
+                },
+                {
+                    "uri": A2A_X402_LEGACY_EXTENSION_URI,
+                    "description": "Legacy URI for the same x402 extension (pre-v0.2 clients).",
                     "required": False,
                 },
                 {
@@ -854,6 +920,47 @@ def agent_card() -> dict[str, Any]:
         "funding": fund,
         "agenticMarket": f"{base}/.well-known/agentic-market.json",
     }
+
+
+def _price_to_atomic_str(price: str | None) -> str:
+    return str(_price_to_atomic_usdc(price)) if price and price != "free" else "0"
+
+
+def _skill_x402(
+    *,
+    price: str | None,
+    method: str,
+    url: str,
+    a2a: bool,
+    skill_id: str,
+    network: str,
+    pay_to: str,
+    base: str,
+) -> dict[str, Any]:
+    """Machine-readable per-skill payment terms (x402 v2 exact, USDC on Base).
+
+    A2A has no core price field, so terms ride in an `x402` object on each
+    skill (unknown fields are ignored by A2A clients). Values mirror the live
+    402 challenge; /.well-known/x402 stays the authoritative catalog.
+    """
+    paid = bool(price) and price != "free"
+    block: dict[str, Any] = {
+        "paid": paid,
+        "price": price if paid else "free",
+        "amount": _price_to_atomic_str(price),
+        "currency": "USD",
+        "scheme": "exact" if paid else None,
+        "x402Version": 2 if paid else None,
+        "network": network,
+        "asset": BASE_USDC,
+        "assetSymbol": "USDC",
+        "payTo": pay_to,
+        "endpoint": {"method": method, "url": url},
+        "catalog": f"{base}/.well-known/x402",
+    }
+    if a2a:
+        block["a2a"] = {"url": f"{base}/a2a", "skillId": skill_id}
+    return {k: v for k, v in block.items() if v is not None}
 
 
 def _price_to_atomic_usdc(price: str) -> int:

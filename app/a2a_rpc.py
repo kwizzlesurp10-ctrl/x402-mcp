@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 
 from starlette.datastructures import Headers
 
-from app.agent_surface import A2A_X402_EXTENSION_URI
+from app.agent_surface import A2A_X402_EXTENSION_URI, A2A_X402_EXTENSION_URIS
 from app.config import settings
 
 log = logging.getLogger("x402")
@@ -677,6 +677,10 @@ def _tasks_cancel(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
 def extension_activation_response_headers(requested: str | None) -> dict[str, str]:
     """Echo x402-a2a extension when client activates it."""
     headers: dict[str, str] = {}
-    if requested and A2A_X402_EXTENSION_URI in requested:
-        headers["X-A2A-Extensions"] = A2A_X402_EXTENSION_URI
+    if not requested:
+        return headers
+    for uri in A2A_X402_EXTENSION_URIS:
+        if uri in requested:
+            headers["X-A2A-Extensions"] = uri
+            break
     return headers
