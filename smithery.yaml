@@ -39,7 +39,7 @@ configSchema:
       description: >
         Optional 0x USDC address on Base for inbound x402 sales.
         Public discover/probe/city.sample tools work without this.
-      default: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+      default: "0x0d25A44f74868eCE53B305C97139CF4B62963410"
     EVM_PRIVATE_KEY:
       type: string
       title: Buyer wallet private key
@@ -49,7 +49,7 @@ configSchema:
       x-from:
         header: x-evm-private-key
 exampleConfig:
-  X402_PAY_TO_ADDRESS: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+  X402_PAY_TO_ADDRESS: "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 startCommand:
   type: http
   configSchema:
@@ -62,7 +62,7 @@ startCommand:
         description: >
           Optional 0x USDC address on Base for inbound x402 sales.
           Public discover/probe/city.sample tools work without this.
-        default: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+        default: "0x0d25A44f74868eCE53B305C97139CF4B62963410"
       EVM_PRIVATE_KEY:
         type: string
         title: Buyer wallet private key
@@ -72,4 +72,4 @@ startCommand:
         x-from:
           header: x-evm-private-key
   exampleConfig:
-    X402_PAY_TO_ADDRESS: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+    X402_PAY_TO_ADDRESS: "0x0d25A44f74868eCE53B305C97139CF4B62963410"

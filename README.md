@@ -37,8 +37,8 @@ Payment for delivered products / documentation artifacts, or a voluntary tip. **
 |-------|-------|
 | Network | Base `eip155:8453` |
 | Asset | USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| payTo | `0x05e1720bB82F86B5bc7940a99FDC702E32256357` |
-| Explorer | https://basescan.org/address/0x05e1720bB82F86B5bc7940a99FDC702E32256357 |
+| payTo | `0x0d25A44f74868eCE53B305C97139CF4B62963410` |
+| Explorer | https://basescan.org/address/0x0d25A44f74868eCE53B305C97139CF4B62963410 |
 | Machine cashier | buy any live paid endpoint (e.g. $0.01 property-check) |
 | Bounties protocol | [docs/BOUNTIES.md](docs/BOUNTIES.md) · [open a bounty](https://github.com/kwizzlesurp10-ctrl/x402-mcp/issues/new?template=paid-bounty.md) |
 | GitHub FUNDING.yml | [.github/FUNDING.yml](.github/FUNDING.yml) |
