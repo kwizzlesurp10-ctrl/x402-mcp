@@ -99,8 +99,11 @@ async def test_check_us_city_property_seller_execution(
 
 @pytest.mark.asyncio
 async def test_check_us_city_property_mcp_wrapper_unpaid() -> None:
-    tool = mcp_server.mcp._tool_manager._tools["city.check"]
-    result = await tool.fn(city_code="nyc", address="1 Centre St", agent_id="city-paid-agent")
+    result = await mcp_server.mcp._tool_manager.call_tool(
+        "city.check",
+        {"city_code": "nyc", "address": "1 Centre St", "agent_id": "city-paid-agent"},
+        convert_result=True,
+    )
     assert result.isError is True
     assert result.structuredContent
     assert result.structuredContent.get("x402Version") == 2
