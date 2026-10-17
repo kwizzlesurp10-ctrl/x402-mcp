@@ -47,6 +47,7 @@ Live paid catalog — same price strings the machine catalog emits:
 | Gainesville Code Cases | `GET /us/gain/property-check` | `$0.01` |
 | KC Exterior Building Violations | `GET /us/kc/property-check` | `$0.01` |
 | Base transaction finality check | `GET /base/finality-check` | `$0.01` |
+| Property Due Diligence Agent | `GET /agent/property-due-diligence` | `$0.01` |
 | Base Network Pulse (pinned) | `GET /swarm/products/d22bbf5f3c4b4666a6f80980c7bc7c50/purchase` | `$0.05` |
 
 Free samples: `GET /pulse` (Base Network Pulse preview), `GET /us/cities`, `GET /{mn,us/{code}}/property-check/sample`. Paid Pulse is `$0.05` on the pinned listing above — not a separate unpaid-roadmap SKU.
