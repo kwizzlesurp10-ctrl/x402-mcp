@@ -264,6 +264,20 @@ def paid_resources() -> list[dict[str, Any]]:
             "submitting a tx, when tx-decision answers the question before.",
             "params": {"tx": "0x-prefixed 32-byte transaction hash (required)"},
         })
+        from app import property_due_diligence_agent as pdd_agent
+
+        res.append({
+            "url": pdd_agent.resource_url(),
+            "method": "GET",
+            "price": pdd_agent.PRICE,
+            "network": settings.x402_default_network,
+            "name": pdd_agent.SERVICE_NAME,
+            "what": pdd_agent.RESOURCE_DESCRIPTION,
+            "params": {
+                "city_code": "City network code (mn, nyc, sea, …)",
+                "address": "street address string, 1-120 chars (required)",
+            },
+        })
     return res
 
 
@@ -408,8 +422,9 @@ def agent_card() -> dict[str, Any]:
     """A2A Protocol v1.0 Agent Card for ecosystem discovery.
 
     Built from the live city registry and pricing config so skills cannot
-    drift from /us/cities. Advertises HTTP+JSON interfaces only — this host
-    is an x402 micropayment storefront, not a JSON-RPC A2A Task endpoint.
+    drift from /us/cities. Primary interface is JSON-RPC at POST /a2a
+    (message/send, tasks/get, tasks/cancel) with x402-a2a payment metadata;
+    HTTP+JSON x402 resources remain as additional supportedInterfaces.
     Streaming and push are disabled because they are not implemented.
     """
     base = _base()
@@ -700,7 +715,7 @@ def agent_card() -> dict[str, Any]:
         ),
         "version": "0.1.0",
         "protocolVersion": "1.0",
-        "url": f"{base}/.well-known/x402",
+        "url": f"{base}/a2a",
         "provider": {
             "organization": "SEVTECH",
             "url": REPO_URL,
@@ -711,6 +726,11 @@ def agent_card() -> dict[str, Any]:
         },
         "documentationUrl": f"{base}/llms.txt",
         "supportedInterfaces": [
+            {
+                "url": f"{base}/a2a",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0",
+            },
             {
                 "url": f"{base}/us/cities",
                 "protocolBinding": "HTTP+JSON",
