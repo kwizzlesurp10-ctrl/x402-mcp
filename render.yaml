@@ -18,7 +18,7 @@ services:
       # payTo is a public receive address, not a secret. Pin it here so a
       # dashboard edit cannot silently split discovery from the live 402.
       - key: X402_PAY_TO_ADDRESS
-        value: "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+        value: "0x0d25A44f74868eCE53B305C97139CF4B62963410"
       - key: CDP_API_KEY_ID
         sync: false
       - key: CDP_API_KEY_SECRET
