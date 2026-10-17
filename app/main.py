@@ -184,6 +184,9 @@ app.add_middleware(
         "https://smithery.ai",
         "https://www.smithery.ai",
         "https://server.smithery.ai",
+        # Smithery's per-server gateway host (listing deploymentUrl). Without it
+        # the CORS preflight is rejected 400 "Disallowed CORS origin".
+        "https://x402-mcp--kwizzlesurp10.run.tools",
     ],
     allow_methods=_cors_methods,
     allow_headers=["*"],
@@ -2024,11 +2027,41 @@ class McpAcceptCompatMiddleware:
         await self.app(scope, receive, send)
 
 
+class McpBarePathAliasMiddleware:
+    """Serve MCP Streamable HTTP at /mcp as well as the canonical /mcp/mcp.
+
+    The transport is mounted at /mcp with FastMCP's own route at /mcp, so the
+    endpoint is /mcp/mcp. A client or gateway configured with the conventional
+    https://host/mcp got 307 -> /mcp/ -> 404 "Not Found" (Starlette's
+    trailing-slash redirect into a mount with no root route). Rewrite /mcp and
+    /mcp/ to /mcp/mcp for MCP traffic. A plain browser GET (no SSE Accept) is left
+    alone.
+    """
+
+    _ALIASES = ("/mcp", "/mcp/")
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") in self._ALIASES:
+            method = scope.get("method", "GET")
+            accept = b""
+            for k, v in scope.get("headers", []):
+                if k == b"accept":
+                    accept = v
+                    break
+            if method != "GET" or b"text/event-stream" in accept:
+                scope = {**scope, "path": "/mcp/mcp", "raw_path": b"/mcp/mcp"}
+        await self.app(scope, receive, send)
+
+
 # Mount MCP Streamable HTTP / SSE transport when available.
 if _mcp_http_app is not None:
     _mcp_http_app.add_middleware(CORSMiddleware, **_MCP_CORS)
     _mcp_http_app.add_middleware(McpAcceptCompatMiddleware)
     app.mount("/mcp", _mcp_http_app)
+    app.add_middleware(McpBarePathAliasMiddleware)
 
 try:
     # Legacy SSE mount. Smithery and MCP clients should use Streamable HTTP

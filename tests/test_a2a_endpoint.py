@@ -143,8 +143,10 @@ def test_well_known_x402_lists_property_due_diligence_agent() -> None:
 
 
 def test_mcp_redirect_respects_forwarded_proto() -> None:
+    # /mcp itself is now served directly (McpBarePathAliasMiddleware), so use
+    # the trailing-slash form, which still redirects to /mcp/mcp.
     resp = client.post(
-        "/mcp",
+        "/mcp/mcp/",
         headers={"X-Forwarded-Proto": "https", "Host": "x402-mcp.onrender.com"},
         follow_redirects=False,
     )
