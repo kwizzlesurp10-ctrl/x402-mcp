@@ -117,6 +117,12 @@ def _transport_security() -> TransportSecuritySettings:
         if host not in allowed:
             allowed.append(host)
             allowed.append(f"{host}:*")
+        # Gateways that proxy with their own Host also send their own Origin
+        # (e.g. https://x402-mcp--kwizzlesurp10.run.tools). Allowlisting only the
+        # Host made those requests 403 "Invalid Origin header".
+        origin = f"https://{host}"
+        if origin not in origins:
+            origins.append(origin)
     for host in _csv(getattr(settings, "mcp_allowed_hosts", "") or ""):
         if host not in allowed:
             allowed.append(host)
