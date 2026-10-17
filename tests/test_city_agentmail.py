@@ -159,45 +159,13 @@ async def test_mcp_sample_sends_per_city_agentmail(
 
 
 @pytest.mark.asyncio
-async def test_mcp_check_probe_sends_agentmail(
-    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", None)
-
-    async def fake_probe(params):  # noqa: ANN001
-        return {"status_code": 402, "url": str(params.url)}
-
-    monkeypatch.setattr(city_mcp.x402_services, "get_payment_requirements", fake_probe)
-    await city_mcp.check_us_city_property(
-        "nyc", "1 Centre St", agent_id="probe-agent"
-    )
-    records = _ledger_records(mail_ledger)
-    assert len(records) == 1
-    assert records[0]["metadata"]["call_kind"] == "paid_probe"
-    assert records[0]["metadata"]["city_code"] == "nyc"
-
-
-@pytest.mark.asyncio
 async def test_mcp_check_paid_sends_agentmail(
     mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", "0x" + "ab" * 32)
+    async def fake_check(address: str) -> dict[str, Any]:
+        return {"compliance_verdict": "licensed_clean", "address": address}
 
-    async def fake_pay(params):  # noqa: ANN001
-        return {
-            "status_code": 200,
-            "url": str(params.url),
-            "body": json.dumps({"compliance_verdict": "licensed_clean"}),
-            "payment_settled": True,
-            "payment_settlement": {
-                "success": True,
-                "transaction": "0xpaidtx",
-                "payer": "0xpayer",
-            },
-            "sdk": "mock",
-        }
-
-    monkeypatch.setattr(city_mcp.x402_services, "pay_and_fetch", fake_pay)
+    monkeypatch.setattr(registry.get_city("chi"), "check_property", fake_check)
     await city_mcp.check_us_city_property(
         "chi", "121 N LaSalle St", agent_id="paid-agent"
     )

@@ -12,8 +12,6 @@ from urllib.parse import quote
 
 from app.city_compliance import agentmail, gate, registry
 from app.config import settings
-from app.models import GetPaymentRequirementsInput, PayAndFetchInput
-from app import x402_services
 
 
 def _catalog_payload() -> dict[str, Any]:
@@ -33,8 +31,8 @@ def _catalog_payload() -> dict[str, Any]:
                 "shape check before paying"
             ),
             "3_paid": (
-                "check_us_city_property(city_code=…, address=…) — requires "
-                "EVM_PRIVATE_KEY on the MCP client host; settles USDC via x402"
+                "city.check(city_code=…, address=…) — MCP seller x402: unpaid "
+                "returns PaymentRequired; retry with _meta['x402/payment']"
             ),
             "http_equivalent": (
                 f"GET {base}/us/{{code}}/property-check?address=… "
@@ -136,14 +134,15 @@ async def get_us_city_property_sample(
         "network": settings.x402_default_network,
         "report": report,
         "next": {
-            "action": "check_us_city_property",
+            "action": "city.check",
             "city_code": spec.code,
             "address": "<street address 1-120 chars>",
-            "requires_env": ["EVM_PRIVATE_KEY"],
+            "mcp_payment_meta": "x402/payment",
             "http": f"{paid}?address=<url-encoded street>",
             "note": (
                 "Sample is a fixed address only. Pay for an arbitrary address "
-                "via check_us_city_property or pay_and_fetch on paid_url."
+                "via city.check (MCP PaymentRequired → _meta x402/payment) or "
+                "HTTP pay_and_fetch on paid_url."
             ),
         },
     }
@@ -184,11 +183,10 @@ async def check_us_city_property(
     preferred_network: str | None = None,
     agent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Paid compliance check via the live HTTP x402 resource.
+    """Seller execution path for city.check after MCP x402 payment is verified.
 
-    With ``EVM_PRIVATE_KEY`` set, settles and returns the report body.
-    Without a buyer key, probes the 402 challenge and returns a handoff package
-    (no settlement) so agents still get a complete discovery → pay path.
+    Unpaid calls are rejected by the MCP payment wrapper (PaymentRequired).
+    ``max_price_usdc`` / ``preferred_network`` are ignored here (buyer-side knobs).
     """
     resolved = _paid_url(city_code, address)
     if isinstance(resolved, dict):
@@ -204,72 +202,29 @@ async def check_us_city_property(
     mod, url = resolved
     spec = mod.SPEC
     price = gate.price_for(spec)
-    sample = gate.sample_url(spec)
+    addr = address.strip()
 
-    if not settings.evm_private_key:
-        probe = await x402_services.get_payment_requirements(
-            GetPaymentRequirementsInput(url=url, method="GET")
-        )
-        handoff = {
-            "paid": False,
-            "reason": "buyer_wallet_not_configured",
-            "city": spec.code,
-            "address": address.strip(),
-            "paid_url": url,
-            "sample_url": sample,
-            "price": price,
-            "network": settings.x402_default_network,
-            "payment_probe": probe,
-            "how_to_pay": (
-                "Set EVM_PRIVATE_KEY on the MCP client host, then re-call "
-                "check_us_city_property (or pay_and_fetch on paid_url). "
-                f"Free shape check first: get_us_city_property_sample("
-                f"city_code={spec.code!r})."
-            ),
-            "mcp": {
-                "tool": "check_us_city_property",
-                "requires_env": ["EVM_PRIVATE_KEY"],
-                "alternate_tool": "pay_and_fetch",
-                "alternate_args": {"url": url, "method": "GET"},
-            },
-        }
+    try:
+        report = await mod.check_property(addr)
+    except Exception:  # noqa: BLE001 — surface upstream failure to agent
         agentmail.notify_city_call(
-            "paid_probe",
+            "error",
             city_code=spec.code,
             city_name=spec.name,
             state=spec.state,
             channel="mcp",
             agent_id=agent_id,
-            address=address.strip(),
+            address=addr,
             price=price,
-            paid=False,
-            detail="buyer_wallet_not_configured",
+            paid=True,
+            detail="upstream_open_data_unavailable",
         )
-        return handoff
-
-    result = await x402_services.pay_and_fetch(
-        PayAndFetchInput(
-            url=url,
-            method="GET",
-            preferred_network=preferred_network or settings.x402_default_network,
-            max_price_usdc=max_price_usdc,
-        )
-    )
-    settlement = result.get("payment_settlement") or {}
-    tx_hash = (
-        settlement.get("transaction")
-        or settlement.get("tx_hash")
-        or settlement.get("hash")
-    )
-    body_report: dict[str, Any] | None = None
-    try:
-        import json as _json
-
-        parsed = _json.loads(result.get("body") or "{}")
-        if isinstance(parsed, dict):
-            body_report = parsed
-    except Exception:  # noqa: BLE001
-        body_report = None
+        return {
+            "error": "upstream_open_data_unavailable",
+            "city": spec.code,
+            "detail": "payment accepted; city open-data join failed; contact seller",
+            "paid_url": url,
+        }
 
     agentmail.notify_city_call(
         "paid_mcp",
@@ -278,19 +233,18 @@ async def check_us_city_property(
         state=spec.state,
         channel="mcp",
         agent_id=agent_id,
-        address=address.strip(),
+        address=addr,
         price=price,
-        verdict=agentmail.verdict_from_report(body_report),
-        paid=bool(result.get("payment_settled")),
-        tx_hash=str(tx_hash) if tx_hash else None,
-        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+        verdict=agentmail.verdict_from_report(report),
+        paid=True,
     )
     return {
         "paid": True,
         "city": spec.code,
-        "address": address.strip(),
+        "address": addr,
         "paid_url": url,
+        "sample_url": gate.sample_url(spec),
         "price": price,
         "network": settings.x402_default_network,
-        "result": result,
+        "report": report,
     }

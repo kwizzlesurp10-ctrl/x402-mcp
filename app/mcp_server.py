@@ -23,6 +23,7 @@ from app.models import (
     ToolResponse,
     VerifyPaymentInput,
 )
+from app.mcp_payments import city_check_payment_wrapper
 from app.ops_events import emit_tool_event
 from app.swarm import orchestrator as swarm_orchestrator
 
@@ -897,8 +898,9 @@ async def get_us_city_property_sample(
     name="city.check",
     title="Paid US city property check",
     description=(
-        "Run a paid US city property compliance check via x402 on the same HTTP resource buyers use. "
-        "Prefer city.sample first. Settles USDC when EVM_PRIVATE_KEY is set; otherwise returns a 402 probe. "
+        "Paid US city property compliance check (MCP seller x402). "
+        "Unpaid calls return PaymentRequired with accepts; pay via _meta['x402/payment']. "
+        "Prefer city.sample first. "
         "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
     ),
     annotations=WRITE_PAYMENT,
@@ -1164,7 +1166,7 @@ def prompt_city_compliance(
         "Call city.list to get supported city codes, paid_url, sample_url, and price. "
         f"Then city.sample with city_code={city_code!r} to validate the free envelope. "
         f"Then city.check with city_code={city_code!r} and address={address!r}. "
-        "If EVM_PRIVATE_KEY is unset, city.check returns a 402 probe rather than charging."
+        "Unpaid city.check returns PaymentRequired; retry with _meta['x402/payment']."
     )
 
 
@@ -1298,3 +1300,9 @@ def _simplify_schema(schema: Any) -> Any:
 # Simplify the parameter schemas of all registered tools to prevent validation errors (status 422) on strict client parsers.
 for tool in mcp._tool_manager._tools.values():
     tool.parameters = _simplify_schema(tool.parameters)
+
+# Seller x402 payment gate for city.check — applied after Tool.from_function so the
+# wrapper's synthetic ctx: Context parameter does not break Pydantic arg models.
+_city_check_tool = mcp._tool_manager._tools.get("city.check")
+if _city_check_tool is not None:
+    _city_check_tool.fn = city_check_payment_wrapper()(_city_check_tool.fn)
