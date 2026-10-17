@@ -120,7 +120,7 @@ def build_authorization(
     accepts = challenge.get("accepts", [])
     req = accepts[0] if accepts else challenge
 
-    pay_to = req.get("payTo") or req.get("pay_to") or "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+    pay_to = req.get("payTo") or req.get("pay_to") or "0x0d25A44f74868eCE53B305C97139CF4B62963410"
     amount = req.get("amount") or req.get("maxAmountRequired") or 10000
     network = req.get("network") or "eip155:8453"
 
@@ -265,7 +265,7 @@ def run_buyer_workflow(
             "target_url": target_url,
             "settlement": "simulated_dry_run",
             "buyer": buyer_addr,
-            "payTo": challenge.get("payTo", "0x05e1720bB82F86B5bc7940a99FDC702E32256357"),
+            "payTo": challenge.get("payTo", "0x0d25A44f74868eCE53B305C97139CF4B62963410"),
             "amount": challenge.get("amount", 10000),
             "timestamp": int(time.time()),
         }

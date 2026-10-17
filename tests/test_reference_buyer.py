@@ -54,14 +54,14 @@ def test_probe_402_paid_endpoint() -> None:
 
 def test_build_authorization_payload() -> None:
     mock_challenge = {
-        "payTo": "0x05e1720bB82F86B5bc7940a99FDC702E32256357",
+        "payTo": "0x0d25A44f74868eCE53B305C97139CF4B62963410",
         "amount": 10000,
         "network": "eip155:8453",
     }
     sig_b64 = build_authorization(mock_challenge, buyer_address="0xTestBuyer")
     parsed = parse_b64_json(sig_b64)
     assert parsed["from"] == "0xTestBuyer"
-    assert parsed["to"] == "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+    assert parsed["to"] == "0x0d25A44f74868eCE53B305C97139CF4B62963410"
     assert parsed["value"] == "10000"
     assert "validBefore" in parsed
 
