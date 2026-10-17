@@ -65,8 +65,9 @@ LICENSE_FIELDS = (
     "licensedUnits,ownerName,ward,neighborhoodDesc,communityDesc,shortTermRental"
 )
 VIOLATION_FIELDS = (
-    "APN,Violation_Case_Number,Case_Type,Case_Group,Inspection_Result,"
-    "Inspection_Type_Desc,Start_Date,Completed_Date"
+    "APN,Violation_Case_Number,Case_Type,Case_Group,Status_Violation_Case,"
+    "Violation_Code,Violation_Code_Description,Status_Violation,Resolution_Code,"
+    "Processed_Date,Resolved_Date"
 )
 CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 
@@ -96,16 +97,73 @@ RESOURCE_DESCRIPTION = (
 SERVICE_NAME = "MN Rental License Check"
 SERVICE_TAGS = ["minneapolis", "rental-license", "compliance", "housing", "diligence"]
 
+# City of Minneapolis closes a CaseViolations row with one of these tokens.
+# Abate/Closed is history. It stays in the report and does not flip the verdict.
+_CLOSED_STATUSES = frozenset({
+    "abate",
+    "abated",
+    "cancel",
+    "canceled",
+    "cancelled",
+    "close",
+    "closed",
+    "void",
+    "complied",
+    "compliance",
+    "no violation",
+    "no violations",
+})
+
 
 def _escape(value: str) -> str:
     """Escape a value for an ArcGIS SQL where clause (single-quote doubling)."""
     return value.replace("'", "''")
 
 
-def _iso(epoch_ms: Any) -> str | None:
-    if not isinstance(epoch_ms, (int, float)):
+def _iso(value: Any) -> str | None:
+    """ArcGIS dates arrive as epoch ms or as already-formatted strings."""
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        return raw[:10]
+    return None
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
         return None
-    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).date().isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def violation_is_open(row: dict) -> bool:
+    """True when this case row is still open.
+
+    A blank Status_Violation on an Enforce, Open, or Pending case is open.
+    Abate, Cancel, Closed, and Void close the row. Old Inspection_Result
+    values from the retired layer use the same tokens.
+    """
+    tokens = (
+        _text(row.get("Status_Violation_Case")),
+        _text(row.get("Status_Violation")),
+        _text(row.get("Resolution_Code")),
+        _text(row.get("Inspection_Result")),
+    )
+    for token in tokens:
+        if token and token.lower() in _CLOSED_STATUSES:
+            return False
+    return True
+
+
+def _violation_sort_key(row: dict) -> float:
+    for key in ("Processed_Date", "Resolved_Date", "Start_Date"):
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return 0.0
 
 
 def effective_mn_data_base_url() -> str:
@@ -238,20 +296,22 @@ async def check_property(address: str) -> dict[str, Any]:
             )
 
     recent_violations = sorted(
-        violations, key=lambda v: v.get("Start_Date") or 0, reverse=True
+        violations, key=_violation_sort_key, reverse=True
     )[:10]
 
     licensed = bool(licenses)
     condemned_flagged = bool(condemned)
     violation_total = len(violations)
+    open_total = sum(1 for row in violations if violation_is_open(row))
     # One-token decision for agent buyers. Severity order: condemned >
-    # unlicensed > licensed-with-open-history > clean. Derived only from the
+    # unlicensed > licensed with an open case > clean. Abated history stays
+    # in violation_cases and does not change the token. Derived only from the
     # three ArcGIS joins above — no scoring model.
     if condemned_flagged:
         compliance_verdict = "condemned_or_boarded"
     elif not licensed:
         compliance_verdict = "unlicensed"
-    elif violation_total > 0:
+    elif open_total > 0:
         compliance_verdict = "licensed_with_violations"
     else:
         compliance_verdict = "licensed_clean"
@@ -281,15 +341,23 @@ async def check_property(address: str) -> dict[str, Any]:
         "licensed": licensed,
         "violation_cases": {
             "total": violation_total,
+            "open": open_total,
+            "abated": violation_total - open_total,
             "recent": [
                 {
                     "case_number": v.get("Violation_Case_Number"),
                     "case_type": v.get("Case_Type"),
                     "case_group": v.get("Case_Group"),
-                    "inspection_result": v.get("Inspection_Result"),
-                    "inspection_type": v.get("Inspection_Type_Desc"),
-                    "start_date": _iso(v.get("Start_Date")),
-                    "completed_date": _iso(v.get("Completed_Date")),
+                    "case_status": _text(v.get("Status_Violation_Case")),
+                    "inspection_result": (
+                        _text(v.get("Status_Violation"))
+                        or _text(v.get("Inspection_Result"))
+                    ),
+                    "inspection_type": _text(v.get("Violation_Code_Description"))
+                    or _text(v.get("Inspection_Type_Desc")),
+                    "violation_code": _text(v.get("Violation_Code")),
+                    "start_date": _iso(v.get("Processed_Date") or v.get("Start_Date")),
+                    "completed_date": _iso(v.get("Resolved_Date") or v.get("Completed_Date")),
                 }
                 for v in recent_violations
             ],

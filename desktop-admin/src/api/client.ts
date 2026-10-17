@@ -1,4 +1,4 @@
-import { readStoredApiBase } from "../config";
+import { readStoredApiBase, readStoredOperatorToken } from "../config";
 
 export type StatsResponse = {
   agents: Array<{
@@ -221,11 +221,11 @@ export type MailRailHealth = {
   ok: boolean;
   enabled: boolean;
   provider: string;
-  from_address: string;
-  admin_recipient: string | null;
-  has_api_key: boolean;
-  has_webhook: boolean;
-  has_smtp: boolean;
+  from_address?: string;
+  admin_recipient?: string | null;
+  has_api_key?: boolean;
+  has_webhook?: boolean;
+  has_smtp?: boolean;
 };
 
 export type MailRailMessage = {
@@ -280,6 +280,20 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const MAILRAIL_POSTMASTER = "x402-mailrail-postmaster";
+
+async function getMailrailOperatorJson<T>(path: string): Promise<T> {
+  const token = readStoredOperatorToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    headers["X-Agent-Id"] = MAILRAIL_POSTMASTER;
+  }
+  const res = await fetch(`${getApiBase()}${path}`, { headers });
+  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 export const api = {
   health: () => getJson<HealthResponse>("/health"),
   stats: () => getJson<StatsResponse>("/stats"),
@@ -294,9 +308,9 @@ export const api = {
   swarmAssessment: () => getJson<SwarmAssessment>("/swarm/assessment"),
   telemetry: () => getJson<TelemetryResponse>("/telemetry"),
   mailrailHealth: () => getJson<MailRailHealth>("/mailrail/health"),
-  mailrailLedger: (limit = 50) => getJson<{ events: MailRailMessage[]; count: number }>(`/mailrail/ledger?limit=${limit}`),
-  mailrailInbox: (limit = 50) => getJson<{ inbox: MailRailMessage[]; count: number }>(`/mailrail/inbox?limit=${limit}`),
-  mailrailStats: () => getJson<MailRailStats>("/mailrail/stats"),
+  mailrailLedger: (limit = 50) => getMailrailOperatorJson<{ events: MailRailMessage[]; count: number }>(`/mailrail/ledger?limit=${limit}`),
+  mailrailInbox: (limit = 50) => getMailrailOperatorJson<{ inbox: MailRailMessage[]; count: number }>(`/mailrail/inbox?limit=${limit}`),
+  mailrailStats: () => getMailrailOperatorJson<MailRailStats>("/mailrail/stats"),
   probe: (url: string, method = "GET") =>
     getJson<Record<string, unknown>>(`/probe?url=${encodeURIComponent(url)}&method=${encodeURIComponent(method)}`),
   sellerRequirements: (body: {

@@ -995,45 +995,47 @@ async def mailrail_send(
     ] = None,
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused before send."),
     ] = None,
 ) -> str:
+    """Postmaster-only helper. Not registered as a public MCP tool."""
     from app import mailrail
     from app.mailrail_agent import refuse_if_not_mailrail_agent
 
     refused = refuse_if_not_mailrail_agent(agent_id)
-    if refused:
-        return json.dumps(refused, indent=2)
+    if refused is not None:
+        return json.dumps(refused)
+
+    def _send(_resolved: str) -> dict:
+        sent = mailrail.send_agent_mail(
+            to=to,
+            subject=subject,
+            body=body,
+            event_id=event_id,
+        )
+        sent["agent_id"] = agent_id
+        return {"status": "ok", "mailrail": sent}
 
     return await _execute_tool(
         "mailrail.send",
         agent_id,
-        lambda _: _sync_result(
-            {
-                "status": "ok",
-                "mailrail": mailrail.send_agent_mail(
-                    to=to,
-                    subject=subject,
-                    body=body,
-                    event_id=event_id,
-                ),
-            }
-        ),
+        lambda resolved: _sync_result(_send(resolved)),
     )
 
 
 async def mailrail_status(
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused."),
     ] = None,
 ) -> str:
+    """Postmaster-only status. Not registered as a public MCP tool."""
     from app.config import settings
     from app.mailrail_agent import refuse_if_not_mailrail_agent
 
     refused = refuse_if_not_mailrail_agent(agent_id)
-    if refused:
-        return json.dumps(refused, indent=2)
+    if refused is not None:
+        return json.dumps(refused)
 
     return await _execute_tool(
         "mailrail.status",
@@ -1068,29 +1070,30 @@ async def mailrail_inbound(
     ],
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused before ingest."),
     ] = None,
 ) -> str:
+    """Postmaster-only inbound helper. Not registered as a public MCP tool."""
     from app import mailrail
     from app.mailrail_agent import refuse_if_not_mailrail_agent
 
     refused = refuse_if_not_mailrail_agent(agent_id)
-    if refused:
-        return json.dumps(refused, indent=2)
+    if refused is not None:
+        return json.dumps(refused)
+
+    def _ingest(_resolved: str) -> dict:
+        inbound = mailrail.process_inbound_mail(
+            sender=sender,
+            subject=subject,
+            body=body,
+        )
+        inbound["agent_id"] = agent_id
+        return {"status": "ok", "inbound": inbound}
 
     return await _execute_tool(
         "mailrail.inbound",
         agent_id,
-        lambda _: _sync_result(
-            {
-                "status": "ok",
-                "inbound": mailrail.process_inbound_mail(
-                    sender=sender,
-                    subject=subject,
-                    body=body,
-                ),
-            }
-        ),
+        lambda resolved: _sync_result(_ingest(resolved)),
     )
 
 

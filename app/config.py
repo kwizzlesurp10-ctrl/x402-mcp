@@ -1,6 +1,6 @@
 """Application configuration."""
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     # Seller (cold receive) — on-chain payTo for revenue. Prefer separate from buyer.
     # Live cashier is 0x0d25A44f74868eCE53B305C97139CF4B62963410 (DEFAULT_PAY_TO).
     x402_pay_to_address: str | None = None
+
+    @model_validator(mode="after")
+    def _public_upgrade_url(self) -> "Settings":
+        """Do not advertise localhost once PUBLIC_BASE_URL is a real origin.
+
+        Render sets PUBLIC_BASE_URL and leaves UPGRADE_URL unset, so the field
+        default leaked http://localhost:8402/upgrade into every tool meta block.
+        """
+        local_upgrade = "http://localhost:8402/upgrade"
+        base = (self.public_base_url or "").strip().rstrip("/")
+        if self.upgrade_url == local_upgrade and base and not base.startswith(
+            ("http://localhost", "http://127.0.0.1")
+        ):
+            self.upgrade_url = f"{base}/upgrade"
+        return self
 
     @field_validator("x402_pay_to_address", mode="before")
     @classmethod
@@ -220,10 +235,12 @@ class Settings(BaseSettings):
     mailrail_admin_recipient: str | None = None
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
-    # Only these agent ids may use MailRail HTTP/MCP (comma-separated).
-    mailrail_allowed_agent_ids: str = "x402-mailrail-postmaster"
+    # Extra postmaster ids, comma-separated. x402-mailrail-postmaster is always allowed.
+    # GITHUB_TOKEN and GITHUB_REPO are host secrets for operator notify. Leave them
+    # unset and MailRail does not open GitHub issues. Do not commit them.
+    mailrail_allowed_agent_ids: str = ""
     github_token: str | None = None
-    github_repo: str = "kwizzlesurp10-ctrl/x402-mcp"
+    github_repo: str | None = None
 
     # Autonomous Cache Warmer & Pulse Auto-Freshness Engine
     cache_warmer_enabled: bool = True

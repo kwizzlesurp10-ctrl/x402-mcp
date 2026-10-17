@@ -81,3 +81,22 @@ def test_product_focus_realignment():
     # With seller_ready true (pay-to configured in tests/CI), mn invest is top.
     if a["signals"]["seller_ready"]:
         assert a["recommended_route"]["id"] == "mn_invest"
+
+
+def test_mn_invest_card_does_not_reopen_packaging():
+    """The card the next session reads must not send it back into packaging.
+
+    Development-burner sales still count, so the reverse clause stays off.
+    """
+    assessed = assessor.assess()
+    route = next(r for r in assessed["profit_routes"] if r["id"] == "mn_invest")
+    card = f"{route['status_note']}\n{route['next_action']}"
+    assert "External sales still 0" not in card
+    assert "Ship value" not in card
+    assert "improve offer quality" not in card
+    assert "Do not open another packaging pass" in route["next_action"]
+    assert "licensed_with_violations" in route["next_action"]
+    assert "does not fire" in route["next_action"]
+    sales = next(b for b in assessed["backlog"] if b["charter"] == "sales_monetization")
+    assert "Do not open another packaging pass" in sales["detail"]
+    assert "licensed_with_violations" in sales["detail"]
