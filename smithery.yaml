@@ -5,7 +5,7 @@ description: >
   Pay for HTTP APIs and charge for your own with x402 USDC micropayments on Base.
   Discover Bazaar services, probe 402 terms, pay-and-fetch protected resources,
   and run US city open-data property compliance. Public tools need no API key.
-version: 0.1.0
+version: 1.30.0
 license: MIT
 homepage: https://x402-mcp.onrender.com
 repository: https://github.com/kwizzlesurp10-ctrl/x402-mcp
