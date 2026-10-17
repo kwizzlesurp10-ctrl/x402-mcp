@@ -1387,17 +1387,41 @@ async def purchase_tool_credits(
             f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
+    return grant_tool_credits_after_settlement(
+        agent_id, credits_paid, payment
+    )
+
+
+def grant_tool_credits_after_settlement(
+    agent_id: str,
+    credits_paid: int,
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    """Credit an agent after payment was verified+settled elsewhere (e.g. MCP _meta)."""
     balance = quota_store.add_credits(agent_id, credits_paid)
     snapshot = quota_store.peek(agent_id)
-
     return {
         "credited": True,
         "agent_id": agent_id,
         "credits_purchased": credits_paid,
         "tool_credits_remaining": balance,
         "tier": snapshot.tier,
-        "payment_settled": payment["payment_settled"],
-        "verification": payment,
+        "payment_settled": verification.get("payment_settled", True),
+        "verification": verification,
+    }
+
+
+def grant_pro_tier_after_settlement(agent_id: str, verification: dict[str, Any]) -> dict[str, Any]:
+    """Unlock Pro quota after payment was verified+settled elsewhere (e.g. MCP _meta)."""
+    quota_store.activate_pro_tier(agent_id)
+    snapshot = quota_store.peek(agent_id)
+    return {
+        "activated": True,
+        "agent_id": agent_id,
+        "tier": snapshot.tier,
+        "pro_quota": settings.pro_tier_monthly_quota,
+        "payment_settled": verification.get("payment_settled", True),
+        "verification": verification,
     }
 
 
@@ -1427,14 +1451,4 @@ async def activate_pro_tier(
             f"{payment.get('settlement_error') or 'settlement unsuccessful'}"
         )
 
-    quota_store.activate_pro_tier(agent_id)
-    snapshot = quota_store.peek(agent_id)
-
-    return {
-        "activated": True,
-        "agent_id": agent_id,
-        "tier": snapshot.tier,
-        "pro_quota": settings.pro_tier_monthly_quota,
-        "payment_settled": payment["payment_settled"],
-        "verification": payment,
-    }
+    return grant_pro_tier_after_settlement(agent_id, payment)
