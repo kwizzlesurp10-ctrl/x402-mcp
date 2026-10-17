@@ -11,7 +11,7 @@ from app.ssrf_guard import validate_probe_url
 
 logger = logging.getLogger("x402_mcp.a2a_discovery")
 
-A2A_X402_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
+A2A_X402_URI = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
 AP2_URI = "https://github.com/google-agentic-commerce/ap2/v1"
 DISCOVERY_PATHS = [
     "/.well-known/agent-card.json",

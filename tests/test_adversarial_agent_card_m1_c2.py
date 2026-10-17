@@ -49,7 +49,7 @@ class TestGetAgentCardToolAdversarial:
 
         # Validate card schema
         card = data["card"]
-        assert card["protocolVersion"] == "1.0"
+        assert card["protocolVersion"] == "0.3.0"
         assert "skills" in card
         assert isinstance(card["skills"], list)
         assert len(card["skills"]) > 0
@@ -226,7 +226,7 @@ class TestFastMCPResourcesAdversarial:
         card = json.loads(raw)
 
         # A2A top-level fields
-        assert card.get("protocolVersion") == "1.0"
+        assert card.get("protocolVersion") == "0.3.0"
         assert isinstance(card.get("name"), str)
         assert isinstance(card.get("description"), str)
         assert isinstance(card.get("documentationUrl"), str)

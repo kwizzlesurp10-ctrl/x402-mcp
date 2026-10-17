@@ -117,6 +117,18 @@ def test_a2a_tasks_cancel() -> None:
     assert canceled.json()["result"]["status"]["state"] == "canceled"
 
 
+def test_legacy_extension_uri_still_activates() -> None:
+    from app.agent_surface import A2A_X402_LEGACY_EXTENSION_URI
+    from app.a2a_rpc import extension_activation_response_headers
+
+    assert extension_activation_response_headers(A2A_X402_LEGACY_EXTENSION_URI) == {
+        "X-A2A-Extensions": A2A_X402_LEGACY_EXTENSION_URI
+    }
+    assert extension_activation_response_headers(A2A_X402_EXTENSION_URI) == {
+        "X-A2A-Extensions": A2A_X402_EXTENSION_URI
+    }
+
+
 def test_agent_card_points_at_a2a_jsonrpc() -> None:
     card = client.get("/.well-known/agent-card.json").json()
     assert card["url"].endswith("/a2a")
