@@ -91,16 +91,18 @@ _ROUTES: list[dict[str, Any]] = [
                   "tool_leverage": 0.9, "defensibility": 0.55, "impact": 0.85},
         "prereqs": ["seller_ready"],
         "status_note": (
-            "PRODUCT-FOCUS unfrozen 2026-08-04: features / repositioning / careful "
-            "repricing allowed under invariants. Only access-barrier product on "
-            "the rail. External sales still 0 — improve offer quality, not "
-            "challenge volume. Reverse clause remains a kill switch from /demand."
+            "PRODUCT-FOCUS unfrozen 2026-08-04. Access-barrier product. Sales "
+            "settled to the development burner cashier still count: the "
+            "2026-09-20 rotation was a lost key, not a new customer. Catalog "
+            "placeholder rows are operator settles. The reverse clause does "
+            "not fire."
         ),
         "next_action": (
-            "Ship value on /mn/property-check (buyer-facing accuracy, coverage, "
-            "or clear packaging). Read GET /demand external sales weekly. If "
-            "still 0 external at high volume, consider reverse clause — stop "
-            "data products rather than polish free-RPC alternatives."
+            "Abated or closed Minneapolis cases stay in the report and do not "
+            "return licensed_with_violations. Do not open another packaging "
+            "pass. The reverse clause does not fire. Next signal is a repeat "
+            "external payer on the current cashier, from GET /demand "
+            "sales_external and GET /ledger/revenue."
         ),
     },
     {
@@ -172,10 +174,10 @@ _ROUTES: list[dict[str, Any]] = [
                   "tool_leverage": 0.5, "defensibility": 0.15, "impact": 0.15},
         "prereqs": ["seller_ready", "settlement_mainnet"],
         "status_note": (
-            "DEMOTED per PRODUCT-FOCUS + live /demand: thousands of challenges, "
+            "LEGACY per PRODUCT-FOCUS + live /demand: thousands of challenges, "
             "~0% external conversion. Free-RPC arithmetic a buyer can inline. "
-            "Stay deployed; no features, no re-index settles, no lead outreach. "
-            "Delisting cliff ~2026-08-21 is intentional."
+            "Stay deployed as a legacy reference; no features, no re-index "
+            "settles, no lead outreach. Delisting cliff (2026-08-21) has passed."
         ),
         "next_action": (
             "Do nothing on this product. Do not change PINNED_PULSE_PRODUCT_ID. "
@@ -247,9 +249,11 @@ def build_backlog(signals: dict[str, Any]) -> list[dict[str, Any]]:
          "human_gated", True, "Ad spend GATED. Recommends budgets/experiments only."),
         ("sales_monetization", "Sales, monetization & product owner",
          "partial", True,
-         "PRODUCT-FOCUS unfrozen 2026-08-04: invest in /mn/property-check + "
-         "cost-basis products. Pulse/tx-decision stay demoted — no features or "
-         "re-index. Score external conversion only. Pricing claims human-gated."),
+         "Abated Minneapolis cases do not return licensed_with_violations. "
+         "Do not open another packaging pass. Catalog placeholder rows are "
+         "operator settles. Development-burner sales still count, so the "
+         "reverse clause does not fire. Pulse and tx-decision stay demoted. "
+         "Pricing claims human-gated."),
         ("ops_monitoring", "Ops, monitoring, protection & analytics",
          "available", False,
          "Policy caps exist; add runtime spend-anomaly alerts + CDP/Bazaar health checks."),

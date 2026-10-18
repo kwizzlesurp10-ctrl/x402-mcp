@@ -105,6 +105,7 @@ def send_agent_mail(
     body: str,
     event_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    *,
     notify_operator_after: bool = False,
 ) -> dict[str, Any]:
     """Send an email / notification via MailRail.
@@ -167,7 +168,8 @@ def send_agent_mail(
         "timestamp": now_iso,
         "agent_id": meta.get("agent_id"),
     }
-    if notify_operator_after:
+    # Default off. notify_operator passes False so email notify cannot recurse.
+    if notify_operator_after and live_success:
         try:
             from app.mailrail_agent import notify_operator
 
@@ -178,8 +180,8 @@ def send_agent_mail(
                 event_id=key,
                 already_emailed=already,
             )
-        except Exception as exc:  # noqa: BLE001
-            log.warning("operator notify after send failed: %s", exc)
+        except Exception as exc:  # noqa: BLE001 — notify must not fail the send
+            log.warning("MailRail operator notify failed: %s", exc)
     return result
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
+from app.mailrail_agent import AGENT_ID
 from app.mailrail import (
     defuse_mentions,
     event_key,
@@ -182,7 +183,7 @@ async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.Monkey
     _SEEN_KEYS.clear()
 
     # Status check tool
-    status_raw = await mailrail_status(agent_id="x402-mailrail-postmaster")
+    status_raw = await mailrail_status(agent_id=AGENT_ID)
     status_data = json.loads(status_raw)
     assert status_data["data"]["status"] == "ok"
     assert "provider" in status_data["data"]
@@ -193,7 +194,7 @@ async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.Monkey
         subject="Report ready",
         body="Findings attached.",
         event_id="mcp_test_01",
-        agent_id="x402-mailrail-postmaster",
+        agent_id=AGENT_ID,
     )
     send_data = json.loads(send_raw)
     assert send_data["data"]["status"] == "ok"
@@ -210,10 +211,7 @@ def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     _SEEN_KEYS.clear()
 
     client = TestClient(app)
-    auth = {
-        "Authorization": "Bearer s3cret",
-        "X-Agent-Id": "x402-mailrail-postmaster",
-    }
+    auth = {"Authorization": "Bearer s3cret", "X-Agent-Id": AGENT_ID}
 
     # Health check stays public
     res_health = client.get("/mailrail/health")
@@ -281,7 +279,7 @@ async def test_mailrail_inbound_mcp_tool(tmp_path: Path, monkeypatch: pytest.Mon
         sender="scout-agent@network.ai",
         subject="Service alert",
         body="Upstream pricing dropped.",
-        agent_id="x402-mailrail-postmaster",
+        agent_id=AGENT_ID,
     )
     res_data = json.loads(res_raw)
     assert res_data["data"]["status"] == "ok"

@@ -29,4 +29,4 @@ COPY --from=dashboard /src/dist/ ./app/static/mission_control/
 ENV HOST=0.0.0.0
 
 # Render injects PORT at runtime; fall back to 8402 for local Docker usage.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8402}
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8402} --proxy-headers --forwarded-allow-ips='*'

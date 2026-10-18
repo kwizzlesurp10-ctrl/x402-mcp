@@ -13,11 +13,13 @@ MC_DIST = Path(__file__).resolve().parents[1] / "app" / "static" / "mission_cont
 
 
 def test_root_serves_ownership_meta_and_points_at_dashboard() -> None:
-    """`/` must expose Base ownership meta for scrapers."""
+    """`/` must expose Base ownership meta for scrapers and strict CSP."""
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert BASE_APP_ID_META in response.text
+    assert "content-security-policy" in response.headers
+    assert "default-src 'self'" in response.headers["content-security-policy"]
 
 
 def test_mission_control_bundle_is_present() -> None:
@@ -30,6 +32,8 @@ def test_dashboard_serves_mission_control_spa() -> None:
     response = client.get("/dashboard")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
+    assert "content-security-policy" in response.headers
+    assert "default-src 'self'" in response.headers["content-security-policy"]
     html = response.text
     assert BASE_APP_ID_META in html
     assert "x402 // mission control" in html
@@ -40,7 +44,21 @@ def test_dashboard_serves_mission_control_spa() -> None:
 
 
 def test_dashboard_trailing_slash() -> None:
-    assert client.get("/dashboard/").status_code == 200
+    response = client.get("/dashboard/")
+    assert response.status_code == 200
+    assert "content-security-policy" in response.headers
+    assert "default-src 'self'" in response.headers["content-security-policy"]
+
+
+def test_dashboard_and_root_csp_headers_are_identical() -> None:
+    root_resp = client.get("/")
+    dash_resp = client.get("/dashboard")
+    dash_slash_resp = client.get("/dashboard/")
+    csp = root_resp.headers.get("content-security-policy")
+    assert csp is not None
+    assert csp == dash_resp.headers.get("content-security-policy")
+    assert csp == dash_slash_resp.headers.get("content-security-policy")
+    assert "connect-src 'self' ws: wss: https://*.render.com;" in csp
 
 
 def test_mission_control_bundle_has_no_costume_claims() -> None:

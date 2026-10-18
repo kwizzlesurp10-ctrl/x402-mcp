@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 client = TestClient(app)
 
 # Sole live seller cashier. Discovery, 402, Smithery, and Render must agree.
-CANONICAL_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+CANONICAL_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 
 # Former receive addresses. Paying either does not credit the live cashier.
 RETIRED_PAY_TO_PREFIXES = (
@@ -23,6 +23,7 @@ RETIRED_PAY_TO_PREFIXES = (
     "0xcA6791f9",  # leaked cold-receive.key / Render dashboard drift
     "0x8A897D54",  # prior live cashier rotated 2026-09-20
     "0x9138fEA6",  # leaked buyer-hot.key
+    "0x05e1720b",  # prior live cashier rotated 2026-10-17
 )
 
 PUBLIC_SURFACES = (
@@ -96,6 +97,8 @@ def test_tracked_tree_does_not_advertise_retired_pay_to() -> None:
     for rel in listed:
         posix = Path(rel).as_posix()
         if posix == self_rel:
+            continue
+        if posix == "CHANGES.md":
             continue
         if posix.startswith(".keys/"):
             continue

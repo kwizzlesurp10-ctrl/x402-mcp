@@ -8,8 +8,8 @@ Legal cashier for this repo: **payment for delivered documentation / audit artif
 |---|---|
 | Network | Base, CAIP-2 `eip155:8453` |
 | Asset | USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
-| payTo | `0x05e1720bB82F86B5bc7940a99FDC702E32256357` |
-| Explorer | https://basescan.org/address/0x05e1720bB82F86B5bc7940a99FDC702E32256357 |
+| payTo | `0x0d25A44f74868eCE53B305C97139CF4B62963410` |
+| Explorer | https://basescan.org/address/0x0d25A44f74868eCE53B305C97139CF4B62963410 |
 | Machine cashier | existing x402 storefront (e.g. $0.01 property-check) |
 
 GitHub Sponsors, Polar, and thanks.dev settle **fiat**. They do not credit `payTo`. If those are used, the operator may later sweep USD→USDC; that sweep is separate from this protocol.
@@ -38,5 +38,5 @@ Filed as GitHub issues with title prefix `bounty:`.
 ```
 DELIVERED: <url to new file on master>
 PAID: https://basescan.org/tx/<hash>
-payTo confirmed: 0x05e1720bB82F86B5bc7940a99FDC702E32256357
+payTo confirmed: 0x0d25A44f74868eCE53B305C97139CF4B62963410
 ```

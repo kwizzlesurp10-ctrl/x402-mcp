@@ -23,6 +23,7 @@ from app.models import (
     ToolResponse,
     VerifyPaymentInput,
 )
+from app.mcp_payments import city_check_payment_wrapper
 from app.ops_events import emit_tool_event
 from app.swarm import orchestrator as swarm_orchestrator
 
@@ -116,6 +117,12 @@ def _transport_security() -> TransportSecuritySettings:
         if host not in allowed:
             allowed.append(host)
             allowed.append(f"{host}:*")
+        # Gateways that proxy with their own Host also send their own Origin
+        # (e.g. https://x402-mcp--kwizzlesurp10.run.tools). Allowlisting only the
+        # Host made those requests 403 "Invalid Origin header".
+        origin = f"https://{host}"
+        if origin not in origins:
+            origins.append(origin)
     for host in _csv(getattr(settings, "mcp_allowed_hosts", "") or ""):
         if host not in allowed:
             allowed.append(host)
@@ -943,11 +950,13 @@ async def get_us_city_property_sample(
     name="city.check",
     title="Paid US city property check",
     description=(
-        "Run a paid US city property compliance check via x402 on the same HTTP resource buyers use. "
-        "Prefer city.sample first. Settles USDC when EVM_PRIVATE_KEY is set; otherwise returns a 402 probe. "
+        "Paid US city property compliance check (MCP seller x402). "
+        "Unpaid calls return PaymentRequired with accepts; pay via _meta['x402/payment']. "
+        "Prefer city.sample first. "
         "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def check_us_city_property(
     city_code: Desc[
@@ -1041,45 +1050,47 @@ async def mailrail_send(
     ] = None,
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused before send."),
     ] = None,
 ) -> str:
+    """Postmaster-only helper. Not registered as a public MCP tool."""
     from app import mailrail
     from app.mailrail_agent import refuse_if_not_mailrail_agent
 
     refused = refuse_if_not_mailrail_agent(agent_id)
-    if refused:
-        return json.dumps(refused, indent=2)
+    if refused is not None:
+        return json.dumps(refused)
+
+    def _send(_resolved: str) -> dict:
+        sent = mailrail.send_agent_mail(
+            to=to,
+            subject=subject,
+            body=body,
+            event_id=event_id,
+        )
+        sent["agent_id"] = agent_id
+        return {"status": "ok", "mailrail": sent}
 
     return await _execute_tool(
         "mailrail.send",
         agent_id,
-        lambda _: _sync_result(
-            {
-                "status": "ok",
-                "mailrail": mailrail.send_agent_mail(
-                    to=to,
-                    subject=subject,
-                    body=body,
-                    event_id=event_id,
-                ),
-            }
-        ),
+        lambda resolved: _sync_result(_send(resolved)),
     )
 
 
 async def mailrail_status(
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused."),
     ] = None,
 ) -> str:
+    """Postmaster-only status. Not registered as a public MCP tool."""
     from app.config import settings
     from app.mailrail_agent import refuse_if_not_mailrail_agent
 
     refused = refuse_if_not_mailrail_agent(agent_id)
-    if refused:
-        return json.dumps(refused, indent=2)
+    if refused is not None:
+        return json.dumps(refused)
 
     return await _execute_tool(
         "mailrail.status",
@@ -1114,29 +1125,30 @@ async def mailrail_inbound(
     ],
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused before ingest."),
     ] = None,
 ) -> str:
+    """Postmaster-only inbound helper. Not registered as a public MCP tool."""
     from app import mailrail
     from app.mailrail_agent import refuse_if_not_mailrail_agent
 
     refused = refuse_if_not_mailrail_agent(agent_id)
-    if refused:
-        return json.dumps(refused, indent=2)
+    if refused is not None:
+        return json.dumps(refused)
+
+    def _ingest(_resolved: str) -> dict:
+        inbound = mailrail.process_inbound_mail(
+            sender=sender,
+            subject=subject,
+            body=body,
+        )
+        inbound["agent_id"] = agent_id
+        return {"status": "ok", "inbound": inbound}
 
     return await _execute_tool(
         "mailrail.inbound",
         agent_id,
-        lambda _: _sync_result(
-            {
-                "status": "ok",
-                "inbound": mailrail.process_inbound_mail(
-                    sender=sender,
-                    subject=subject,
-                    body=body,
-                ),
-            }
-        ),
+        lambda resolved: _sync_result(_ingest(resolved)),
     )
 
 
@@ -1210,7 +1222,7 @@ def prompt_city_compliance(
         "Call city.list to get supported city codes, paid_url, sample_url, and price. "
         f"Then city.sample with city_code={city_code!r} to validate the free envelope. "
         f"Then city.check with city_code={city_code!r} and address={address!r}. "
-        "If EVM_PRIVATE_KEY is unset, city.check returns a 402 probe rather than charging."
+        "Unpaid city.check returns PaymentRequired; retry with _meta['x402/payment']."
     )
 
 
@@ -1344,3 +1356,18 @@ def _simplify_schema(schema: Any) -> Any:
 # Simplify the parameter schemas of all registered tools to prevent validation errors (status 422) on strict client parsers.
 for tool in mcp._tool_manager._tools.values():
     tool.parameters = _simplify_schema(tool.parameters)
+
+# Seller x402 payment gate for city.check — applied after Tool.from_function so the
+# wrapper's synthetic ctx: Context parameter does not break Pydantic arg models.
+_city_check_tool = mcp._tool_manager._tools.get("city.check")
+if _city_check_tool is not None:
+    from mcp.server.fastmcp.utilities.context_injection import find_context_parameter
+    from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+
+    _city_check_tool.fn = city_check_payment_wrapper()(_city_check_tool.fn)
+    # Payment wrapper returns CallToolResult (PaymentRequired or settlement receipt).
+    # Keep unstructured output so FastMCP does not validate structuredContent as {result: str}.
+    _city_check_tool.fn_metadata = FuncMetadata(
+        arg_model=_city_check_tool.fn_metadata.arg_model
+    )
+    _city_check_tool.context_kwarg = find_context_parameter(_city_check_tool.fn)

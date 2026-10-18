@@ -4,6 +4,17 @@ This file documents deltas **only** within this repository (`x402-mcp/`).
 If this clone sits inside a larger parent workspace, use this manifest for goal
 verification instead of a repo-wide `git status` of the parent tree.
 
+## Direct x402 Facilitator Endpoints (/verify, /settle, /supported, /facilitator) (2026-10-11)
+
+- Exposed standard x402 Facilitator endpoints directly in `app/main.py`:
+  - `POST /verify` & `POST /facilitator/verify`: Validates buyer payment authorization against payment requirements. Accepts both standard x402 JSON (`paymentPayload`, `paymentRequirements`) and base64 wire headers (`payment_signature`, `payment_required`).
+  - `POST /settle` & `POST /facilitator/settle`: Executes on-chain settlement via the server's configured relayer / CDP, dispatches MailRail receipts on success, and returns transaction hashes.
+  - `GET /supported` & `GET /facilitator/supported`: Returns supported settlement kinds, networks, and tokens.
+  - `GET /facilitator`: Service catalog and health endpoint returning active endpoints and documentation links, preventing 404s on facilitator base path.
+- Implemented `facilitator_supported`, `facilitator_verify`, `facilitator_settle`, and `_parse_facilitator_input` in `app/x402_services.py`.
+- Added unit tests in `tests/test_facilitator_endpoints.py`.
+
+
 ## A2A Discovery & AP2 Protocol Expansion (2026-09-29)
 
 - Aligned with Google Agent Payments Protocol (AP2 v1): declared `AP2_EXTENSION_URI` in `app/agent_surface.py` under `capabilities.extensions` alongside `a2a-x402`, with `stateTransitionHistory: True`

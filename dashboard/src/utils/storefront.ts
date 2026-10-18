@@ -4,7 +4,7 @@ import type { CityCatalogItem, DemandReport, DemandResource, SwarmProduct, Ledge
 /** Bazaar-indexed Pulse listing — must match render.yaml PINNED_PULSE_PRODUCT_ID. */
 export const PINNED_PULSE_PRODUCT_ID = "d22bbf5f3c4b4666a6f80980c7bc7c50";
 
-export const DEFAULT_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357";
+export const DEFAULT_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410";
 
 export type StorefrontCategory = "Canonical Data" | "US Compliance Network" | "Swarm Composite";
 
@@ -191,6 +191,16 @@ const FREE_BAZAAR_ENTRIES: BazaarEntry[] = [
     path: "/.well-known/agent-card.json",
     description:
       "A2A v0.1 agent card with AP2 v1 commerce extension, Base USDC cashier rails, and us-rental-diligence-pack skill schema.",
+  },
+  {
+    id: "mcp-tools-catalog",
+    name: "Model Context Protocol (MCP) Public Catalog (21 tools)",
+    category: "MCP Manifest (free)",
+    priceUsdc: 0,
+    network: "Base Mainnet (8453)",
+    path: "/.well-known/mcp",
+    description:
+      "FastMCP tool catalog exposing all 21 production tools: MARC-HD diligence ($0.85), city compliance, commerce, swarm agency, and A2A resolution.",
   },
 ];
 

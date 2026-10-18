@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import mcp_server
 from app.config import settings
+from app.mailrail_agent import AGENT_ID
 from app.main import app
 from app.tools_registry import EXPECTED_TOOL_NAMES, is_public_mcp_tool
 
@@ -75,12 +76,12 @@ def test_operator_bearer_can_read_empty_ledger(
     monkeypatch.setattr(settings, "operator_token", "s3cret")
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", tmp_path / "mailrail.jsonl")
     client = TestClient(app)
+    bearer = {"Authorization": "Bearer s3cret"}
+    # Bearer alone is not the postmaster. The ledger stays locked.
+    assert client.get("/mailrail/ledger", headers=bearer).status_code == 403
     res = client.get(
         "/mailrail/ledger",
-        headers={
-            "Authorization": "Bearer s3cret",
-            "X-Agent-Id": "x402-mailrail-postmaster",
-        },
+        headers={**bearer, "X-Agent-Id": AGENT_ID},
     )
     assert res.status_code == 200
     assert res.json()["count"] == 0
