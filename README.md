@@ -180,6 +180,40 @@ smithery mcp add https://x402-mcp.onrender.com/mcp/mcp --id x402-mcp
 
 Connect an MCP client to Streamable HTTP `/mcp/mcp`. Call `x402.discover` then `x402.probe` then `x402.pay_and_fetch` for paid APIs; `city.list` → `city.sample` → `city.check` for US property compliance.
 
+### MCP-native x402 buyer (`@x402/mcp`)
+
+Commerce tools (`commerce.activate_pro`, `commerce.purchase_credits`) support the official MCP payment transport: unpaid calls return payment requirements in the tool result (`isError` + `structuredContent.accepts`); paid retries attach the signed payload in request `_meta["x402/payment"]` and receive a settlement receipt in `_meta["x402/payment-response"]`. Server-authored terms from `commerce.pro_requirements` / `commerce.credits_requirements` are enforced — tampered `payTo` / `amount` values are rejected.
+
+**TypeScript (recommended)** — wrap the MCP session with `@x402/mcp`:
+
+```typescript
+import { x402Client } from "@x402/evm";
+import { wrapMCPClientWithPayment } from "@x402/mcp";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const baseUrl = "https://x402-mcp.onrender.com/mcp/mcp";
+const transport = new StreamableHTTPClientTransport(new URL(baseUrl));
+const mcp = new Client({ name: "buyer", version: "1.0.0" });
+await mcp.connect(transport);
+
+const x402 = new x402Client();
+// Register ExactEvmClientScheme + wallet signer per https://docs.x402.org/guides/mcp-server-with-x402
+
+const paid = wrapMCPClientWithPayment(mcp, x402);
+const result = await paid.callTool({
+  name: "commerce.activate_pro",
+  arguments: { agent_id: "my-agent" },
+});
+// Automatic: probe → sign USDC on Base → retry with _meta["x402/payment"]
+```
+
+**Python** — `x402.mcp.create_x402_mcp_client` performs the same probe → pay → retry loop against Streamable HTTP MCP.
+
+Legacy HTTP-style parameters (`payment_signature` + `payment_required` from `commerce.pro_requirements`) remain supported and unchanged.
+
+See [docs/MCP-X402-BUYER.md](docs/MCP-X402-BUYER.md) for transport details and verification commands.
+
 ## Environment
 
 | Variable | Required | Description |
