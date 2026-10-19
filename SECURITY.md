@@ -44,3 +44,12 @@ This policy covers the x402-mcp codebase, its dependencies as used in the projec
 MailRail send/inbound and message ledgers are **operator-only**. They are not public MCP tools. HTTP ingest/ledger/inbox/stats require `Authorization: Bearer $OPERATOR_TOKEN` and fail closed if the token is unset. See [docs/MAILRAIL-PUBLIC-SURFACE.md](docs/MAILRAIL-PUBLIC-SURFACE.md).
 
 Thank you for helping keep x402-mcp and the agent commerce ecosystem secure.
+
+## Operator surfaces and agent identity
+
+`OPERATOR_TOKEN` (sent as `Authorization: Bearer …`, compared in constant time)
+is the single operator credential. Without it, `/stats` returns aggregates only
+(no agent ids), `/quota/{agent_id}` returns 401, `/events` and `/swarm/runs`
+redact agent ids, and `/pulse/publish` / `/swarm/run` return 401. All of these
+fail closed when the token is unset. The token is never rendered into HTML.
+

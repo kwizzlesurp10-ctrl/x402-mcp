@@ -4,6 +4,28 @@ This file documents deltas **only** within this repository (`x402-mcp/`).
 If this clone sits inside a larger parent workspace, use this manifest for goal
 verification instead of a repo-wide `git status` of the parent tree.
 
+## P1: Lock stats/operator surfaces + agent identity (2026-10-19)
+
+Agent ids are the only key to an agent's quota, Pro tier and prepaid credits,
+so publishing them let anyone act as those agents.
+
+- New `app/operator_auth.py`: `is_operator` / `require_operator` (Bearer
+  `OPERATOR_TOKEN` or `X-Operator-Token`, `hmac.compare_digest`, fails closed
+  when unset) and `redact_agent_ids` (stable `agt_<sha256[:12]>` labels).
+- `GET /stats`: public callers get `summary` aggregates + `config` and an empty
+  `agents` list (`scope: "public"`); the per-agent list is operator-only.
+- `GET /quota/{agent_id}`: operator-only and now fails closed when
+  `OPERATOR_TOKEN` is unset (was open).
+- `GET /events` SSE and `GET /swarm/runs`: agent ids redacted for non-operators.
+- `POST /pulse/publish` and `POST /swarm/run`: operator token required on top of
+  the existing `DASHBOARD_ACTIONS` / `SWARM_ENABLED` gates.
+- `/dashboard/legacy` (and the SPA fallback) no longer render `OPERATOR_TOKEN`
+  into public HTML; the legacy terminal reads it from `localStorage.x402_op_token`.
+- MailRail operator guard uses the same constant-time compare.
+- desktop-admin sends its stored operator token on `/stats`.
+- Unchanged and public: `/health`, `/doctor`, paid 402 routes, `/ledger/*`.
+- Tests: `tests/test_operator_surfaces.py`.
+
 ## Direct x402 Facilitator Endpoints (/verify, /settle, /supported, /facilitator) (2026-10-11)
 
 - Exposed standard x402 Facilitator endpoints directly in `app/main.py`:

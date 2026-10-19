@@ -24,7 +24,7 @@ services:
       - key: CDP_API_KEY_SECRET
         sync: false
       - key: OPERATOR_TOKEN
-        sync: false           # protects /quota and MailRail ledger/inbox/stats/inbound
+        sync: false           # operator auth: /stats agent list, /quota, /events ids, /pulse/publish, /swarm/run, MailRail
       # MailRail is enabled and stays on the mock provider. That records mail
       # and does not call Resend or a webhook. Do not set MAILRAIL_API_KEY,
       # MAILRAIL_WEBHOOK_URL, or GITHUB_TOKEN in this file.

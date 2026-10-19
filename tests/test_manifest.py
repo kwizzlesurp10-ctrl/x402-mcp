@@ -38,10 +38,14 @@ def test_well_known_mcp() -> None:
     assert "PAYMENT-REQUIRED" in manifest["x402"]["headers"]["payment_required"]
 
 
-def test_quota_peek_no_consume() -> None:
+def test_quota_peek_no_consume(monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "operator_token", "op-test")
+    auth = {"Authorization": "Bearer op-test"}
     agent = "peek-agent-unique"
-    first = client.get(f"/quota/{agent}").json()
-    second = client.get(f"/quota/{agent}").json()
+    first = client.get(f"/quota/{agent}", headers=auth).json()
+    second = client.get(f"/quota/{agent}", headers=auth).json()
     assert first["meta"]["calls_this_month"] == second["meta"]["calls_this_month"]
 
 
