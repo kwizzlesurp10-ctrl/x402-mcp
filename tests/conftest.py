@@ -188,3 +188,31 @@ def isolated_swarm_registry(tmp_path_factory):
     yield
     swarm_registry.persist_path = old_path
     swarm_registry._products = old_products
+
+
+# Documentation-range-adjacent public IPv4 (example.com's historical A record).
+PUBLIC_TEST_IP = "93.184.215.14"
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    """Hermetic DNS for SSRF-guard tests.
+
+    CI runners can resolve public names to private/benchmark ranges (the box
+    runner maps example.com -> 198.18.0.1), and offline runners can't resolve
+    at all. Call ``fake_dns({"example.com": "93.184.215.14"})`` to pin answers;
+    unknown hosts raise ``socket.gaierror`` so nothing leaks to real DNS.
+    """
+    import socket
+
+    def install(mapping: dict[str, str]) -> None:
+        def _getaddrinfo(host, port, *args, **kwargs):
+            ip = mapping.get(str(host).lower())
+            if ip is None:
+                raise socket.gaierror(socket.EAI_NONAME, f"fake_dns: no record for {host!r}")
+            family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+            return [(family, socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
+
+    return install
