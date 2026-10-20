@@ -1,0 +1,253 @@
+"""Synthesis publisher — turn a live Base Network Pulse into a payable product.
+
+This is the "swap the input" step: instead of composing junk Bazaar feeds, the
+archivist synthesizes free, quality Base RPC data into a decision (the Pulse) and
+lists it as a real x402-payable composite. Cost basis ~$0 (data is free to read);
+the margin is entirely in the synthesis.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from app import pulse, x402_services
+from app.config import settings
+from app.models import BuildSellerRequirementsInput
+from app.ops_events import emit_swarm_step
+from app.swarm.models import CompositeProduct, purchase_discovery_metadata
+from app.swarm.registry import swarm_registry
+
+log = logging.getLogger("x402")
+
+# Stable seller identity for the pinned listing, so revenue rows stay attributable
+# across restarts instead of picking up a fresh uuid on every boot.
+_PINNED_SELLER_AGENT_ID = "pinned-pulse-seller"
+
+# Every Pulse listing's topic starts with this; the block height follows. It is
+# what identifies one Pulse row as superseded by another when pruning, so the
+# two must stay in sync — hence a shared constant rather than a literal.
+PULSE_TOPIC_PREFIX = "Base Network Pulse @ block "
+
+
+def parse_price_usdc(price_str: str) -> float:
+    return float(price_str.replace("$", "").strip())
+
+
+def render_report(data: dict[str, Any]) -> str:
+    """The digital good a buyer receives: a readable settlement-intelligence brief."""
+    a = data["assessment"]
+    f = data["fees"]
+    u = data["utilization"]
+    net = data["network"]
+    sc = data["settlement_cost"]
+    lines = [
+        f"# Base Network Pulse - block {data['latest_block']}",
+        f"_{data['generated_at']} · ETH ${data['eth_price_usd']:,.2f}_",
+        "",
+        f"## Verdict: {a['verdict'].replace('_', ' ')}",
+        a["rationale"],
+        "",
+        f"**Window:** {a['window']}",
+        "",
+        "## Settlement conditions",
+        f"- Base fee: **{f['base_fee_gwei']} gwei** (next block projected "
+        f"{f['next_base_fee_gwei']} gwei, {f['next_base_fee_change_pct']:+.1f}%)",
+        f"- Priority tip: {f['priority_fee_gwei']} gwei",
+        f"- Utilization: **{u['now_pct']}%** now, {u['avg_pct']}% avg, trend "
+        f"*{u['trend']}*, {u['headroom_x']}x headroom",
+        f"- Block time {net['block_time_s']}s · ~{net['tps_est']} tps",
+        "",
+        "## Cost to settle right now (USD)",
+        f"- ETH transfer: **${sc['eth_transfer']['usd']:.6f}**",
+        f"- USDC transfer: **${sc['erc20_usdc_transfer']['usd']:.6f}**",
+        f"- x402 settle (EIP-3009): **${sc['x402_settle']['usd']:.6f}**",
+        "",
+        f"_Source: {data['sources']['rpc']} + Coinbase spot · "
+        f"{data['sources']['method']}_",
+    ]
+    return "\n".join(lines)
+
+
+def _is_stale(product: CompositeProduct) -> bool:
+    """Has the restored report aged past what we can honestly sell as live?"""
+    max_age = settings.pinned_pulse_max_age_seconds
+    if max_age <= 0:
+        return False
+    if not product.created_at:
+        return True  # persisted before the field existed — refresh it once
+    try:
+        created = datetime.fromisoformat(product.created_at)
+    except ValueError:
+        return True
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - created).total_seconds() > max_age
+
+
+async def rebuild_pinned_product(agent_id: str = _PINNED_SELLER_AGENT_ID) -> CompositeProduct | None:
+    """Force a rebuild of the pinned listing, carrying over existing revenue."""
+    pinned = settings.pinned_pulse_product_id.strip()
+    if not pinned:
+        return None
+
+    existing = swarm_registry.get_product(pinned)
+    try:
+        product = await publish_pulse_product(
+            agent_id=agent_id, product_id=pinned
+        )
+    except Exception:
+        log.exception("pinned listing %s could not be republished", pinned)
+        return existing
+
+    if existing is not None:
+        product.revenue_usdc = existing.revenue_usdc
+        swarm_registry.save()
+
+    swarm_registry.prune_superseded(pinned, PULSE_TOPIC_PREFIX)
+    return product
+
+
+async def pulse_refresh_loop() -> None:
+    """Republish the pinned Pulse on a schedule so the cataloged URL stays live.
+
+    Interval follows ``pinned_pulse_max_age_seconds`` (minimum 60s). Failures are
+    logged and swallowed — a facilitator blip must never take down ``/health``.
+    """
+    while True:
+        interval = max(60, int(settings.pinned_pulse_max_age_seconds or 900))
+        await asyncio.sleep(interval)
+        try:
+            await restore_pinned_listing()
+        except Exception:
+            log.exception("scheduled pulse refresh failed; /health stays up")
+
+
+async def restore_pinned_listing() -> CompositeProduct | None:
+    """Make sure PINNED_PULSE_PRODUCT_ID is listed and sellable, republishing if not.
+
+    Called at startup. On an ephemeral host (Render free) a restart wipes
+    ledger/products.json, so the registry comes back empty and the purchase URL
+    sitting in the CDP Bazaar catalog answers 404 — the listing is indexed but
+    dead, and buyers who discovered it get nothing. Republishing onto the same id
+    rebuilds a fresh Pulse behind the same URL.
+
+    Returns None when pinning is disabled or the republish failed; never raises,
+    because a listing that can't be rebuilt must not stop the server from
+    booting (the rest of the API, /health included, still works).
+    """
+    pinned = settings.pinned_pulse_product_id.strip()
+    if not pinned:
+        return None
+
+    existing = swarm_registry.get_product(pinned)
+    sellable = bool(
+        existing and (existing.seller_requirements or {}).get("payment_required_header")
+    )
+    if sellable and not _is_stale(existing):
+        log.info("pinned listing %s survived the restart; not republishing", pinned)
+        swarm_registry.prune_superseded(pinned, PULSE_TOPIC_PREFIX)
+        return existing
+
+    # Stale, broken, or gone (ephemeral restart) - force a rebuild.
+    product = await rebuild_pinned_product()
+    if product is None:
+        # Rebuild failed and there was nothing sellable to keep. Boot anyway.
+        return None
+    # If the rebuild failed, we keep the existing if it is sellable
+    if product is existing and not sellable:
+        return None
+
+    log.info(
+        "pinned listing %s %s at $%.2f on %s",
+        pinned,
+        "refreshed (stale report)" if sellable else "republished",
+        product.price_usdc,
+        product.network,
+    )
+    return product
+
+
+async def publish_pulse_product(
+    agent_id: str,
+    price_usdc: float | None = None,
+    product_id: str | None = None,
+) -> CompositeProduct:
+    """Synthesize a live Pulse and list it as a payable x402 product.
+
+    Pass `product_id` to republish onto an existing id — the purchase URL embeds
+    it, so reusing the id is what keeps an already-cataloged listing resolvable
+    across a restart. The id has to be set before the seller requirements are
+    built, since the discovery metadata carries the URL derived from it.
+    """
+    data = await pulse.get_pulse()
+    price = price_usdc if price_usdc is not None else parse_price_usdc(settings.pulse_price)
+
+    product = CompositeProduct(
+        product_id=product_id or uuid.uuid4().hex,
+        topic=f"{PULSE_TOPIC_PREFIX}{data['latest_block']}",
+        cost_basis_usdc=0.0,  # quality input data is free to read
+        price_usdc=price,
+        markup=0.0,
+        network=settings.swarm_sell_network,
+        sources=[settings.base_rpc_url, settings.eth_price_url],
+        report=render_report(data),
+        status="draft",
+        seller_agent_id=agent_id,
+        ltv_cac_projected=0.0,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+
+    # build_seller_requirements does sync facilitator I/O (server.initialize());
+    # run it off the event loop so a hung facilitator can't freeze the API.
+    # Discovery metadata makes the served 402 Bazaar-catalogable on settle.
+    requirements = await asyncio.to_thread(
+        x402_services.build_seller_requirements,
+        BuildSellerRequirementsInput(
+            network=settings.swarm_sell_network,
+            price=f"${price:.6f}",
+            # Deliberately free of the block height: discovery catalogs index
+            # this description once, at publish, and never revisit it — while
+            # the listing itself is rebuilt with newer data. A block number here
+            # would be frozen at whatever the catalog first saw and drift
+            # further every day, advertising stale data to every buyer browsing
+            # Bazaar. The block belongs in the report, which is generated per
+            # publish and is what the buyer actually receives.
+            # Written as the queries an agent would type — the catalog ranks on
+            # full-text + semantic match over this string, and nobody searches
+            # for a brand name they have never heard of. No block height here:
+            # catalogs index description once at first settle.
+            description=(
+                "Should I settle on Base mainnet now? Live Base Network Pulse: "
+                "base fee + priority fee (gwei gas), block utilization/congestion "
+                "trend, ETH-USD, USD cost for ETH transfer / USDC ERC-20 / x402 "
+                "settle, and settle-now-or-wait verdict with rationale. GET, no "
+                "inputs. Computed from Base RPC + ETH spot. Not a tx simulator."
+            ),
+            # Per-product Bazaar metadata — must NOT inherit housing tags or a
+            # generic storefront name (facilitator: name <=32, <=5 tags).
+            service_name="Base Network Pulse",
+            service_tags=["base", "gas", "fees", "settlement", "congestion"],
+            **purchase_discovery_metadata(product, settings.public_base_url),
+        ),
+    )
+    product.seller_requirements = requirements
+    product.status = "listed"
+    swarm_registry.list_product(product)
+
+    emit_swarm_step(
+        run_id=product.product_id,
+        role="archivist",
+        phase="publishing",
+        action="publish_pulse_product",
+        detail={
+            "product_id": product.product_id,
+            "price_usdc": price,
+            "verdict": data["assessment"]["verdict"],
+            "block": data["latest_block"],
+        },
+    )
+    return product

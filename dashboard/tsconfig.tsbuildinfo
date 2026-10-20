@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/glossary.ts","./src/main.tsx","./src/vite-env.d.ts","./src/api/client.ts","./src/components/copybutton.tsx","./src/fixtures/demo.ts","./src/hooks/usesse.ts","./src/utils/decode402.test.ts","./src/utils/decode402.ts","./src/utils/usdc.test.ts","./src/utils/usdc.ts"],"errors":true,"version":"5.7.3"}

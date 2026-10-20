@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm --prefix dashboard install && pnpm --prefix dashboard run build",
+  "outputDirectory": "dashboard/dist",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/(stats|events|ledger|doctor|probe|wallet|health|seller|swarm)(.*)",
+      "destination": "https://x402-mission-control.onrender.com/$1$2"
+    }
+  ]
+}

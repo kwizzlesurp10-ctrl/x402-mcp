@@ -1,0 +1,106 @@
+"""x402 service unit tests (no wallet required)."""
+
+import pytest
+
+from app.models import DiscoverServicesInput, GetPaymentRequirementsInput
+from app import x402_services
+
+
+def test_supported_networks() -> None:
+    result = x402_services.get_supported_networks()
+    assert result.protocol_version == "v2"
+    assert any(n["id"] == "eip155:8453" for n in result.networks)
+    assert "PAYMENT-SIGNATURE" in result.headers
+
+
+@pytest.mark.asyncio
+async def test_get_payment_requirements_public_url(probe_402_url: str) -> None:
+    """Probe a 402-returning URL (local fixture — no httpbin.org flakiness)."""
+    params = GetPaymentRequirementsInput(url=probe_402_url)
+    result = await x402_services.get_payment_requirements(params)
+    assert "status_code" in result
+    assert result["status_code"] == 402
+
+
+@pytest.mark.asyncio
+async def test_discover_services_structure() -> None:
+    params = DiscoverServicesInput(limit=5)
+    try:
+        result = await x402_services.discover_services(params)
+    except Exception as exc:
+        pytest.skip(f"Discovery API unavailable: {exc}")
+
+    assert "services" in result
+    assert "count" in result
+    assert isinstance(result["services"], list)
+
+
+@pytest.mark.asyncio
+async def test_pay_and_fetch_requires_wallet(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import settings
+    from app.models import PayAndFetchInput
+
+    monkeypatch.setattr(settings, "evm_private_key", None)
+    params = PayAndFetchInput(url="https://example.com/paid")
+    with pytest.raises(ValueError, match="EVM_PRIVATE_KEY"):
+        await x402_services.pay_and_fetch(params)
+
+
+@pytest.mark.asyncio
+async def test_malformed_signature_returns_invalid_not_raise() -> None:
+    """Garbage PAYMENT-SIGNATURE must 402, not 500 — live Render 500'd on this."""
+    from app.models import VerifyPaymentInput
+
+    result = await x402_services._verify_and_settle_payment(
+        VerifyPaymentInput(payment_signature="e30=", payment_required="e30=")
+    )
+    assert result["is_valid"] is False
+    assert result["payment_settled"] is False
+    assert result["invalid_reason"]
+    assert result["invalid_reason"].startswith("malformed_payment")
+
+
+def test_parse_caip2_networks_splits_and_strips() -> None:
+    assert x402_services.parse_caip2_networks(None) == []
+    assert x402_services.parse_caip2_networks("") == []
+    assert x402_services.parse_caip2_networks("eip155:8453") == ["eip155:8453"]
+    assert x402_services.parse_caip2_networks(
+        "eip155:8453, solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp,eip155:42161"
+    ) == [
+        "eip155:8453",
+        "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "eip155:42161",
+    ]
+    assert (
+        x402_services.primary_caip2_network(
+            "eip155:8453,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+        )
+        == "eip155:8453"
+    )
+
+
+def test_buyer_cap_rounds_list_price_to_10000_atomic() -> None:
+    """int(0.01 * 1e6) truncates to 9999 on some platforms and refuses $0.01."""
+    assert x402_services.usdc_cap_atomic(0.01) == 10_000
+    assert x402_services.usdc_cap_atomic(0.02) == 20_000
+
+
+@pytest.mark.asyncio
+async def test_pay_and_fetch_price_cap_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_price_usdc must surface as a clear refusal, not a raw SDK error."""
+    from x402 import NoMatchingRequirementsError
+    from x402.http.clients import x402HttpxClient
+
+    from app.config import settings
+    from app.models import PayAndFetchInput
+
+    monkeypatch.setattr(settings, "evm_private_key", "0x" + "11" * 32)
+
+    async def refuse(self, *args, **kwargs):
+        raise NoMatchingRequirementsError("all options exceed cap")
+
+    monkeypatch.setattr(x402HttpxClient, "request", refuse)
+
+    params = PayAndFetchInput(url="https://example.com/paid", max_price_usdc=0.0001)
+    with pytest.raises(ValueError, match="payment refused"):
+        await x402_services.pay_and_fetch(params)
