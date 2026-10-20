@@ -304,7 +304,7 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             price_usdc=entry["price"],
             # Bind the loop's spec/examples as default args: a plain lambda would
             # late-bind them, so every city skill would serve the LAST city's
-            # challenge (all 17 pointed at San Diego). See #717.
+            # challenge (all 17 pointed at San Diego).
             build_payment_header=lambda _spec=spec, _inp=input_example, _out=output_example: (
                 city_gate.build_payment_required_header(
                     _spec,
