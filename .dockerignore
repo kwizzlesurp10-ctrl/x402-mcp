@@ -1,8 +1,0 @@
-dashboard/node_modules/
-node_modules/
-.venv/
-.git/
-.agents/
-__pycache__/
-*.pyc
-.pytest_cache/
