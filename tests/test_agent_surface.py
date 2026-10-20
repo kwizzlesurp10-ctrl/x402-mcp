@@ -365,3 +365,11 @@ def test_agent_card_declares_canonical_a2a_x402_extension() -> None:
     assert ext["params"]["network"] == settings.x402_default_network
     assert ext["params"]["asset"] == agent_surface.BASE_USDC
     assert agent_surface.A2A_X402_LEGACY_EXTENSION_URI in exts
+
+
+def test_llms_txt_points_at_direct_mcp_not_smithery() -> None:
+    """Smithery retires 2026-10-31; llms.txt must advertise the direct MCP URL."""
+    text = client.get("/llms.txt").text
+    assert "smithery.ai" not in text
+    assert "run.tools" not in text
+    assert "/mcp" in text.splitlines()[2]
