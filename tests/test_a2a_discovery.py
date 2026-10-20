@@ -24,7 +24,8 @@ def test_ssrf_blocking_on_a2a_targets() -> None:
         validate_probe_url("http://169.254.169.254/metadata")
 
 
-def test_normalize_target_urls() -> None:
+def test_normalize_target_urls(fake_dns) -> None:
+    fake_dns({"example.com": "93.184.215.14"})
     urls = normalize_target_urls("example.com")
     assert "https://example.com/.well-known/agent-card.json" in urls
     assert "https://example.com/.well-known/agent.json" in urls
@@ -32,6 +33,13 @@ def test_normalize_target_urls() -> None:
     direct = normalize_target_urls("https://example.com/custom-card.json")
     assert direct == ["https://example.com/custom-card.json"]
 
+
+
+def test_normalize_target_urls_rejects_host_resolving_private(fake_dns) -> None:
+    """Same hostname, but DNS answers in 198.18.0.0/15: guard must refuse."""
+    fake_dns({"example.com": "198.18.0.1"})
+    with pytest.raises(ValueError):
+        normalize_target_urls("example.com")
 
 def test_parse_agent_card_with_extensions() -> None:
     mock_card = {
