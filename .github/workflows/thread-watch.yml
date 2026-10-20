@@ -1,0 +1,148 @@
+name: thread watch
+
+# Watches the outreach threads on OTHER repos — currently the BankrBot skill PR
+# — and opens a local issue the moment one gets a new comment, a state change,
+# or a review. A maintainer reply is the thing that converts to a real agent
+# buyer, and a lagged response on our side is what loses it. This makes the
+# reply reach you off-box, machine closed.
+#
+# State lives in the alert issues themselves: each event opens exactly one
+# local issue whose title carries the event key, and scripts/alerts.py skips
+# anything already alerted. No committed state file, no external store.
+#
+# 2026-08-02: this workflow spent four days opening the same two alerts every
+# 30 minutes (432 issues) because the fingerprint it searched for was never
+# written into the issue it created, and every alert `@`-mentioned the
+# maintainer whose thread it was watching. Dedup, mention-escaping and a
+# per-run cap all now live in scripts/alerts.py, under test — do not hand-roll
+# them here again.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SELF_REPO: ${{ github.repository }}
+      PYTHONPATH: scripts
+      # Threads to watch: "owner/repo:kind:number". kind is pr or issue.
+      # ClawRouter#216 removed 2026-07-25: we closed it ourselves after pivoting
+      # to a direct email (see ClawRouter outreach email reply watch routine).
+      # gold-402#58 removed 2026-08-02: resolved — the entry was applied to
+      # main and the thread closed, so there is nothing left to watch.
+      THREADS: 'BankrBot/skills:pr:588 Merit-Systems/agentcash-skills:pr:27 Haustorium12/gold-402:pr:75'
+      # Our own GitHub login — comments BY us are not events to alert on.
+      OUR_LOGIN: kwizzlesurp10-ctrl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Poll outreach threads and alert on maintainer activity
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          from alerts import Alerter, event_key
+
+          SELF = os.environ["SELF_REPO"]
+          OURS = os.environ["OUR_LOGIN"].lower()
+          alerter = Alerter(SELF, "outreach")
+
+          def gh(args):
+              r = subprocess.run(["gh", *args], capture_output=True, text=True)
+              if r.returncode != 0:
+                  print(f"  gh {' '.join(args)} -> {r.stderr.strip()[:160]}")
+                  return None
+              return r.stdout
+
+          for spec in os.environ["THREADS"].split():
+              repo, kind, number = spec.split(":")
+              ref = f"{repo}#{number}"
+              print(f"checking {ref} ({kind})")
+
+              if kind == "pr":
+                  raw = gh(["pr", "view", number, "--repo", repo, "--json",
+                            "state,isDraft,reviewDecision,comments,reviews,url,title"])
+              else:
+                  raw = gh(["issue", "view", number, "--repo", repo, "--json",
+                            "state,comments,url,title"])
+              if not raw:
+                  print(f"  could not read {ref}; skipping this run")
+                  continue
+              d = json.loads(raw)
+              url = d.get("url", "")
+
+              # 1) New comments from anyone who is not us, and not a bot.
+              #
+              # Read comments through the REST endpoint rather than `gh pr view`:
+              # only REST carries `user.type`, and `gh pr view` strips the
+              # `[bot]` suffix from the login, so a review bot is otherwise
+              # indistinguishable from a maintainer. The first alert this
+              # watcher ever raised was a Codex bot reporting its own usage
+              # limits — real, correctly detected, and worth nobody's attention.
+              raw_comments = gh(["api", f"repos/{repo}/issues/{number}/comments",
+                                 "--paginate"])
+              try:
+                  comments = json.loads(raw_comments) if raw_comments else []
+              except json.JSONDecodeError:
+                  comments = []
+
+              for c in comments:
+                  user = c.get("user") or {}
+                  who = user.get("login", "")
+                  if who.lower() == OURS or not who:
+                      continue
+                  if user.get("type") == "Bot" or who.endswith("[bot]"):
+                      print(f"  skipping bot comment from {who}")
+                      continue
+                  cid = c.get("id") or c.get("html_url", "")
+                  alerter.alert(
+                      event_key("thread-comment", ref, cid),
+                      f"\U0001F4AC {ref}: reply from {who}",
+                      f"A maintainer commented on your outreach thread.\n\n"
+                      f"- **Thread:** {url}\n- **By:** {who}\n\n"
+                      f"> {(c.get('body') or '')[:500]}\n\n"
+                      f"Respond promptly — a lagged reply is what loses the integration. "
+                      f"Close this once handled.",
+                  )
+
+              # 2) PR review decisions (approve / changes requested).
+              for rv in d.get("reviews", []):
+                  who = (rv.get("author") or {}).get("login", "")
+                  st = rv.get("state", "")
+                  if who.lower() == OURS or st in ("", "COMMENTED", "PENDING"):
+                      continue
+                  alerter.alert(
+                      event_key("thread-review", ref, rv.get("id", "")),
+                      f"\U0001F4DD {ref}: review {st} by {who}",
+                      f"- **Thread:** {url}\n- **Review:** {st} by {who}\n\n"
+                      f"> {(rv.get('body') or '')[:500]}\n\nClose this once handled.",
+                  )
+
+              # 3) Terminal state: merged / closed.
+              state = d.get("state", "")
+              if state in ("MERGED", "CLOSED"):
+                  good = state == "MERGED"
+                  emoji = "\U0001F389" if good else "\U0001F6D1"
+                  alerter.alert(
+                      event_key("thread-state", ref, state),
+                      f"{emoji} {ref}: {state}",
+                      f"- **Thread:** {url}\n- **Now:** {state}\n\n"
+                      + ("Merged — the integration is live. Watch /demand qualified_views "
+                         "for that endpoint and the sale-watch for the first external payer."
+                         if good else
+                         "Closed. Read the thread before assuming it was a rejection — a "
+                         "maintainer who applies your change by hand also closes rather "
+                         "than merges. Either way the reason is market signal worth keeping."),
+                  )
+
+          print(alerter.summary())
+          PY

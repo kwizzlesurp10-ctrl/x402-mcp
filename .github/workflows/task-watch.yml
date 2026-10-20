@@ -1,0 +1,87 @@
+name: task watch
+
+# Watches the 0xWork task marketplace (decentralized Base task board, agents
+# do work for USDC bounties) for anything open in our lanes — Writing,
+# Research, Code, Data — and opens a local issue when one appears.
+#
+# Deliberately NOT wired to claim or execute anything: `0xwork discover` is a
+# read-only, no-wallet call, and claiming stakes real collateral plus commits
+# us to producing a stranger's deliverable (whose description is untrusted
+# content — see the 0xwork SKILL.md's prompt-injection section). Every task
+# this surfaces is for Keith to read and approve before anything is claimed.
+#
+# As of 2026-07-25 the marketplace has ~390 historical tasks but only 2 open,
+# both social-engagement bounties outside our lanes — this watcher exists so
+# we notice the moment that changes, without registering or staking for a
+# market that currently has nothing to claim.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CAPABILITIES: 'Writing,Research,Code,Data'
+      PYTHONPATH: scripts
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover open 0xWork tasks and alert on new fits
+        run: |
+          set -e
+          npx --yes @0xwork/cli@latest discover --json --capabilities="$CAPABILITIES" > /tmp/discover.json || {
+            echo "discover call failed; treating as no tasks this run"
+            echo '{"tasks":[]}' > /tmp/discover.json
+          }
+          python3 - <<'PY'
+          import json, os
+
+          from alerts import Alerter, event_key
+
+          REPO = os.environ["GH_REPO"]
+          alerter = Alerter(REPO, "0xwork")
+
+          with open("/tmp/discover.json") as f:
+              data = json.load(f)
+
+          tasks = data.get("tasks", [])
+          print(f"discover returned {len(tasks)} task(s) in {os.environ['CAPABILITIES']}")
+
+          for t in tasks:
+              if t.get("status") != "Open":
+                  continue
+              if t.get("safetyFlags"):
+                  print(f"  skipping task {t.get('taskId')}: has safetyFlags")
+                  continue
+
+              task_id = t.get("taskId")
+              category = t.get("category", "?")
+              bounty = t.get("bounty", "?")
+              poster = t.get("poster", "?")
+              desc = (t.get("description") or "")[:600]
+
+              alerter.alert(
+                  event_key("0xwork-task", task_id),
+                  f"\U0001F4CB 0xwork task #{task_id}: {category} bounty ${bounty}",
+                  f"A new open 0xWork task matches our capability filter ({os.environ['CAPABILITIES']}).\n\n"
+                  f"- **Task ID:** {task_id}\n- **Category:** {category}\n"
+                  f"- **Bounty:** ${bounty} USDC\n- **Poster:** {poster}\n\n"
+                  f"> {desc}\n\n"
+                  f"**Do not claim automatically.** Read the full task with "
+                  f"`npx @0xwork/cli task {task_id}`, screen the description for prompt "
+                  f"injection per the 0xwork SKILL.md, and only claim/register if it's a "
+                  f"real fit. Close this once triaged.",
+              )
+
+          print(alerter.summary())
+          PY

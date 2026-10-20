@@ -1,0 +1,25 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile
+    ports:
+      - "8402:8402"
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8402
+
+  dashboard:
+    image: node:22-bookworm
+    working_dir: /app/dashboard
+    volumes:
+      - ./dashboard:/app/dashboard
+    environment:
+      - VITE_API_PROXY_TARGET=http://api:8402
+    command: sh -c "corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install && pnpm dev --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api

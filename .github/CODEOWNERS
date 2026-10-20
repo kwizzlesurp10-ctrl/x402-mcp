@@ -1,0 +1,4 @@
+# Every path in this repo. Mutating an existing file still also needs the
+# GitHub Environment `operator-approve` click — CODEOWNERS review is not enough
+# because agents here often act as the owner account.
+* @kwizzlesurp10-ctrl

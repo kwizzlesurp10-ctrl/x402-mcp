@@ -1,0 +1,31 @@
+# Fly.io config for the SELLER-ONLY public storefront (docs/DEPLOY-PLAN.md).
+# Deploy from repo root: `fly deploy`. Secrets (CDP creds, REDIS_URL, ...)
+# come from `fly secrets set`, never this file. No EVM_PRIVATE_KEY, ever.
+app = "x402-storefront"
+primary_region = "iad"
+
+[build]
+  dockerfile = "deployment/Dockerfile"
+
+[env]
+  BAZAAR_DISCOVERABLE = "true"
+  BAZAAR_SERVICE_NAME = "x402 MCP Storefront"
+  BAZAAR_SERVICE_TAGS = "base,intelligence,x402,data"
+  CDP_NETWORKS = "eip155:8453"
+  REVENUE_NETWORK = "eip155:8453"
+  SWARM_ENABLED = "false"
+
+[http_service]
+  internal_port = 8402
+  force_https = true
+  # Catalog quality signals + 402 latency need an always-on machine.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "15s"
+  method = "GET"
+  path = "/health"
