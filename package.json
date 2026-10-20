@@ -1,0 +1,38 @@
+{
+  "name": "x402-mcp",
+  "version": "0.1.0",
+  "description": "The complete autonomous agent economy toolkit. Equip your agents to seamlessly execute crypto USDC micropayments over x402 on Base, run complex property compliance checks across US cities, optimize blockchain gas fees, and leverage Agent ID cards for cross-agent discovery and auditing. A robust, production-ready server that turns passive LLMs into active economic participants.",
+  "main": "run_stdio.py",
+  "keywords": [
+    "mcp",
+    "x402",
+    "crypto",
+    "ai-agents",
+    "agent-cards",
+    "compliance",
+    "base",
+    "blockchain",
+    "fastmcp",
+    "model-context-protocol",
+    "micropayments",
+    "usdc",
+    "real-estate",
+    "gas-optimizer",
+    "smithery"
+  ],
+  "author": "kwizzlesurp10",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp/issues"
+  },
+  "homepage": "https://github.com/kwizzlesurp10-ctrl/x402-mcp#readme",
+  "scripts": {
+    "start": "python run_stdio.py",
+    "test": "pytest",
+    "build": "cd dashboard && pnpm install && pnpm run build && cd .. && node -e \"require('fs').copyFileSync('dashboard/dist/index.html', 'index.html'); require('fs').cpSync('dashboard/dist/assets', 'assets', {recursive: true})\""
+  }
+}
