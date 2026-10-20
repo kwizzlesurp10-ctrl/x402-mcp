@@ -4,6 +4,14 @@ This file documents deltas **only** within this repository (`x402-mcp/`).
 If this clone sits inside a larger parent workspace, use this manifest for goal
 verification instead of a repo-wide `git status` of the parent tree.
 
+## Smithery listing retired — connect directly (2026-10-20)
+
+- Smithery shuts down on **2026-10-31**: `*.run.tools` (incl. `x402-mcp--kwizzlesurp10.run.tools`), `server.smithery.ai`, the Smithery CLI, Connect and Toolbox stop working
+- `README.md`: removed Smithery badge, `npx @smithery/cli install` and `smithery mcp add` instructions; added direct-connect Quickstart for `https://x402-mcp.onrender.com/mcp` (generic `mcp.json`, Claude Code, Claude Desktop via `mcp-remote`) plus server/agent card links
+- `app/agent_surface.py` `llms_txt()`: header points at the direct MCP URL instead of the Smithery listing
+- `tests/test_readme.py`: asserts direct-connect instructions and that Smithery install paths are gone
+- Unchanged (possible later cleanup): Smithery CORS/host allowances in `app/main.py` and `app/mcp_server.py`, `smithery.yaml`, `smithery.remote-config.json`
+
 ## Direct x402 Facilitator Endpoints (/verify, /settle, /supported, /facilitator) (2026-10-11)
 
 - Exposed standard x402 Facilitator endpoints directly in `app/main.py`:

@@ -340,7 +340,7 @@ def llms_txt() -> str:
     lines = [
         "# x402-mcp storefront",
         "",
-        "> MCP listing: https://smithery.ai/servers/kwizzlesurp10/x402-mcp",
+        f"> MCP (Streamable HTTP, connect directly): {base}/mcp",
         "> Pay-per-call HTTP APIs over x402: USDC on Base, no API key, no signup.",
         "> A 402 response IS the price quote — read the PAYMENT-REQUIRED header,",
         "> sign an EIP-3009 USDC transfer authorization, retry with",

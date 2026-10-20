@@ -2,7 +2,7 @@
 
 Verifies:
 1. Exact MCP tool count (20 MCP tools) and individual tool listing.
-2. Official Smithery badge and Quickstart 1-click installation commands.
+2. Direct-connect Quickstart (Streamable HTTP URL; Smithery retired 2026-10-31).
 3. A2A Protocol v1.0 Agent ID Card & Machine Identity documentation.
 4. Complete MCP Prompts documentation (4 prompts).
 5. Complete MCP Resources documentation (4 resources).
@@ -53,13 +53,13 @@ def test_readme_lists_each_tool(tool_name: str) -> None:
     assert f"`{tool_name}`" in text
 
 
-def test_readme_smithery_badge_present() -> None:
-    """Verify official Smithery badge is present."""
+def test_readme_has_no_smithery_install_paths() -> None:
+    """Smithery shuts down 2026-10-31; README must not send buyers there."""
     text = README.read_text(encoding="utf-8")
-    assert (
-        "[![smithery badge](https://smithery.ai/badge/kwizzlesurp10/x402-mcp)](https://smithery.ai/server/kwizzlesurp10/x402-mcp)"
-        in text
-    )
+    assert "smithery.ai/badge" not in text
+    assert "smithery.ai/server" not in text
+    assert "npx -y @smithery/cli install" not in text
+    assert "smithery mcp add" not in text
 
 
 def test_readme_24klabs_badge_present() -> None:
@@ -72,12 +72,13 @@ def test_readme_24klabs_badge_present() -> None:
     )
 
 
-def test_readme_quickstart_smithery_cli_install() -> None:
-    """Verify 1-click Smithery CLI installation commands for Claude, Cursor, and Windsurf."""
+def test_readme_quickstart_direct_connect() -> None:
+    """Verify direct Streamable HTTP connect instructions for MCP clients."""
     text = README.read_text(encoding="utf-8")
-    assert "npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client claude" in text
-    assert "npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client cursor" in text
-    assert "npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client windsurf" in text
+    assert '"type": "http"' in text
+    assert '"url": "https://x402-mcp.onrender.com/mcp"' in text
+    assert "claude mcp add --transport http x402-mcp https://x402-mcp.onrender.com/mcp" in text
+    assert "https://x402-mcp.onrender.com/.well-known/agent-card.json" in text
 
 
 def test_readme_agent_id_card_section() -> None:

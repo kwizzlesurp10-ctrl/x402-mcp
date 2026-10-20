@@ -1,6 +1,6 @@
 # x402 Micropayments MCP
 
-[![smithery badge](https://smithery.ai/badge/kwizzlesurp10/x402-mcp)](https://smithery.ai/server/kwizzlesurp10/x402-mcp)
+[![MCP Streamable HTTP](https://img.shields.io/badge/MCP-Streamable%20HTTP-black.svg)](https://x402-mcp.onrender.com/.well-known/mcp/server-card.json)
 [![US City Open-Data Compliance Network on the 24K Labs curated list](https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402)](https://24klabs.ai/listing/us-city-open-data-compliance-network)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Mainnet](https://img.shields.io/badge/Network-Base%20Mainnet%20(8453)-0052FF.svg)](https://base.org)
@@ -72,20 +72,53 @@ The public seller host holds **no spend key** — it only verifies and settles i
 - **Operator dashboard** at `/dashboard` — live health, per-agent quota burn-down meters, tool matrix, and revenue paths (single-file, zero build step)
 - **Hermetic test suite** — a local mock facilitator/discovery backend spins up automatically; no internet required. Set `X402_LIVE_TESTS=1` to run against x402.org
 
-## Quickstart & 1-Click Installation
+## Quickstart: connect directly (no install)
 
-Install `kwizzlesurp10/x402-mcp` into your favorite MCP client using the [Smithery CLI](https://smithery.ai/server/kwizzlesurp10/x402-mcp):
+The hosted server speaks MCP **Streamable HTTP** at:
+
+```
+https://x402-mcp.onrender.com/mcp
+```
+
+(`/mcp/mcp` is the canonical mount and also works.) No API key or signup; paid tools quote prices via x402.
+
+> **Smithery listing retired.** Smithery shuts down on **October 31, 2026** — the
+> `x402-mcp--kwizzlesurp10.run.tools` gateway, `server.smithery.ai`, and
+> `npx @smithery/cli install` will stop working. Connect directly to the URL above.
+
+**Generic `mcp.json`** (Cursor `~/.cursor/mcp.json`, VS Code, Windsurf, and most clients):
+
+```json
+{
+  "mcpServers": {
+    "x402-mcp": {
+      "type": "http",
+      "url": "https://x402-mcp.onrender.com/mcp"
+    }
+  }
+}
+```
+
+**Claude Code:**
 
 ```bash
-# Claude Desktop
-npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client claude
-
-# Cursor
-npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client cursor
-
-# Windsurf
-npx -y @smithery/cli install kwizzlesurp10/x402-mcp --client windsurf
+claude mcp add --transport http x402-mcp https://x402-mcp.onrender.com/mcp
 ```
+
+**Claude Desktop** (clients without native remote HTTP support) via `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "x402-mcp": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://x402-mcp.onrender.com/mcp"]
+    }
+  }
+}
+```
+
+**Discovery:** [MCP server card](https://x402-mcp.onrender.com/.well-known/mcp/server-card.json) · [A2A agent card](https://x402-mcp.onrender.com/.well-known/agent-card.json) · [x402 manifest](https://x402-mcp.onrender.com/.well-known/x402) · [llms.txt](https://x402-mcp.onrender.com/llms.txt)
 
 ## Quick Start (Mission Control)
 
@@ -166,19 +199,13 @@ Tool names use domain.action trees so clients can route `x402.*`, `a2a.*`, `comm
 ## Installation
 
 
-### Smithery
+### Remote (Streamable HTTP, no install)
 
-[Install via Smithery](https://smithery.ai/servers/kwizzlesurp10/x402-mcp)
-
-Remote Streamable HTTP (no install): `https://x402-mcp.onrender.com/mcp/mcp`
-
-```bash
-smithery mcp add https://x402-mcp.onrender.com/mcp/mcp --id x402-mcp
-```
+Point any MCP client at `https://x402-mcp.onrender.com/mcp` — see [Quickstart](#quickstart-connect-directly-no-install) for `mcp.json`, Claude Code, and Claude Desktop snippets. The former Smithery listing and `run.tools` gateway are retired as of October 31, 2026.
 
 ### Usage
 
-Connect an MCP client to Streamable HTTP `/mcp/mcp`. Call `x402.discover` then `x402.probe` then `x402.pay_and_fetch` for paid APIs; `city.list` → `city.sample` → `city.check` for US property compliance.
+Connect an MCP client to Streamable HTTP `https://x402-mcp.onrender.com/mcp` (alias of `/mcp/mcp`). Call `x402.discover` then `x402.probe` then `x402.pay_and_fetch` for paid APIs; `city.list` → `city.sample` → `city.check` for US property compliance.
 
 ### MCP-native x402 buyer (`@x402/mcp`)
 
