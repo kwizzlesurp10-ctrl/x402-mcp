@@ -183,9 +183,13 @@ def test_register_is_a_noop_without_pay_to_address(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("agent_id", ["dashboard-agent"])
-def test_quota_route_untouched(agent_id: str) -> None:
+def test_quota_route_untouched(agent_id: str, monkeypatch) -> None:
     """Spot-check a second unrelated route family stays reachable."""
-    assert client.get(f"/quota/{agent_id}").status_code == 200
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "operator_token", "op-test")
+    resp = client.get(f"/quota/{agent_id}", headers={"Authorization": "Bearer op-test"})
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------

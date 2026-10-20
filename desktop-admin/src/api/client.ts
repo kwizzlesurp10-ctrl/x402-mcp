@@ -294,9 +294,19 @@ async function getMailrailOperatorJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** /stats lists per-agent rows only to the operator; public gets aggregates. */
+async function getOperatorScopedJson<T>(path: string): Promise<T> {
+  const token = readStoredOperatorToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${getApiBase()}${path}`, { headers });
+  if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 export const api = {
   health: () => getJson<HealthResponse>("/health"),
-  stats: () => getJson<StatsResponse>("/stats"),
+  stats: () => getOperatorScopedJson<StatsResponse>("/stats"),
   doctor: () => getJson<{ checks: DoctorCheck[]; summary: { ready: boolean; fail?: number } }>("/doctor"),
   ledgerSpend: () => getJson<LedgerRow[]>("/ledger/spend"),
   ledgerRevenue: () => getJson<LedgerRow[]>("/ledger/revenue"),

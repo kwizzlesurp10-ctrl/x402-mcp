@@ -98,8 +98,9 @@ def authorize_http(request: Request) -> str:
                 "detail": "MailRail send/inbound/ledgers require OPERATOR_TOKEN",
             },
         )
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {token}":
+    from app.operator_auth import is_operator
+
+    if not is_operator(request):
         raise HTTPException(status_code=401, detail={"error": "unauthorized"})
 
     agent_id = extract_agent_id(request)

@@ -46,6 +46,7 @@ from app.mcp_server import mcp
 from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput, InboundMailInput
 
 from app.ops_events import event_stream, format_sse
+from app.operator_auth import is_operator, redact_agent_ids, require_operator
 from app.payment_rails import build_payment_rails
 from app.a2a_discovery import resolve_agent_card
 from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
@@ -565,6 +566,15 @@ _MC_DIST = Path(__file__).resolve().parent / "static" / "mission_control"
 _BASE_APP_ID_META = '<meta name="base:app_id" content="6a7018e2a8c4f2b6db3b3e71" />'
 
 
+# The operator token is NEVER rendered into a public page. The legacy terminal
+# reads it from the operator's own browser storage (paste once via
+# ``localStorage.setItem("x402_op_token", "<token>")``).
+_OP_TOKEN_JS = (
+    'var __OP_TOKEN__=(function(){try{return localStorage.getItem("x402_op_token")'
+    '||null}catch(e){return null}})();'
+)
+
+
 def _mission_control_html() -> str:
     index_path = _MC_DIST / "index.html"
     if index_path.is_file():
@@ -572,8 +582,7 @@ def _mission_control_html() -> str:
         if "base:app_id" not in html:
             html = html.replace("<head>", f"<head>\n{_BASE_APP_ID_META}", 1)
         return html
-    token_js = f"var __OP_TOKEN__={json.dumps(settings.operator_token)};"
-    return DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", token_js, 1)
+    return DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", _OP_TOKEN_JS, 1)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -589,8 +598,7 @@ async def dashboard() -> HTMLResponse:
 @app.get("/dashboard/legacy", response_class=HTMLResponse)
 async def dashboard_legacy() -> HTMLResponse:
     """Previous single-file operator terminal (kept for rollback/compare)."""
-    token_js = f"var __OP_TOKEN__={json.dumps(settings.operator_token)};"
-    html = DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", token_js, 1)
+    html = DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", _OP_TOKEN_JS, 1)
     return HTMLResponse(html)
 
 
@@ -696,26 +704,64 @@ import asyncio
 
 _stats_cache = {"time": None, "data": None}
 
+def _stats_summary(agents: list[dict]) -> dict:
+    by_tier: dict[str, int] = {}
+    for row in agents:
+        tier = str(row.get("tier") or "unknown")
+        by_tier[tier] = by_tier.get(tier, 0) + 1
+    return {
+        "agent_count": len(agents),
+        "agents_by_tier": by_tier,
+        "agents_with_calls_this_month": sum(
+            1 for a in agents if (a.get("calls_this_month") or 0) > 0
+        ),
+        "calls_this_month_total": sum(int(a.get("calls_this_month") or 0) for a in agents),
+        "agents_with_credits": sum(
+            1 for a in agents if (a.get("tool_credits_remaining") or 0) > 0
+        ),
+        "sample_limit": getattr(quota_store, "SNAPSHOT_AGENT_LIMIT", None),
+    }
+
+
 @app.get("/stats")
-async def stats_snapshot() -> dict:
-    """Mission-control quota snapshot (read-only)."""
+async def stats_snapshot(request: Request) -> dict:
+    """Mission-control quota snapshot (read-only).
+
+    Public callers get aggregate counts only: agent ids are the sole key to an
+    agent's quota, Pro tier and prepaid credits, so listing them would let
+    anyone act as those agents. The per-agent list is returned only to the
+    operator (``Authorization: Bearer <OPERATOR_TOKEN>``). ``agents`` stays in
+    the public payload as an empty list so older dashboards keep rendering.
+    """
     now = datetime.now()
     if _stats_cache["time"] and now - _stats_cache["time"] < timedelta(seconds=10):
-        return _stats_cache["data"]
-    try:
-        data = quota_store.snapshot()
-    except Exception:
-        logger.exception("GET /stats snapshot failed")
-        data = {
-            "agents": [],
-            "config": {
-                "redis_mode": getattr(quota_store, "mode", "unknown"),
-                "snapshot_degraded": True,
-            },
-        }
-    _stats_cache["time"] = now
-    _stats_cache["data"] = data
-    return data
+        data = _stats_cache["data"]
+    else:
+        try:
+            data = quota_store.snapshot()
+        except Exception:
+            logger.exception("GET /stats snapshot failed")
+            data = {
+                "agents": [],
+                "config": {
+                    "redis_mode": getattr(quota_store, "mode", "unknown"),
+                    "snapshot_degraded": True,
+                },
+            }
+        _stats_cache["time"] = now
+        _stats_cache["data"] = data
+    agents = list(data.get("agents") or [])
+    out = {
+        "summary": _stats_summary(agents),
+        "config": data.get("config") or {},
+    }
+    if is_operator(request):
+        out["agents"] = agents
+        out["scope"] = "operator"
+    else:
+        out["agents"] = []
+        out["scope"] = "public"
+    return out
 
 
 def _mailrail_operator_guard(request: Request) -> str:
@@ -822,12 +868,18 @@ async def get_analytics() -> dict:
 
 
 @app.get("/events")
-async def tool_events() -> StreamingResponse:
-    """SSE stream of MCP tool invocations."""
+async def tool_events(request: Request) -> StreamingResponse:
+    """SSE stream of MCP tool invocations.
+
+    Agent ids are redacted to stable ``agt_…`` labels unless the caller is
+    the operator: the live stream would otherwise hand every caller's id to
+    anyone listening.
+    """
+    operator = is_operator(request)
 
     async def generate():
         async for event in event_stream():
-            yield format_sse(event)
+            yield format_sse(event if operator else redact_agent_ids(event))
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -1166,9 +1218,15 @@ async def ledger_rows(name: Literal["spend", "revenue"]) -> list[dict]:
 
 
 @app.get("/swarm/runs")
-async def swarm_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]:
-    """Recent swarm Agency runs (buy → compose → list), newest first."""
-    return swarm_registry.recent_runs(limit)
+async def swarm_runs(
+    request: Request, limit: int = Query(default=50, ge=1, le=200)
+) -> list[dict]:
+    """Recent swarm Agency runs (buy → compose → list), newest first.
+
+    Agent ids are redacted for non-operator callers.
+    """
+    runs = swarm_registry.recent_runs(limit)
+    return runs if is_operator(request) else redact_agent_ids(runs)
 
 
 @app.get("/swarm/products")
@@ -1203,12 +1261,17 @@ async def base_pulse() -> dict:
 
 
 @app.post("/pulse/publish")
-async def pulse_publish() -> dict:
-    """Synthesize a live Pulse and list it as a payable x402 product."""
+async def pulse_publish(request: Request) -> dict:
+    """Synthesize a live Pulse and list it as a payable x402 product.
+
+    Operator-only: publishing mints a new listing id and can abandon the
+    cataloged purchase URL, so it is never a public action.
+    """
     if not settings.dashboard_actions:
         raise HTTPException(
             status_code=403, detail="DASHBOARD_ACTIONS is disabled; publishing is off."
         )
+    require_operator(request)
     from app.swarm import publisher
 
     agent_id = quota_store.resolve_agent_id(None)
@@ -1225,12 +1288,14 @@ async def pulse_publish() -> dict:
 
 
 @app.post("/swarm/run")
-async def swarm_run(body: SwarmRunRequest) -> dict:
+async def swarm_run(body: SwarmRunRequest, request: Request) -> dict:
     """Run one swarm cycle in-process so the listing is hosted by this server.
 
     Two independent gates, because they mean different things: SWARM_ENABLED
     says this deployment has a buyer role at all, DASHBOARD_ACTIONS says
     mutating HTTP actions are allowed. A seller-only box wants the first off.
+    Operator-only on top of both: it spends from the buyer wallet under a
+    caller-chosen agent id.
     """
     if not settings.swarm_enabled:
         raise HTTPException(
@@ -1241,6 +1306,7 @@ async def swarm_run(body: SwarmRunRequest) -> dict:
         raise HTTPException(
             status_code=403, detail="DASHBOARD_ACTIONS is disabled; running is off."
         )
+    require_operator(request)
     agent_id = quota_store.resolve_agent_id(body.agent_id)
     return await swarm_orchestrator.run_swarm_research(
         body.topic, agent_id, body.max_price_usdc, body.allow_paid_inputs
@@ -1348,12 +1414,16 @@ async def swarm_revenue() -> dict:
 async def quota_status(request: Request, agent_id: str):
     """Debug endpoint: inspect quota without consuming a call.
 
-    Protected by OPERATOR_TOKEN when set — send ``Authorization: Bearer <token>``.
+    Operator-only — send ``Authorization: Bearer <OPERATOR_TOKEN>``. Fails
+    closed when OPERATOR_TOKEN is unset: an open per-id quota lookup is an
+    oracle for which agent ids exist and how many credits they hold.
     """
-    if settings.operator_token:
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {settings.operator_token}":
-            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    if not is_operator(request):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "unauthorized"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     snapshot = quota_store.peek(agent_id)
     meta = quota_store.build_meta(snapshot)
     return {"meta": meta.model_dump()}
