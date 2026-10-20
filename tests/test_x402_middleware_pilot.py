@@ -96,6 +96,22 @@ def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
     joined string as PaymentOption.network makes the SDK's initialize() raise
     RouteConfigurationError and 500 /pilot/ping + /base/finality-check."""
     monkeypatch.setattr(settings, "x402_default_network", JOINED_PRODUCTION_NETWORKS)
+    # Hermetic: register() builds its resource server via _facilitator_client(),
+    # which otherwise talks to the live CDP facilitator (when CDP creds are in
+    # the env) or the SDK-default x402.org one -- never the conftest mock. The
+    # live /supported list decides which rails survive (CDP advertises
+    # eip155:42161), so results flipped with runner creds/network. Pin it to
+    # the session mock facilitator, which supports eip155:8453 but neither
+    # Arbitrum nor Solana mainnet.
+    from x402.http import HTTPFacilitatorClient
+
+    from app import x402_services
+
+    monkeypatch.setattr(
+        x402_services,
+        "_facilitator_client",
+        lambda _network=None: HTTPFacilitatorClient({"url": settings.x402_facilitator_url}),
+    )
     pilot_app = FastAPI()
     x402_middleware_pilot.register(pilot_app)
     pilot_client = TestClient(pilot_app)
@@ -109,6 +125,8 @@ def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
     # Joined production string must never appear as a single network id.
     assert JOINED_PRODUCTION_NETWORKS not in ping_nets
     assert "eip155:42161" not in ping_nets
+    # Only rails the (mock) facilitator actually supports are advertised.
+    assert ping_nets == ["eip155:8453"]
 
     finality = pilot_client.get("/base/finality-check", params={"tx": VALID_TX})
     assert finality.status_code == 402, finality.text[:300]
@@ -116,6 +134,7 @@ def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
     fin_nets = [a["network"] for a in fin_decoded["accepts"]]
     assert all(n.startswith("eip155:") and "," not in n for n in fin_nets)
     assert JOINED_PRODUCTION_NETWORKS not in fin_nets
+    assert fin_nets == ["eip155:8453"]
 
 
 def test_atomic_options_skip_joined_and_unsupported_ids() -> None:
