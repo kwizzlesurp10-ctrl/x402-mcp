@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   watch:
-    runs-on: [self-hosted, linux, box]
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 6
     env:
       GH_TOKEN: ${{ github.token }}

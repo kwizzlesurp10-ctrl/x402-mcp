@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   classify:
-    runs-on: [self-hosted, linux, box]
+    runs-on: [self-hosted, linux, x64]
     outputs:
       mutation: ${{ steps.guard.outputs.mutation }}
       summary: ${{ steps.guard.outputs.summary }}
@@ -68,7 +68,7 @@ jobs:
   notify:
     needs: classify
     if: needs.classify.outputs.mutation == 'true'
-    runs-on: [self-hosted, linux, box]
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,7 +144,7 @@ jobs:
   add-only-ok:
     needs: classify
     if: needs.classify.outputs.mutation != 'true'
-    runs-on: [self-hosted, linux, box]
+    runs-on: [self-hosted, linux, x64]
     steps:
       - run: echo "add-only ok — no existing files mutated"
 
@@ -152,14 +152,14 @@ jobs:
     needs: classify
     if: needs.classify.outputs.mutation == 'true'
     environment: operator-approve
-    runs-on: [self-hosted, linux, box]
+    runs-on: [self-hosted, linux, x64]
     steps:
       - run: echo "operator clicked Approve on environment operator-approve"
 
   change-control:
     needs: [classify, add-only-ok, operator-approve]
     if: always() && needs.classify.result == 'success'
-    runs-on: [self-hosted, linux, box]
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Require add-only path or operator click
         run: |
