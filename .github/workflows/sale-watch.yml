@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   watch:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 6
     env:
       BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
