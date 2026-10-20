@@ -27,9 +27,23 @@ def test_ssrf_blocks_file_scheme() -> None:
         validate_probe_url("file:///etc/passwd")
 
 
-def test_ssrf_allows_public_https() -> None:
+def test_ssrf_allows_public_https(fake_dns) -> None:
+    fake_dns({"example.com": "93.184.215.14"})
     assert validate_probe_url("https://example.com/api") == "https://example.com/api"
 
+
+
+@pytest.mark.parametrize("resolved", ["198.18.0.1", "10.1.2.3", "127.0.0.1", "169.254.169.254"])
+def test_ssrf_blocks_public_name_resolving_to_blocked_range(fake_dns, resolved) -> None:
+    fake_dns({"example.com": resolved})
+    with pytest.raises(SSRFBlockedError):
+        validate_probe_url("https://example.com/api")
+
+
+def test_ssrf_blocks_unresolvable_host(fake_dns) -> None:
+    fake_dns({})
+    with pytest.raises(SSRFBlockedError):
+        validate_probe_url("https://example.com/api")
 
 def test_probe_route_blocks_localhost() -> None:
     response = client.get("/probe", params={"url": "http://127.0.0.1/test"})
