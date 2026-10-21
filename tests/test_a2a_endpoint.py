@@ -145,11 +145,18 @@ def test_well_known_x402_lists_property_due_diligence_agent() -> None:
 def test_mcp_redirect_respects_forwarded_proto() -> None:
     # /mcp itself is now served directly (McpBarePathAliasMiddleware), so use
     # the trailing-slash form, which still redirects to /mcp/mcp.
-    resp = client.post(
-        "/mcp/mcp/",
-        headers={"X-Forwarded-Proto": "https", "Host": "x402-mcp.onrender.com"},
-        follow_redirects=False,
-    )
+    # X-Forwarded-Proto is honoured only from a trusted proxy (TRUSTED_PROXIES).
+    from app import main as _main
+
+    _main.set_trusted_proxies(["testclient"])
+    try:
+        resp = client.post(
+            "/mcp/mcp/",
+            headers={"X-Forwarded-Proto": "https", "Host": "x402-mcp.onrender.com"},
+            follow_redirects=False,
+        )
+    finally:
+        _main.set_trusted_proxies([])
     if resp.status_code in {307, 308}:
         location = resp.headers.get("location", "")
         assert location.startswith("https://"), location

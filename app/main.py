@@ -154,8 +154,59 @@ app = FastAPI(
 
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-# Trust X-Forwarded-Proto/Host behind Render/nginx so slash redirects stay on https.
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+# Private ranges trusted on Render only: the container is reachable solely via
+# Render's internal proxy, and Render does not publish fixed proxy IPs.
+RENDER_DEFAULT_TRUSTED_PROXIES = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+
+def resolve_trusted_proxies() -> list[str]:
+    """Trusted proxy IPs/CIDRs. Never '*'. Empty list = trust nobody."""
+    raw = (settings.trusted_proxies or "").strip()
+    source = "TRUSTED_PROXIES"
+    if not raw and os.environ.get("RENDER"):
+        raw, source = RENDER_DEFAULT_TRUSTED_PROXIES, "Render default"
+    out = []
+    for p in raw.split(","):
+        p = p.strip()
+        if not p:
+            continue
+        if p == "*":
+            logger.error("TRUSTED_PROXIES='*' ignored: it allows client IP spoofing.")
+            continue
+        out.append(p)
+    logger.info("Trusted proxies (%s): %s", source, ",".join(out) or "none")
+    return out
+
+
+class TrustedProxyHeadersMiddleware(ProxyHeadersMiddleware):
+    """uvicorn ProxyHeaders, plus a record of the real socket peer.
+
+    The original peer is kept in scope['x402.peer_trusted'] so code that reads
+    X-Forwarded-Host can require the hop to come from a trusted proxy.
+    """
+
+    async def __call__(self, scope, receive, send):  # type: ignore[override]
+        self.trusted_hosts = _TRUSTED_HOSTS
+        if scope.get("type") in ("http", "websocket"):
+            client = scope.get("client")
+            host = client[0] if client else None
+            scope["x402.peer_trusted"] = bool(host) and host in self.trusted_hosts
+        return await super().__call__(scope, receive, send)
+
+
+def set_trusted_proxies(proxies: list[str]) -> None:
+    """(Re)load the trusted proxy list used by TrustedProxyHeadersMiddleware."""
+    global TRUSTED_PROXIES, _TRUSTED_HOSTS
+    from uvicorn.middleware.proxy_headers import _TrustedHosts
+
+    TRUSTED_PROXIES = [p for p in proxies if p != "*"]
+    _TRUSTED_HOSTS = _TrustedHosts(TRUSTED_PROXIES)
+
+
+TRUSTED_PROXIES: list[str] = []
+_TRUSTED_HOSTS = None
+set_trusted_proxies(resolve_trusted_proxies())
+app.add_middleware(TrustedProxyHeadersMiddleware, trusted_hosts=TRUSTED_PROXIES)
 
 app.add_middleware(UpstashAnalyticsMiddleware)
 
@@ -253,9 +304,12 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "[::1]", "::1")
 def _public_base_from_request(request: Request) -> str:
     """Public origin for seller resource URLs baked into signed 402 challenges.
 
-    Forwarded headers are only honoured when TRUST_FORWARDED_HOST is set.
+    Forwarded headers are only honoured when TRUST_FORWARDED_HOST is set AND
+    the request arrived from a configured trusted proxy (TRUSTED_PROXIES).
     """
     if not settings.trust_forwarded_host:
+        return settings.public_base_url.rstrip("/")
+    if not request.scope.get("x402.peer_trusted", False):
         return settings.public_base_url.rstrip("/")
 
     xf_proto = request.headers.get("x-forwarded-proto")

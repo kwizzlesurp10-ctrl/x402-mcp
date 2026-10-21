@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # allowlist (defaults to the main allowlist + MCP_ALLOWED_ORIGINS); set it
     # to "*" only to deliberately allow every browser origin on /mcp.
     cors_allowed_origins: str = ""
+    # Reverse proxies allowed to set X-Forwarded-For / X-Forwarded-Proto (and,
+    # with TRUST_FORWARDED_HOST, X-Forwarded-Host). Comma-separated IPs/CIDRs.
+    # Unset = trust none, except on Render (RENDER env set) where the private
+    # RFC1918 ranges are trusted because Render publishes no proxy IP list.
+    # "*" is rejected: it lets any client spoof its IP past the rate limiter.
+    trusted_proxies: str = ""
     cors_extra_origins: str = ""
     cors_extra_headers: str = ""
     mcp_cors_origins: str = ""
