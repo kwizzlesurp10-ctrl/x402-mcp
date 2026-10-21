@@ -2,3 +2,14 @@
 # GitHub Environment `operator-approve` click — CODEOWNERS review is not enough
 # because agents here often act as the owner account.
 * @kwizzlesurp10-ctrl
+
+# High-risk paths: CODEOWNERS itself, CI workflows and the change-control
+# guard. A change here must be approved by a SECOND human reviewer (not the
+# PR author, not an agent using the owner's token) or by a reviewer whose
+# account signs in with a hardware security key. See SECURITY.md
+# "Change control for CODEOWNERS and workflows". Add the second reviewer's
+# handle on these lines once they exist, and enable "Require review from
+# Code Owners" + "Require approval of the most recent push" on master.
+/.github/CODEOWNERS @kwizzlesurp10-ctrl
+/.github/workflows/ @kwizzlesurp10-ctrl
+/scripts/add_only_guard.py @kwizzlesurp10-ctrl
