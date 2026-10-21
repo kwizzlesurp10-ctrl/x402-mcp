@@ -48,8 +48,14 @@ Thank you for helping keep x402-mcp and the agent commerce ecosystem secure.
 ## Operator surfaces and agent identity
 
 `OPERATOR_TOKEN` (sent as `Authorization: Bearer …`, compared in constant time)
-is the single operator credential. Without it, `/stats` returns aggregates only
-(no agent ids), `/quota/{agent_id}` returns 401, `/events` and `/swarm/runs`
-redact agent ids, and `/pulse/publish` / `/swarm/run` return 401. All of these
-fail closed when the token is unset. The token is never rendered into HTML.
+is the single, **required** operator credential. Callers without it see
+`/stats` aggregates only (no agent ids), and `/events` and `/swarm/runs`
+redact agent ids. A wrong or missing bearer on `/quota/{agent_id}`,
+`/pulse/publish`, `/swarm/run` or MailRail gets 401.
+
+If the server has no `OPERATOR_TOKEN` configured at all, those operator
+routes return **503 `operator_surface_disabled`** (never open) and startup
+logs an error. Set `REQUIRE_OPERATOR_TOKEN=true` to make the process refuse
+to start without it. Use a long random value (>= 24 chars; e.g.
+`openssl rand -hex 32`). The token is never rendered into HTML.
 

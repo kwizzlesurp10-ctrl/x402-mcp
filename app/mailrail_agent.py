@@ -91,11 +91,13 @@ def authorize_http(request: Request) -> str:
     """Fail closed: bearer OPERATOR_TOKEN and an allowlisted MailRail agent."""
     token = settings.operator_token
     if not token:
+        from app.operator_auth import OPERATOR_DISABLED_DETAIL
+
         raise HTTPException(
-            status_code=401,
+            status_code=503,
             detail={
-                "error": "unauthorized",
-                "detail": "MailRail send/inbound/ledgers require OPERATOR_TOKEN",
+                **OPERATOR_DISABLED_DETAIL,
+                "detail": "MailRail send/inbound/ledgers require OPERATOR_TOKEN, which is not configured.",
             },
         )
     from app.operator_auth import is_operator

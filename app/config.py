@@ -25,8 +25,12 @@ class Settings(BaseSettings):
     tool_credit_pack_size: int = 100
     tool_credit_pack_price: str = "$1.00"
 
-    # Optional bearer token to protect /quota endpoint. If unset, endpoint is open.
+    # REQUIRED bearer token for every operator surface (/quota, /stats agent
+    # list, /pulse/publish, /swarm/run, MailRail, ...). When unset those routes
+    # fail closed with 503 and startup logs an error. Set
+    # REQUIRE_OPERATOR_TOKEN=true to refuse to start at all without it.
     operator_token: str | None = None
+    require_operator_token: bool = False
 
     # Redis-ready: set REDIS_URL to migrate from in-memory stores.
     redis_url: str | None = None

@@ -75,6 +75,9 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     Endpoints also sample on demand, so nothing breaks when the lifespan
     doesn't run (e.g. bare TestClient without a context manager).
     """
+    from app.operator_auth import check_operator_token_at_startup
+
+    check_operator_token_at_startup()
     sampler = (
         asyncio.create_task(os_monitor.sampler_loop())
         if settings.os_monitor_enabled
@@ -1418,6 +1421,10 @@ async def quota_status(request: Request, agent_id: str):
     closed when OPERATOR_TOKEN is unset: an open per-id quota lookup is an
     oracle for which agent ids exist and how many credits they hold.
     """
+    if not settings.operator_token:
+        from app.operator_auth import OPERATOR_DISABLED_DETAIL
+
+        return JSONResponse(status_code=503, content=dict(OPERATOR_DISABLED_DETAIL))
     if not is_operator(request):
         return JSONResponse(
             status_code=401,
