@@ -16,6 +16,16 @@ class Settings(BaseSettings):
     # Extra Origin header values for MCP DNS-rebinding protection (comma-separated).
     mcp_allowed_origins: str = ""
 
+    # CORS. CORS_ALLOWED_ORIGINS (comma-separated, exact origins) replaces the
+    # built-in dashboard/landing allowlist when set; CORS_EXTRA_ORIGINS appends.
+    # "*" is never accepted here. MCP_CORS_ORIGINS overrides the MCP transport
+    # allowlist (defaults to the main allowlist + MCP_ALLOWED_ORIGINS); set it
+    # to "*" only to deliberately allow every browser origin on /mcp.
+    cors_allowed_origins: str = ""
+    cors_extra_origins: str = ""
+    cors_extra_headers: str = ""
+    mcp_cors_origins: str = ""
+
     free_tier_monthly_quota: int = 500
     free_tier_rate_limit_per_min: int = 10
     pro_tier_monthly_quota: int = 50_000

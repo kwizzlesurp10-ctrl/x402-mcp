@@ -159,41 +159,85 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 app.add_middleware(UpstashAnalyticsMiddleware)
 
-# Dashboard CORS: local Vite only + exact extras (no free-tunnel wildcards).
+# CORS: exact origins only (env allowlist), explicit methods and headers.
+_DEFAULT_CORS_ORIGINS = (
+    "https://x402-mission-control.vercel.app",
+    "https://kwizzle-landing-page.onrender.com",
+    "https://kwizzlesurp.com",
+    "https://www.kwizzlesurp.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "https://smithery.ai",
+    "https://www.smithery.ai",
+    "https://server.smithery.ai",
+    # Smithery's per-server gateway host (listing deploymentUrl). Without it
+    # the CORS preflight is rejected 400 "Disallowed CORS origin".
+    "https://x402-mcp--kwizzlesurp10.run.tools",
+)
+
+CORS_ALLOWED_METHODS = ["GET", "POST", "DELETE", "OPTIONS", "HEAD"]
+CORS_ALLOWED_HEADERS = [
+    "Accept",
+    "Accept-Language",
+    "Authorization",
+    "Content-Type",
+    "Content-Language",
+    "Last-Event-Id",
+    "Mcp-Protocol-Version",
+    "Mcp-Session-Id",
+    "PAYMENT-SIGNATURE",
+    "X-PAYMENT",
+    "X-Agent-Id",
+    "X-A2A-Extensions",
+    "X-Operator-Token",
+    "X-NVM-Token",
+]
+
+
+def _split_csv(raw: str | None) -> list[str]:
+    return [p.strip().rstrip("/") for p in (raw or "").split(",") if p.strip()]
+
+
 def _cors_origins() -> list[str]:
-    origins = [
-        "https://x402-mission-control.vercel.app",
-        "https://kwizzle-landing-page.onrender.com",
-        "https://kwizzlesurp.com",
-        "https://www.kwizzlesurp.com",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ]
-    extra = getattr(settings, "cors_extra_origins", "") or ""
-    origins.extend(o.strip().rstrip("/") for o in extra.split(",") if o.strip())
-    return origins
+    """Exact-origin allowlist. Wildcards are dropped, never honoured."""
+    configured = _split_csv(getattr(settings, "cors_allowed_origins", ""))
+    origins = configured or list(_DEFAULT_CORS_ORIGINS)
+    origins.extend(_split_csv(getattr(settings, "cors_extra_origins", "")))
+    out: list[str] = []
+    for o in origins:
+        if "*" in o:
+            logger.warning("Ignoring wildcard CORS origin %r; list exact origins.", o)
+            continue
+        if o not in out:
+            out.append(o)
+    return out
 
 
-# MCP Streamable HTTP is POST + CORS preflight. Restricting methods to GET
-# when DASHBOARD_ACTIONS is off blocked Smithery/browser MCP clients.
-_cors_methods = ["GET", "POST", "DELETE", "OPTIONS", "HEAD"]
-if settings.dashboard_actions and "POST" not in _cors_methods:
-    _cors_methods.append("POST")
+def _cors_headers() -> list[str]:
+    extra = [h for h in _split_csv(getattr(settings, "cors_extra_headers", "")) if h != "*"]
+    return CORS_ALLOWED_HEADERS + [h for h in extra if h not in CORS_ALLOWED_HEADERS]
+
+
+def _mcp_cors_origins() -> list[str]:
+    override = _split_csv(getattr(settings, "mcp_cors_origins", ""))
+    if override == ["*"]:
+        return ["*"]
+    if override:
+        return [o for o in override if "*" not in o]
+    out = _cors_origins()
+    for o in _split_csv(settings.mcp_allowed_origins):
+        if "*" not in o and o not in out:
+            out.append(o)
+    return out
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins()
-    + [
-        "https://smithery.ai",
-        "https://www.smithery.ai",
-        "https://server.smithery.ai",
-        # Smithery's per-server gateway host (listing deploymentUrl). Without it
-        # the CORS preflight is rejected 400 "Disallowed CORS origin".
-        "https://x402-mcp--kwizzlesurp10.run.tools",
-    ],
-    allow_methods=_cors_methods,
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=_cors_headers(),
     expose_headers=[
         "PAYMENT-REQUIRED",
         "PAYMENT-RESPONSE",
@@ -2075,10 +2119,10 @@ async def ops_status() -> dict:
 
 
 _MCP_CORS = dict(
-    allow_origins=["*"],
+    allow_origins=_mcp_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=_cors_headers(),
     expose_headers=["Mcp-Session-Id", "Last-Event-Id"],
 )
 
