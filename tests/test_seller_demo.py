@@ -146,13 +146,30 @@ def test_forwarded_host_is_ignored_by_default(monkeypatch, seller_configured) ->
 
 
 def test_forwarded_host_is_honoured_when_trusted(monkeypatch, seller_configured) -> None:
+    from app import main as _main
+
     monkeypatch.setattr(settings, "trust_forwarded_host", True)
+    _main.set_trusted_proxies(["testclient"])
+    try:
+        response = client.get(
+            "/demo/paid/info",
+            headers={"X-Forwarded-Host": "demo.example", "X-Forwarded-Proto": "https"},
+        )
+    finally:
+        _main.set_trusted_proxies([])
+    assert response.json()["resource"] == "https://demo.example/demo/paid"
+
+
+def test_forwarded_host_ignored_from_untrusted_peer(monkeypatch, seller_configured) -> None:
+    """TRUST_FORWARDED_HOST alone is not enough: the hop must be a trusted proxy."""
+    monkeypatch.setattr(settings, "trust_forwarded_host", True)
+    monkeypatch.setattr(settings, "public_base_url", "http://localhost:8402")
 
     response = client.get(
         "/demo/paid/info",
         headers={"X-Forwarded-Host": "demo.example", "X-Forwarded-Proto": "https"},
     )
-    assert response.json()["resource"] == "https://demo.example/demo/paid"
+    assert response.json()["resource"] == "http://localhost:8402/demo/paid"
 
 
 def test_trusted_forwarded_loopback_falls_back_to_config(monkeypatch, seller_configured) -> None:

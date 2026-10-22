@@ -16,6 +16,22 @@ class Settings(BaseSettings):
     # Extra Origin header values for MCP DNS-rebinding protection (comma-separated).
     mcp_allowed_origins: str = ""
 
+    # CORS. CORS_ALLOWED_ORIGINS (comma-separated, exact origins) replaces the
+    # built-in dashboard/landing allowlist when set; CORS_EXTRA_ORIGINS appends.
+    # "*" is never accepted here. MCP_CORS_ORIGINS overrides the MCP transport
+    # allowlist (defaults to the main allowlist + MCP_ALLOWED_ORIGINS); set it
+    # to "*" only to deliberately allow every browser origin on /mcp.
+    cors_allowed_origins: str = ""
+    # Reverse proxies allowed to set X-Forwarded-For / X-Forwarded-Proto (and,
+    # with TRUST_FORWARDED_HOST, X-Forwarded-Host). Comma-separated IPs/CIDRs.
+    # Unset = trust none, except on Render (RENDER env set) where the private
+    # RFC1918 ranges are trusted because Render publishes no proxy IP list.
+    # "*" is rejected: it lets any client spoof its IP past the rate limiter.
+    trusted_proxies: str = ""
+    cors_extra_origins: str = ""
+    cors_extra_headers: str = ""
+    mcp_cors_origins: str = ""
+
     free_tier_monthly_quota: int = 500
     free_tier_rate_limit_per_min: int = 10
     pro_tier_monthly_quota: int = 50_000
@@ -25,8 +41,12 @@ class Settings(BaseSettings):
     tool_credit_pack_size: int = 100
     tool_credit_pack_price: str = "$1.00"
 
-    # Optional bearer token to protect /quota endpoint. If unset, endpoint is open.
+    # REQUIRED bearer token for every operator surface (/quota, /stats agent
+    # list, /pulse/publish, /swarm/run, MailRail, ...). When unset those routes
+    # fail closed with 503 and startup logs an error. Set
+    # REQUIRE_OPERATOR_TOKEN=true to refuse to start at all without it.
     operator_token: str | None = None
+    require_operator_token: bool = False
 
     # Redis-ready: set REDIS_URL to migrate from in-memory stores.
     redis_url: str | None = None

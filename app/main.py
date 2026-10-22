@@ -75,6 +75,9 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     Endpoints also sample on demand, so nothing breaks when the lifespan
     doesn't run (e.g. bare TestClient without a context manager).
     """
+    from app.operator_auth import check_operator_token_at_startup
+
+    check_operator_token_at_startup()
     sampler = (
         asyncio.create_task(os_monitor.sampler_loop())
         if settings.os_monitor_enabled
@@ -151,46 +154,141 @@ app = FastAPI(
 
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-# Trust X-Forwarded-Proto/Host behind Render/nginx so slash redirects stay on https.
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+# Private ranges trusted on Render only: the container is reachable solely via
+# Render's internal proxy, and Render does not publish fixed proxy IPs.
+RENDER_DEFAULT_TRUSTED_PROXIES = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+
+def resolve_trusted_proxies() -> list[str]:
+    """Trusted proxy IPs/CIDRs. Never '*'. Empty list = trust nobody."""
+    raw = (settings.trusted_proxies or "").strip()
+    source = "TRUSTED_PROXIES"
+    if not raw and os.environ.get("RENDER"):
+        raw, source = RENDER_DEFAULT_TRUSTED_PROXIES, "Render default"
+    out = []
+    for p in raw.split(","):
+        p = p.strip()
+        if not p:
+            continue
+        if p == "*":
+            logger.error("TRUSTED_PROXIES='*' ignored: it allows client IP spoofing.")
+            continue
+        out.append(p)
+    logger.info("Trusted proxies (%s): %s", source, ",".join(out) or "none")
+    return out
+
+
+class TrustedProxyHeadersMiddleware(ProxyHeadersMiddleware):
+    """uvicorn ProxyHeaders, plus a record of the real socket peer.
+
+    The original peer is kept in scope['x402.peer_trusted'] so code that reads
+    X-Forwarded-Host can require the hop to come from a trusted proxy.
+    """
+
+    async def __call__(self, scope, receive, send):  # type: ignore[override]
+        self.trusted_hosts = _TRUSTED_HOSTS
+        if scope.get("type") in ("http", "websocket"):
+            client = scope.get("client")
+            host = client[0] if client else None
+            scope["x402.peer_trusted"] = bool(host) and host in self.trusted_hosts
+        return await super().__call__(scope, receive, send)
+
+
+def set_trusted_proxies(proxies: list[str]) -> None:
+    """(Re)load the trusted proxy list used by TrustedProxyHeadersMiddleware."""
+    global TRUSTED_PROXIES, _TRUSTED_HOSTS
+    from uvicorn.middleware.proxy_headers import _TrustedHosts
+
+    TRUSTED_PROXIES = [p for p in proxies if p != "*"]
+    _TRUSTED_HOSTS = _TrustedHosts(TRUSTED_PROXIES)
+
+
+TRUSTED_PROXIES: list[str] = []
+_TRUSTED_HOSTS = None
+set_trusted_proxies(resolve_trusted_proxies())
+app.add_middleware(TrustedProxyHeadersMiddleware, trusted_hosts=TRUSTED_PROXIES)
 
 app.add_middleware(UpstashAnalyticsMiddleware)
 
-# Dashboard CORS: local Vite only + exact extras (no free-tunnel wildcards).
+# CORS: exact origins only (env allowlist), explicit methods and headers.
+_DEFAULT_CORS_ORIGINS = (
+    "https://x402-mission-control.vercel.app",
+    "https://kwizzle-landing-page.onrender.com",
+    "https://kwizzlesurp.com",
+    "https://www.kwizzlesurp.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "https://smithery.ai",
+    "https://www.smithery.ai",
+    "https://server.smithery.ai",
+    # Smithery's per-server gateway host (listing deploymentUrl). Without it
+    # the CORS preflight is rejected 400 "Disallowed CORS origin".
+    "https://x402-mcp--kwizzlesurp10.run.tools",
+)
+
+CORS_ALLOWED_METHODS = ["GET", "POST", "DELETE", "OPTIONS", "HEAD"]
+CORS_ALLOWED_HEADERS = [
+    "Accept",
+    "Accept-Language",
+    "Authorization",
+    "Content-Type",
+    "Content-Language",
+    "Last-Event-Id",
+    "Mcp-Protocol-Version",
+    "Mcp-Session-Id",
+    "PAYMENT-SIGNATURE",
+    "X-PAYMENT",
+    "X-Agent-Id",
+    "X-A2A-Extensions",
+    "X-Operator-Token",
+    "X-NVM-Token",
+]
+
+
+def _split_csv(raw: str | None) -> list[str]:
+    return [p.strip().rstrip("/") for p in (raw or "").split(",") if p.strip()]
+
+
 def _cors_origins() -> list[str]:
-    origins = [
-        "https://x402-mission-control.vercel.app",
-        "https://kwizzle-landing-page.onrender.com",
-        "https://kwizzlesurp.com",
-        "https://www.kwizzlesurp.com",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ]
-    extra = getattr(settings, "cors_extra_origins", "") or ""
-    origins.extend(o.strip().rstrip("/") for o in extra.split(",") if o.strip())
-    return origins
+    """Exact-origin allowlist. Wildcards are dropped, never honoured."""
+    configured = _split_csv(getattr(settings, "cors_allowed_origins", ""))
+    origins = configured or list(_DEFAULT_CORS_ORIGINS)
+    origins.extend(_split_csv(getattr(settings, "cors_extra_origins", "")))
+    out: list[str] = []
+    for o in origins:
+        if "*" in o:
+            logger.warning("Ignoring wildcard CORS origin %r; list exact origins.", o)
+            continue
+        if o not in out:
+            out.append(o)
+    return out
 
 
-# MCP Streamable HTTP is POST + CORS preflight. Restricting methods to GET
-# when DASHBOARD_ACTIONS is off blocked Smithery/browser MCP clients.
-_cors_methods = ["GET", "POST", "DELETE", "OPTIONS", "HEAD"]
-if settings.dashboard_actions and "POST" not in _cors_methods:
-    _cors_methods.append("POST")
+def _cors_headers() -> list[str]:
+    extra = [h for h in _split_csv(getattr(settings, "cors_extra_headers", "")) if h != "*"]
+    return CORS_ALLOWED_HEADERS + [h for h in extra if h not in CORS_ALLOWED_HEADERS]
+
+
+def _mcp_cors_origins() -> list[str]:
+    override = _split_csv(getattr(settings, "mcp_cors_origins", ""))
+    if override == ["*"]:
+        return ["*"]
+    if override:
+        return [o for o in override if "*" not in o]
+    out = _cors_origins()
+    for o in _split_csv(settings.mcp_allowed_origins):
+        if "*" not in o and o not in out:
+            out.append(o)
+    return out
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins()
-    + [
-        "https://smithery.ai",
-        "https://www.smithery.ai",
-        "https://server.smithery.ai",
-        # Smithery's per-server gateway host (listing deploymentUrl). Without it
-        # the CORS preflight is rejected 400 "Disallowed CORS origin".
-        "https://x402-mcp--kwizzlesurp10.run.tools",
-    ],
-    allow_methods=_cors_methods,
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=_cors_headers(),
     expose_headers=[
         "PAYMENT-REQUIRED",
         "PAYMENT-RESPONSE",
@@ -206,9 +304,12 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "[::1]", "::1")
 def _public_base_from_request(request: Request) -> str:
     """Public origin for seller resource URLs baked into signed 402 challenges.
 
-    Forwarded headers are only honoured when TRUST_FORWARDED_HOST is set.
+    Forwarded headers are only honoured when TRUST_FORWARDED_HOST is set AND
+    the request arrived from a configured trusted proxy (TRUSTED_PROXIES).
     """
     if not settings.trust_forwarded_host:
+        return settings.public_base_url.rstrip("/")
+    if not request.scope.get("x402.peer_trusted", False):
         return settings.public_base_url.rstrip("/")
 
     xf_proto = request.headers.get("x-forwarded-proto")
@@ -1418,6 +1519,10 @@ async def quota_status(request: Request, agent_id: str):
     closed when OPERATOR_TOKEN is unset: an open per-id quota lookup is an
     oracle for which agent ids exist and how many credits they hold.
     """
+    if not settings.operator_token:
+        from app.operator_auth import OPERATOR_DISABLED_DETAIL
+
+        return JSONResponse(status_code=503, content=dict(OPERATOR_DISABLED_DETAIL))
     if not is_operator(request):
         return JSONResponse(
             status_code=401,
@@ -2068,10 +2173,10 @@ async def ops_status() -> dict:
 
 
 _MCP_CORS = dict(
-    allow_origins=["*"],
+    allow_origins=_mcp_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=_cors_headers(),
     expose_headers=["Mcp-Session-Id", "Last-Event-Id"],
 )
 

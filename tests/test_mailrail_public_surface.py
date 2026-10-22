@@ -22,10 +22,29 @@ def test_mailrail_tools_are_not_on_public_mcp_list() -> None:
         assert not is_public_mcp_tool(banned)
 
 
+def test_unauthenticated_http_mailrail_message_routes_are_503_when_token_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No OPERATOR_TOKEN configured -> MailRail is closed with 503, never open."""
+    monkeypatch.setattr(settings, "operator_token", None)
+    client = TestClient(app)
+
+    assert client.get("/mailrail/ledger").status_code == 503
+    assert client.get("/mailrail/inbox").status_code == 503
+    assert client.get("/mailrail/stats").status_code == 503
+    inbound = client.post(
+        "/mailrail/inbound",
+        json={"sender": "public@evil.test", "subject": "hi", "body": "open relay?"},
+    )
+    assert inbound.status_code == 503
+    detail = inbound.json().get("detail") or inbound.json()
+    assert detail.get("error") == "operator_surface_disabled"
+
+
 def test_unauthenticated_http_mailrail_message_routes_are_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "operator_token", None)
+    monkeypatch.setattr(settings, "operator_token", "s3cret-token-for-tests")
     client = TestClient(app)
 
     assert client.get("/mailrail/ledger").status_code == 401
@@ -36,11 +55,6 @@ def test_unauthenticated_http_mailrail_message_routes_are_401(
         json={"sender": "public@evil.test", "subject": "hi", "body": "open relay?"},
     )
     assert inbound.status_code == 401
-    detail = inbound.json().get("detail") or inbound.json()
-    if isinstance(detail, dict):
-        assert detail.get("error") == "unauthorized"
-    else:
-        assert "unauthorized" in str(detail).lower()
 
 
 def test_wrong_bearer_is_401(monkeypatch: pytest.MonkeyPatch) -> None:

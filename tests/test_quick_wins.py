@@ -78,9 +78,9 @@ def test_quota_fails_closed_when_no_token(monkeypatch: pytest.MonkeyPatch) -> No
     """When OPERATOR_TOKEN is unset, /quota is closed (no open id oracle)."""
     monkeypatch.setattr(settings, "operator_token", None)
     resp = client.get("/quota/test-agent")
-    assert resp.status_code == 401
+    assert resp.status_code == 503
     resp = client.get("/quota/test-agent", headers={"Authorization": "Bearer "})
-    assert resp.status_code == 401
+    assert resp.status_code == 503
 
 
 def test_quota_rejects_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
