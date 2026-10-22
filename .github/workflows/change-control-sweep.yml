@@ -1,0 +1,67 @@
+# Sweep change-control issues whose decision has already been made.
+#
+# WHY THIS EXISTS
+# ---------------
+# The `add-only` workflow opens a `change-control` issue every time it
+# classifies a mutation. Until 2026-10-22 nothing ever closed one: 63 were
+# open at once and 0 had ever been closed, so the queue said nothing about
+# what still needed an operator decision. Every approved PR left TWO issues
+# behind -- one for the pull_request event and one for the push-to-master
+# event that re-classifies the same squash.
+#
+# The `add-only` workflow now closes the issue it answered, in the same run
+# (see the "Close the change-control issue this run answered" step). This
+# sweep is the backstop for everything that path cannot cover:
+#
+#   - a run that was cancelled or timed out before reaching the close step
+#   - an issue opened by a run that later got superseded
+#   - a push-to-master duplicate whose own change-control went red even
+#     though the identical content was approved at PR level
+#   - anything left over from before the fix
+#
+# WHAT IT WILL NOT DO
+# -------------------
+# It never closes an issue whose mutation is not already on master, and it
+# never closes one whose `change-control` check was not green. An unapproved
+# mutation that landed stays OPEN, and the run prints those separately so
+# they are read, not skimmed. A sweep that closed things it was unsure about
+# would be worse than no sweep.
+name: change-control sweep
+
+on:
+  schedule:
+    # 04:17 UTC daily. Off the hour on purpose -- every other scheduled
+    # workflow in this repo fires on the hour, and they all compete for the
+    # same self-hosted runner at once.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: change-control-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Close resolved change-control issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CC_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/close_change_control_issues.py
