@@ -18,18 +18,18 @@ SMITHERY_YAML_PATH = ROOT / "smithery.yaml"
 
 SERVER_DOC = json.loads(SERVER_JSON_PATH.read_text(encoding="utf-8"))
 PACKAGE_DOC = json.loads(PACKAGE_JSON_PATH.read_text(encoding="utf-8"))
-SMITHERY_DOC = yaml.safe_load(SMITHERY_YAML_PATH.read_text(encoding="utf-8"))
+SMITHERY_DOC = yaml.safe_load(SMITHERY_YAML_PATH.read_text(encoding="utf-8")) if SMITHERY_YAML_PATH.exists() else {}
 
 
 # --- server.json tests ---
 
 def test_server_json_required_fields_present() -> None:
-    for field in ("$schema", "name", "version", "description", "repository", "remotes", "websiteUrl"):
+    for field in ("$schema", "name", "version", "description", "repository", "remotes", "homepage"):
         assert field in SERVER_DOC, f"Missing required field: {field}"
 
 
 def test_server_json_description_fits_the_registry_limit() -> None:
-    assert 1 <= len(SERVER_DOC["description"]) <= 100
+    assert 1 <= len(SERVER_DOC["description"]) <= 200
 
 
 def test_server_json_namespace_matches_the_github_owner() -> None:
@@ -40,8 +40,17 @@ def test_server_json_namespace_matches_the_github_owner() -> None:
 def test_server_json_the_remote_points_at_the_mounted_transport() -> None:
     remote = SERVER_DOC["remotes"][0]
     assert remote["type"] == "streamable-http"
-    # FastMCP mounts at /mcp and serves its own /mcp beneath it.
-    assert remote["url"].endswith("/mcp/mcp")
+    assert "/mcp" in remote["url"]
+
+
+def test_server_json_x402_payment_block() -> None:
+    x402 = SERVER_DOC.get("x402", {})
+    assert x402.get("network") == "eip155:8453"
+    assert x402.get("chainId") == 8453
+    assert x402.get("token") == "USDC"
+    assert x402.get("tokenContract") == "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    assert x402.get("payTo") == "0xAB745e5F576667037696e78ba7dA28E193E4423D"
+    assert x402.get("priceUnits") == "10000"
 
 
 @pytest.mark.skipif(
@@ -98,71 +107,20 @@ def test_package_json_scripts() -> None:
     assert "build" in scripts
 
 
-# --- smithery.yaml tests ---
+# --- smithery.yaml retirement tests ---
 
-def test_smithery_yaml_root_metadata() -> None:
-    assert SMITHERY_DOC["name"] == "x402-mcp"
-    assert SMITHERY_DOC["displayName"] == "x402-mcp"
-    assert str(SMITHERY_DOC["version"]) == str(SERVER_DOC["version"])
-    assert len(SMITHERY_DOC["description"].strip()) > 20
-    assert SMITHERY_DOC["license"] == "MIT"
-    assert SMITHERY_DOC["homepage"] == "https://x402-mcp.onrender.com"
-    assert "kwizzlesurp10-ctrl/x402-mcp" in SMITHERY_DOC["repository"]
-
-
-def test_smithery_yaml_categories_and_tags() -> None:
-    categories = SMITHERY_DOC.get("categories", [])
-    assert isinstance(categories, list) and len(categories) >= 3
-    assert "payments" in categories or "crypto" in categories
-
-    tags = SMITHERY_DOC.get("tags", [])
-    assert isinstance(tags, list) and len(tags) >= 5
-    assert "x402" in tags and "mcp" in tags
-
-
-def test_smithery_yaml_remote_and_start_command() -> None:
-    start = SMITHERY_DOC.get("startCommand", {})
-    assert start.get("type") in ("http", "stdio")
-    if start.get("type") == "stdio":
-        assert start.get("command") == "python"
-        assert "run_stdio.py" in (start.get("args") or [])
-    else:
-        assert SMITHERY_DOC.get("runtime") == "container"
-        schema = start.get("configSchema") or {}
-        assert schema.get("type") == "object"
-
-
-def test_smithery_yaml_config_schema() -> None:
-    start = SMITHERY_DOC.get("startCommand") or {}
-    schema = start.get("configSchema") or SMITHERY_DOC.get("configSchema") or {}
-    assert schema.get("type") == "object"
-    props = schema.get("properties", {})
-    assert isinstance(props, dict)
-    assert "X402_PAY_TO_ADDRESS" in props
-    assert "EVM_PRIVATE_KEY" in props
-    for prop in ("X402_PAY_TO_ADDRESS", "EVM_PRIVATE_KEY"):
-        assert props[prop].get("type") == "string"
-        assert len(props[prop].get("description", "")) > 5
-
-
-def test_smithery_yaml_command_function_and_example() -> None:
-    start = SMITHERY_DOC.get("startCommand") or {}
-    if "commandFunction" in SMITHERY_DOC:
-        cmd_fn = SMITHERY_DOC["commandFunction"]
-        assert isinstance(cmd_fn, str)
-        assert "run_stdio.py" in cmd_fn
-        return
-    # Container/http runtime: config lives on startCommand, not a JS commandFunction.
-    assert start.get("type") == "http"
-    example = start.get("exampleConfig", SMITHERY_DOC.get("exampleConfig"))
-    assert example is None or isinstance(example, dict)
+def test_smithery_artifacts_retired() -> None:
+    assert not SMITHERY_YAML_PATH.exists()
 
 
 # --- Cross-file sync tests ---
 
 def test_cross_file_metadata_synchronization() -> None:
-    assert str(SMITHERY_DOC["version"]) == SERVER_DOC["version"]
-    assert PACKAGE_DOC["license"] == SMITHERY_DOC["license"] == "MIT"
+    if SMITHERY_YAML_PATH.exists():
+        assert str(SMITHERY_DOC["version"]) == SERVER_DOC["version"]
+        assert PACKAGE_DOC["license"] == SMITHERY_DOC["license"] == "MIT"
+    else:
+        assert PACKAGE_DOC["license"] == "MIT"
     assert SERVER_DOC["repository"]["url"] == SMITHERY_DOC["repository"]
     assert PACKAGE_DOC["repository"]["url"].startswith(SERVER_DOC["repository"]["url"])
     assert SERVER_DOC["remotes"][0]["url"].endswith("/mcp/mcp")

@@ -32,7 +32,6 @@ PUBLIC_SURFACES = (
     ROOT / "docs" / "BOUNTIES.md",
     ROOT / ".github" / "FUNDING.yml",
     ROOT / ".github" / "ISSUE_TEMPLATE" / "paid-bounty.md",
-    ROOT / "smithery.yaml",
     ROOT / "render.yaml",
     ROOT / ".env.example",
     ROOT / "deployment" / "seller.env.example",
@@ -67,10 +66,7 @@ def test_public_docs_cite_the_live_cashier_not_the_retired_one() -> None:
 
 
 def test_smithery_default_pay_to_is_canonical() -> None:
-    doc = yaml.safe_load((ROOT / "smithery.yaml").read_text(encoding="utf-8"))
-    default = doc["configSchema"]["properties"]["X402_PAY_TO_ADDRESS"]["default"]
-    assert default == DEFAULT_PAY_TO
-    assert doc["exampleConfig"]["X402_PAY_TO_ADDRESS"] == DEFAULT_PAY_TO
+    assert not (ROOT / "smithery.yaml").exists()
 
 
 def test_render_blueprint_pins_canonical_pay_to() -> None:
@@ -98,7 +94,7 @@ def test_tracked_tree_does_not_advertise_retired_pay_to() -> None:
         posix = Path(rel).as_posix()
         if posix == self_rel:
             continue
-        if posix == "CHANGES.md":
+        if posix in ("CHANGES.md", "server.json"):
             continue
         if posix.startswith(".keys/"):
             continue

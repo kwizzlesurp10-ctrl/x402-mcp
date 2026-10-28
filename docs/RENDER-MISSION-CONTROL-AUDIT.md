@@ -485,7 +485,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY run_stdio.py .
 COPY manifests ./manifests
-COPY server.json smithery.yaml smithery.remote-config.json ./
+COPY server.json ./
 COPY --from=dashboard /src/dist/ ./app/static/mission_control/
 ENV HOST=0.0.0.0
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8402}

@@ -11,7 +11,7 @@ Unauthenticated clients could:
 - `GET /mailrail/ledger` and `GET /mailrail/inbox` and dump those messages.
 - `POST /mailrail/inbound` without a token.
 
-That is open-relay + inbox disclosure on a public seller host. **Do not list these on Smithery.**
+That is open-relay + inbox disclosure on a public seller host. **Do not expose these on the public MCP server.**
 
 ## Decision
 
@@ -26,6 +26,6 @@ That is open-relay + inbox disclosure on a public seller host. **Do not list the
 
 The seller sets `MAILRAIL_ENABLED=true` and `MAILRAIL_PROVIDER=mock`. Mock records mail and does not call Resend or a webhook. Do not put `MAILRAIL_API_KEY`, `MAILRAIL_WEBHOOK_URL`, or `GITHUB_TOKEN` in `render.yaml`.
 
-Public Smithery catalog is x402 / commerce / swarm / pulse / ops / city only.
+Public Streamable HTTP catalog (https://x402-mcp.onrender.com/mcp) is x402 / commerce / swarm / pulse / ops / city only.
 
 Operator MailRail stays in-process for receipts. External ingest requires `OPERATOR_TOKEN` and the postmaster agent id.

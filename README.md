@@ -82,9 +82,8 @@ https://x402-mcp.onrender.com/mcp
 
 (`/mcp/mcp` is the canonical mount and also works.) No API key or signup; paid tools quote prices via x402.
 
-> **Smithery listing retired.** Smithery shuts down on **October 31, 2026** — the
-> `x402-mcp--kwizzlesurp10.run.tools` gateway, `server.smithery.ai`, and
-> `npx @smithery/cli install` will stop working. Connect directly to the URL above.
+> **Direct Streamable HTTP.** Connect directly to `https://x402-mcp.onrender.com/mcp`
+> or run `npx -y mcp-remote https://x402-mcp.onrender.com/mcp`.
 
 **Generic `mcp.json`** (Cursor `~/.cursor/mcp.json`, VS Code, Windsurf, and most clients):
 
@@ -201,7 +200,7 @@ Tool names use domain.action trees so clients can route `x402.*`, `a2a.*`, `comm
 
 ### Remote (Streamable HTTP, no install)
 
-Point any MCP client at `https://x402-mcp.onrender.com/mcp` — see [Quickstart](#quickstart-connect-directly-no-install) for `mcp.json`, Claude Code, and Claude Desktop snippets. The former Smithery listing and `run.tools` gateway are retired as of October 31, 2026.
+Point any MCP client at `https://x402-mcp.onrender.com/mcp` or run `npx -y mcp-remote https://x402-mcp.onrender.com/mcp` — see [Quickstart](#quickstart-connect-directly-no-install) for `mcp.json`, Claude Code, and Claude Desktop snippets.
 
 ### Usage
 

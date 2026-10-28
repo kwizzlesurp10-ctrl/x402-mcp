@@ -11,30 +11,10 @@ from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_COUNT
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_smithery_yaml_has_full_metadata() -> None:
-    text = (ROOT / "smithery.yaml").read_text(encoding="utf-8")
-    for needle in (
-        "name: x402-mcp",
-        "displayName: x402-mcp",
-        "description:",
-        "homepage: https://x402-mcp.onrender.com",
-        "repository: https://github.com/kwizzlesurp10-ctrl/x402-mcp",
-        "license: MIT",
-        "categories:",
-        "tags:",
-        "startCommand:",
-        "type: http",
-        "required: []",
-        "X402_PAY_TO_ADDRESS:",
-        "EVM_PRIVATE_KEY:",
-    ):
-        assert needle in text, needle
-
-
-def test_remote_config_schema_has_no_required_fields() -> None:
-    schema = json.loads((ROOT / "smithery.remote-config.json").read_text(encoding="utf-8"))
-    assert schema["required"] == []
-    assert schema["type"] == "object"
+def test_smithery_artifacts_retired() -> None:
+    """Pre-Oct 31 cutover: smithery proxy artifacts are permanently retired."""
+    assert not (ROOT / "smithery.yaml").exists()
+    assert not (ROOT / "smithery.remote-config.json").exists()
 
 
 def test_every_tool_uses_dot_notation() -> None:
