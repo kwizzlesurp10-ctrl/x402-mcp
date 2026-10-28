@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY run_stdio.py .
 COPY manifests ./manifests
-COPY server.json smithery.yaml smithery.remote-config.json ./
+COPY server.json ./
 # Fresh SPA build overwrites any committed static bundle.
 COPY --from=dashboard /src/dist/ ./app/static/mission_control/
 

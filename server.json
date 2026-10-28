@@ -1,24 +1,30 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "$schema": "https://modelcontextprotocol.io/schemas/2026-07-28/server.json",
   "name": "io.github.kwizzlesurp10-ctrl/x402-mcp",
-  "description": "x402 crypto commerce, US city property compliance, gas optimizer, and Agent ID cards on Base.",
-  "version": "1.30.0",
-  "title": "x402 Micropayments MCP",
-  "license": "MIT",
+  "description": "Live Base Mainnet USDC ($0.01) x402 micropayment gateway for 14 municipal housing & property compliance endpoints.",
+  "version": "1.2.0",
   "repository": {
     "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
     "source": "github"
   },
-  "websiteUrl": "https://x402-mcp.onrender.com",
+  "homepage": "https://x402-mcp.onrender.com",
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://x402-mcp.onrender.com/mcp/mcp"
+      "url": "https://x402-mcp.onrender.com/mcp"
+    },
+    {
+      "type": "sse",
+      "url": "https://x402-mcp.onrender.com/sse"
     }
   ],
-  "capabilities": {
-    "tools": true,
-    "resources": true,
-    "prompts": true
+  "x402": {
+    "version": "1.2",
+    "network": "eip155:8453",
+    "chainId": 8453,
+    "token": "USDC",
+    "tokenContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "payTo": "0xAB745e5F576667037696e78ba7dA28E193E4423D",
+    "priceUnits": "10000"
   }
 }
