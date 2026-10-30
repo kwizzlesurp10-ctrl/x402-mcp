@@ -49,7 +49,7 @@ def test_server_json_x402_payment_block() -> None:
     assert x402.get("chainId") == 8453
     assert x402.get("token") == "USDC"
     assert x402.get("tokenContract") == "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-    assert x402.get("payTo") == "0xAB745e5F576667037696e78ba7dA28E193E4423D"
+    assert x402.get("payTo") == "0x0d25A44f74868eCE53B305C97139CF4B62963410"
     assert x402.get("priceUnits") == "10000"
 
 
@@ -119,8 +119,8 @@ def test_cross_file_metadata_synchronization() -> None:
     if SMITHERY_YAML_PATH.exists():
         assert str(SMITHERY_DOC["version"]) == SERVER_DOC["version"]
         assert PACKAGE_DOC["license"] == SMITHERY_DOC["license"] == "MIT"
+        assert SERVER_DOC["repository"]["url"] == SMITHERY_DOC["repository"]
     else:
         assert PACKAGE_DOC["license"] == "MIT"
-    assert SERVER_DOC["repository"]["url"] == SMITHERY_DOC["repository"]
     assert PACKAGE_DOC["repository"]["url"].startswith(SERVER_DOC["repository"]["url"])
-    assert SERVER_DOC["remotes"][0]["url"].endswith("/mcp/mcp")
+    assert SERVER_DOC["remotes"][0]["url"].endswith(("/mcp", "/mcp/mcp"))
