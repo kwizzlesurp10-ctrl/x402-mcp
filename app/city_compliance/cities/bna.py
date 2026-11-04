@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 
 # Metro Nashville Residential Short Term Rental Permits (ArcGIS Hub view).
@@ -23,12 +24,7 @@ SPEC = CitySpec(
     state="TN",
     service_name="Nashville STR Permit Check",
     tags=("nashville", "str", "rental-license", "housing", "diligence"),
-    description=(
-        "Nashville short-term rental permit check: is this property permitted "
-        "for STR? Property due diligence agent for Nashville Davidson County "
-        "housing compliance open data. GET ?address= → permit number, status, "
-        "type. Live Metro Nashville FeatureServer. Host compliance, HOA, agent workflows."
-    ),
+    description=outcome_copy.paid_route_description(code="bna", name="Nashville"),
     sample_address="1 PUBLIC SQ",
     sample_note=(
         "Free fixed-address sample of Nashville short-term rental permits. "

@@ -440,7 +440,7 @@ def agent_card() -> dict[str, Any]:
     """
     base = _base()
     try:
-        from app.city_compliance import registry
+        from app.city_compliance import outcome_copy, registry
     except Exception:  # pragma: no cover
         cities: list[dict[str, Any]] = []
     else:
@@ -566,15 +566,12 @@ def agent_card() -> dict[str, Any]:
             "id": "us-city-property-check",
             "name": "US City Property Compliance Check",
             "description": (
-                f"Paid address-level open-data compliance report for one of "
-                f"{len(cities)} US jurisdictions. Input: city code "
-                f"({codes_pipe}) and street address (1-120 chars). "
-                f"Price: {price} USDC on {network} via x402 "
-                "(HTTP 402 + PAYMENT-SIGNATURE). Output: JSON compliance report "
-                "from city open data. Free fixed-address samples at "
-                "/us/{code}/property-check/sample without payment. "
-                "MCP: get_us_city_property_sample then check_us_city_property "
-                "(or pay_and_fetch on paid_url)."
+                f"Is a US rental address licensed or flagged? Paid check for "
+                f"{len(cities)} cities: input city_code + street address → "
+                f"normalized verdict, summary, key dates, source_url ($0.01 USDC, "
+                f"x402 on {network}). Free fixed-address samples at "
+                "/us/{{code}}/property-check/sample. MCP: city.list → city.sample → "
+                "city.check (or HTTP pay_and_fetch on paid_url)."
             ),
             "tags": [
                 "property",
@@ -598,10 +595,9 @@ def agent_card() -> dict[str, Any]:
             "id": "us-city-property-check-sample",
             "name": "US City Property Compliance Sample (Free)",
             "description": (
-                "Free fixed-address sample report for any supported city code. "
-                "Same JSON shape as the paid property-check; no payment required. "
-                "Use for integration testing before paying for arbitrary addresses. "
-                "MCP tool: get_us_city_property_sample(city_code)."
+                "Free fixed-address preview of the paid property-check JSON: "
+                "verdict, summary, and full schema — no payment. "
+                "Use before paying for arbitrary addresses."
             ),
             "tags": [
                 "sample",
@@ -712,13 +708,7 @@ def agent_card() -> dict[str, Any]:
             {
                 "id": f"property-check-{code}",
                 "name": c["service_name"],
-                "description": (
-                    f"{c['service_name']} for {c['name']}, {c['state']}. "
-                    f"Source: {c['sources_label']}. "
-                    f"Paid: GET {paid}?address={{street}} at {c['price']} USDC "
-                    f"on {c['network']} (x402). Free sample: {sample} "
-                    f"(fixed address: {sample_addr})."
-                ),
+                "description": outcome_copy.agent_skill_summary(c),
                 "tags": tags,
                 "examples": [
                     f"Check {c['name']} compliance for {sample_addr}",

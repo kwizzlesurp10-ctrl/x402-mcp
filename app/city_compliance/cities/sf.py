@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import escape_soda, soda_get, source_url
 
@@ -18,13 +19,7 @@ SPEC = CitySpec(
     state="CA",
     service_name="SF Housing NOV Check",
     tags=("sanfrancisco", "housing", "violations", "dbi", "property"),
-    description=(
-        "Does this San Francisco address have Department of Building Inspection "
-        "notices of violation? Query house number + street and get NOV status, "
-        "category, filing date, and division. For tenant screening, landlord "
-        "diligence, and lending checks. Input: address string. Output: JSON, "
-        "live SF Open Data."
-    ),
+    description=outcome_copy.paid_route_description(code="sf", name="San Francisco"),
     sample_address="2329 Mission St",
     sample_note=(
         "Free fixed-address sample of SF DBI Notices of Violation. "

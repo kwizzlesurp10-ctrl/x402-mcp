@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,12 +18,7 @@ SPEC = CitySpec(
     state="TX",
     service_name="Austin STR License Check",
     tags=("austin", "str", "rental-license", "housing", "diligence"),
-    description=(
-        "Austin short term rental license check: is this property licensed for "
-        "STR? Property due diligence agent for Austin Texas housing "
-        "compliance open data. GET ?address= → short-term rental license, "
-        "status. Live Austin JSON. Host compliance, HOA/property manager, agent workflows."
-    ),
+    description=outcome_copy.paid_route_description(code="atx", name="Austin"),
     sample_address="1108 Lavaca St",
     sample_note=(
         "Free fixed-address sample of Austin short-term rental licenses. "

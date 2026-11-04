@@ -153,26 +153,28 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     {
         "name": "city.list",
         "description": (
-            "List US City Open-Data Compliance Network cities with paid_url, sample_url, and price. "
-            "Call first, then city.sample, then city.check for the paid address lookup."
+            "List US cities with paid_url and free sample_url for property compliance. "
+            "Start here — each paid lookup is $0.01 USDC and returns a normalized "
+            "verdict (licensed / not_licensed / violations_open / …) plus source link, "
+            "not raw portal JSON. Then city.sample (free shape), then city.check."
         ),
         "tier": "free",
     },
     {
         "name": "city.sample",
         "description": (
-            "Get a free fixed-address property compliance sample for one US city code. "
-            "Use before city.check to validate city_code and response shape without paying."
+            "Free fixed-address preview of paid property-check JSON: verdict, summary, "
+            "schema. Use before city.check to validate parsing without spending $0.01 USDC."
         ),
         "tier": "free",
     },
     {
         "name": "city.check",
         "description": (
-            "Paid US city property compliance check (MCP seller x402). "
-            "Unpaid calls return PaymentRequired with accepts; pay via _meta['x402/payment']. "
-            "Prefer city.sample first. "
-            "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
+            "Is this US address licensed / flagged / showing open violations? "
+            "One city.check ($0.01 USDC, x402 on Base) returns verdict, summary, "
+            "dates, and source_url — skip querying city open-data portals yourself. "
+            "Unpaid → PaymentRequired; pay via _meta['x402/payment']. Prefer city.sample first."
         ),
         "tier": "paid",
     },

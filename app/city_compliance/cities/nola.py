@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="LA",
     service_name="NOLA STR License Check",
     tags=("neworleans", "str", "rental", "license", "housing"),
-    description=(
-        "Does this New Orleans address hold an active short-term rental license? "
-        "Query any street address and get license number, type, subtype, "
-        "expiration, and operator/holder fields from city open data. For host "
-        "compliance and agent workflows. Input: address string. Output: JSON, "
-        "live City of New Orleans open data."
-    ),
+    description=outcome_copy.paid_route_description(code="nola", name="New Orleans"),
     sample_address="179 Dunleith Dr",
     sample_note=(
         "Free fixed-address sample of New Orleans active STR licenses. "

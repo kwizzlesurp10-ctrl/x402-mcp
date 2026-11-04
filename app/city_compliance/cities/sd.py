@@ -7,6 +7,7 @@ import urllib.parse
 from typing import Any
 import httpx
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 
 # Using the ArcGIS MapServer endpoint for San Diego STRO licenses
@@ -18,12 +19,7 @@ SPEC = CitySpec(
     state="CA",
     service_name="San Diego STR License Check",
     tags=("sandiego", "str", "rental-license", "housing", "diligence"),
-    description=(
-        "San Diego short term rental license check: is this property licensed for "
-        "STR? Property due diligence agent for San Diego California housing "
-        "compliance open data via ArcGIS MapServer. GET ?address= → short-term rental license, "
-        "status, tier. Host compliance, HOA/property manager, agent workflows."
-    ),
+    description=outcome_copy.paid_route_description(code="sd", name="San Diego"),
     sample_address="123 MAIN ST",
     sample_note=(
         "Free fixed-address sample of San Diego short-term rental licenses. "

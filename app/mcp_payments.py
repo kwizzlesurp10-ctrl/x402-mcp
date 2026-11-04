@@ -34,11 +34,9 @@ def get_mcp_resource_server() -> Any:
 
 
 def _city_check_description() -> str:
-    return (
-        "Paid US city property compliance check (MCP seller). "
-        f"Price: {settings.city_network_price} per call (x402, USDC on Base). "
-        "Use city.sample first for a free fixed-address shape check."
-    )
+    from app.city_compliance import outcome_copy
+
+    return outcome_copy.mcp_city_check_blurb()
 
 
 def _city_check_bazaar_extensions() -> dict[str, Any]:
@@ -48,8 +46,10 @@ def _city_check_bazaar_extensions() -> dict[str, Any]:
         declare_mcp_discovery_extension,
     )
 
+    from app.city_compliance import publish
+
     mn = registry.get_city("mn")
-    output_example = mn.discovery_output_example()
+    output_example = publish.discovery_output_example(mn)
     return declare_mcp_discovery_extension(
         DeclareMcpDiscoveryConfig(
             tool_name="city.check",

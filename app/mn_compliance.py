@@ -80,15 +80,9 @@ CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 # rather than describing the endpoint to another engineer.
 #
 # 500 chars is the CDP ceiling (_clamp_description); this sits under it.
-RESOURCE_DESCRIPTION = (
-    "Minneapolis rental license check — is this property licensed? Property due "
-    "diligence agent for Minneapolis Minnesota (Hennepin) housing compliance open "
-    "data. GET ?address= (street 1-120 chars) → compliance_verdict "
-    "(licensed_clean|licensed_with_violations|unlicensed|condemned_or_boarded), "
-    "rental license status/tier/units/expiration, violation cases, condemned/"
-    "boarded. Live City JSON. Tenant screening, landlord DD, lending. Sample: "
-    "/mn/property-check/sample."
-)
+from app.city_compliance import outcome_copy
+
+RESOURCE_DESCRIPTION = outcome_copy.mn_resource_description()
 
 # Per-resource Bazaar metadata (facilitator: name <=32, <=5 tags x <=32 chars).
 # Must NOT inherit the storefront defaults (base,intelligence) — those describe
