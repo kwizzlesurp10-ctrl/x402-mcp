@@ -11,11 +11,22 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.city_compliance.coverage import (
+    MODE_LICENSE,
+    MODE_LICENSE_AND_VIOLATIONS,
+    MODE_NONE,
+    MODE_VIOLATIONS_ONLY,
+    allows_not_licensed_verdict,
+    coverage_note_for,
+    product_mode_for_city,
+)
+
 # Normalized verdicts agents should branch on (stable contract).
 VERDICT_LICENSED = "licensed"
 VERDICT_NOT_LICENSED = "not_licensed"
 VERDICT_EXPIRED = "expired"
 VERDICT_VIOLATIONS_OPEN = "violations_open"
+VERDICT_NO_VIOLATIONS_FOUND = "no_violations_found"
 VERDICT_FLAGGED = "flagged"
 VERDICT_UNKNOWN = "unknown"
 
@@ -113,12 +124,50 @@ def open_violation_count(report: dict[str, Any]) -> int | None:
     return None
 
 
-def normalized_verdict(compliance_verdict: str | None, report: dict[str, Any]) -> str:
+def normalized_verdict(
+    compliance_verdict: str | None,
+    report: dict[str, Any],
+    *,
+    product_mode: str | None = None,
+) -> str:
+    mode = product_mode or product_mode_for_city(
+        str(report.get("city") or ""), report
+    )
     token = (compliance_verdict or "").strip().lower()
+
+    if mode == MODE_NONE:
+        return VERDICT_UNKNOWN
+
     if token in _INVALID:
         return VERDICT_UNKNOWN
     if token in _FLAGGED:
         return VERDICT_FLAGGED
+
+    if mode == MODE_VIOLATIONS_ONLY:
+        if token in _VIOLATIONS_OPEN or token in {
+            "unregistered_with_violations",
+            "unlicensed_with_violations",
+        }:
+            return VERDICT_VIOLATIONS_OPEN
+        if token in _VIOLATIONS_HISTORY or token in {
+            "no_violations_found",
+            "no_open_violations",
+            "no_open_code_cases",
+            "no_cases_found",
+            "no_nov_found",
+            "violations_closed_only",
+            "cases_closed_only",
+            "nov_historical_only",
+        }:
+            return VERDICT_NO_VIOLATIONS_FOUND
+        open_n = open_violation_count(report)
+        if open_n and open_n > 0:
+            return VERDICT_VIOLATIONS_OPEN
+        if open_n == 0:
+            return VERDICT_NO_VIOLATIONS_FOUND
+        return VERDICT_UNKNOWN
+
+    # License or license+violations products
     if token in _VIOLATIONS_OPEN:
         return VERDICT_VIOLATIONS_OPEN
     if token in _LICENSED_INACTIVE:
@@ -129,25 +178,26 @@ def normalized_verdict(compliance_verdict: str | None, report: dict[str, Any]) -
             return VERDICT_VIOLATIONS_OPEN
         return VERDICT_LICENSED
     if token in _NOT_LICENSED:
-        if token in _VIOLATIONS_HISTORY or token in {
-            "violations_closed_only",
-            "cases_closed_only",
-            "nov_historical_only",
-        }:
+        if allows_not_licensed_verdict(mode):
+            open_n = open_violation_count(report)
+            if open_n and open_n > 0:
+                return VERDICT_VIOLATIONS_OPEN
             return VERDICT_NOT_LICENSED
-        open_n = open_violation_count(report)
-        if open_n and open_n > 0:
-            return VERDICT_VIOLATIONS_OPEN
-        return VERDICT_NOT_LICENSED
+        return VERDICT_UNKNOWN
     if token in _VIOLATIONS_HISTORY:
-        return VERDICT_NOT_LICENSED
+        if allows_not_licensed_verdict(mode):
+            return VERDICT_NOT_LICENSED
+        return VERDICT_NO_VIOLATIONS_FOUND
+
     if report.get("registered") is True or report.get("licensed") is True:
         open_n = open_violation_count(report)
         if open_n and open_n > 0:
             return VERDICT_VIOLATIONS_OPEN
         return VERDICT_LICENSED
     if report.get("registered") is False or report.get("licensed") is False:
-        return VERDICT_NOT_LICENSED
+        if allows_not_licensed_verdict(mode):
+            return VERDICT_NOT_LICENSED
+        return VERDICT_UNKNOWN
     return VERDICT_UNKNOWN
 
 
@@ -214,13 +264,26 @@ def data_as_of(report: dict[str, Any]) -> str | None:
     return None
 
 
-def confidence_for(report: dict[str, Any], *, address: str) -> str:
+def confidence_for(
+    report: dict[str, Any],
+    *,
+    address: str,
+    product_mode: str,
+    verdict: str,
+) -> str:
+    if product_mode == MODE_NONE or verdict == VERDICT_UNKNOWN:
+        return "low"
     queried = normalize_address_for_match(str(report.get("address_queried") or address))
     if not queried:
         return "low"
     registrations = report.get("registrations") or []
     licenses = report.get("rental_licenses") or []
     rows = [r for r in (*registrations, *licenses) if isinstance(r, dict)]
+    if product_mode == MODE_VIOLATIONS_ONLY:
+        viol = report.get("violation_cases") or {}
+        if isinstance(viol, dict) and (viol.get("total") or viol.get("recent")):
+            return "medium"
+        return "low"
     if not rows and not report.get("violation_cases"):
         return "medium"
     for row in rows:
@@ -242,15 +305,31 @@ def summary_sentence(
     compliance_verdict: str | None,
     open_count: int | None,
     registered: bool | None,
+    product_mode: str,
 ) -> str:
     place = city_name or "This city"
+    if product_mode == MODE_NONE:
+        return (
+            f"{place}: no live open-data licensing feed is wired for this product; "
+            "status is unknown — not a determination that rental is unlicensed or illegal."
+        )
     if verdict == VERDICT_FLAGGED:
         return f"{place}: public records flag condemned or boarded conditions at this address."
     if verdict == VERDICT_VIOLATIONS_OPEN:
         n = open_count if open_count is not None else "open"
+        if product_mode == MODE_VIOLATIONS_ONLY:
+            return (
+                f"{place}: open code-enforcement case(s) found in the violations feed "
+                f"({n} open in this snapshot). Does not prove rental license status."
+            )
         return (
             f"{place}: open housing-code or enforcement activity found "
             f"({n} open case(s) in the returned snapshot)."
+        )
+    if verdict == VERDICT_NO_VIOLATIONS_FOUND:
+        return (
+            f"{place}: no open violations in the enforcement feed returned for this address "
+            "(closed/historical cases may still appear in records)."
         )
     if verdict == VERDICT_LICENSED:
         return f"{place}: an active rental or registration license match was found for this address."
@@ -259,16 +338,13 @@ def summary_sentence(
             f"{place}: a license or registration record exists but appears inactive or expired."
         )
     if verdict == VERDICT_NOT_LICENSED:
-        if compliance_verdict in _VIOLATIONS_HISTORY:
-            return (
-                f"{place}: no active license match; only closed or historical "
-                "enforcement records were returned."
-            )
-        return f"{place}: no active rental license or registration match was found."
+        return f"{place}: no active rental license or registration match was found in city records."
+    if verdict == VERDICT_UNKNOWN:
+        return (
+            f"{place}: this product's feeds do not support a licensing determination for this address."
+        )
     if registered is True:
         return f"{place}: registration data was returned; review records for status details."
-    if registered is False:
-        return f"{place}: no matching registration was found in the city open-data feeds queried."
     return f"{place}: compliance status could not be determined reliably from the returned records."
 
 
@@ -299,15 +375,25 @@ def enrich_decision(
 ) -> dict[str, Any]:
     """Return a shallow copy of ``report`` with decision-ready fields added."""
     out = dict(report)
+    city_code = str(out.get("city") or "")
+    product_mode = product_mode_for_city(city_code, out)
     compliance = out.get("compliance_verdict")
     verdict = normalized_verdict(
-        str(compliance) if compliance is not None else None, out
+        str(compliance) if compliance is not None else None,
+        out,
+        product_mode=product_mode,
     )
     open_count = open_violation_count(out)
     registered = out.get("registered")
     if registered is None:
         registered = out.get("licensed")
 
+    out["product_mode"] = product_mode
+    out["coverage_note"] = coverage_note_for(
+        product_mode,
+        verdict=verdict,
+        compliance_verdict=str(compliance) if compliance is not None else None,
+    )
     out["verdict"] = verdict
     out["summary"] = summary_sentence(
         city_name=city_name or out.get("city_name"),
@@ -315,11 +401,15 @@ def enrich_decision(
         compliance_verdict=str(compliance) if compliance is not None else None,
         open_count=open_count,
         registered=registered if isinstance(registered, bool) else None,
+        product_mode=product_mode,
     )
     out["key_dates"] = key_dates(out)
     out["open_violations_count"] = open_count
     out["confidence"] = confidence_for(
-        out, address=str(out.get("address_queried") or address_fallback)
+        out,
+        address=str(out.get("address_queried") or address_fallback),
+        product_mode=product_mode,
+        verdict=verdict,
     )
     out["data_as_of"] = data_as_of(out)
     out["source_url"] = source_url_from_report(out)
