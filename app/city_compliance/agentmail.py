@@ -173,4 +173,4 @@ def notify_city_call(
 def verdict_from_report(report: dict[str, Any] | None) -> str | None:
     if not report:
         return None
-    return report.get("compliance_verdict") or report.get("verdict")
+    return report.get("verdict") or report.get("compliance_verdict")

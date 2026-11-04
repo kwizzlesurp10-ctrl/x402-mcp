@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import demand
-from app.city_compliance import agentmail, gate, registry
+from app.city_compliance import agentmail, gate, publish, registry
 from app.city_compliance.models import CitySpec
 from app.config import settings
 
@@ -56,7 +56,10 @@ async def us_city_sample(city_code: str) -> JSONResponse:
 
     spec: CitySpec = mod.SPEC
     try:
-        report = await mod.check_property(spec.sample_address)
+        raw = await mod.check_property(spec.sample_address)
+        report = publish.prepare_city_report(
+            raw, spec=spec, address_fallback=spec.sample_address
+        )
     except Exception:
         log.warning("us/%s sample upstream failed", spec.code, exc_info=True)
         agentmail.notify_city_call(
@@ -205,7 +208,10 @@ async def us_city_property_check(
         )
 
     try:
-        report = await mod.check_property(address)
+        raw = await mod.check_property(address)
+        report = publish.prepare_city_report(
+            raw, spec=spec, address_fallback=address.strip()
+        )
     except Exception:
         log.warning("us/%s property join failed after settle", spec.code, exc_info=True)
         # Payment already settled — never re-challenge; return 502 with receipt.
