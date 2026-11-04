@@ -172,7 +172,7 @@ async def test_mcp_check_paid_sends_agentmail(
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "paid_mcp"
-    assert "licensed_clean" in records[0]["body"]
+    assert "Verdict:    licensed" in records[0]["body"]
 
 
 @pytest.mark.asyncio
