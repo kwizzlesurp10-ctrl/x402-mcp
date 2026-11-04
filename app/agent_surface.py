@@ -566,12 +566,12 @@ def agent_card() -> dict[str, Any]:
             "id": "us-city-property-check",
             "name": "US City Property Compliance Check",
             "description": (
-                f"Is a US rental address licensed or flagged? Paid check for "
-                f"{len(cities)} cities: input city_code + street address → "
-                f"normalized verdict, summary, key dates, source_url ($0.01 USDC, "
-                f"x402 on {network}). Free fixed-address samples at "
-                "/us/{{code}}/property-check/sample. MCP: city.list → city.sample → "
-                "city.check (or HTTP pay_and_fetch on paid_url)."
+                f"Is a US address licensed, flagged, or showing open code violations? "
+                f"Paid check for {len(cities)} cities ($0.01 USDC, x402 on {network}): "
+                "returns verdict, product_mode, coverage_note, summary, source_url. "
+                "Violations-only cities (chi, bos, phi, …) do not answer rental legality. "
+                "Free samples at /us/{{code}}/property-check/sample. MCP: city.list → "
+                "city.sample → city.check."
             ),
             "tags": [
                 "property",
