@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from app.city_compliance import agentmail, gate, registry
+from app.city_compliance import agentmail, gate, publish, registry
 from app.config import settings
 
 
@@ -86,7 +86,10 @@ async def get_us_city_property_sample(
 
     spec = mod.SPEC
     try:
-        report = await mod.check_property(spec.sample_address)
+        raw = await mod.check_property(spec.sample_address)
+        report = publish.prepare_city_report(
+            raw, spec=spec, address_fallback=spec.sample_address
+        )
     except Exception as exc:  # noqa: BLE001 — surface upstream failure to agent
         agentmail.notify_city_call(
             "error",
@@ -206,7 +209,8 @@ async def check_us_city_property(
     addr = address.strip()
 
     try:
-        report = await mod.check_property(addr)
+        raw = await mod.check_property(addr)
+        report = publish.prepare_city_report(raw, spec=spec, address_fallback=addr)
     except Exception:  # noqa: BLE001 — surface upstream failure to agent
         agentmail.notify_city_call(
             "error",

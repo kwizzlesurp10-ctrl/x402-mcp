@@ -1585,7 +1585,14 @@ async def mn_property_check_sample() -> JSONResponse:
 
     mn_spec = registry.get_city("mn").SPEC
     try:
-        report = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
+        raw = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
+        from app.city_compliance import publish
+
+        report = publish.prepare_city_report(
+            raw,
+            spec=mn_spec,
+            address_fallback=mn_compliance.SAMPLE_ADDRESS,
+        )
     except Exception:
         log.warning("mn/property-check/sample upstream failed", exc_info=True)
         agentmail.notify_city_call(
@@ -1716,14 +1723,20 @@ async def mn_property_check(
             },
         )
 
+    from app.city_compliance import agentmail, publish, registry
+
+    mn_spec = registry.get_city("mn").SPEC
     try:
-        report = await mn_compliance.check_property(address)
+        raw = await mn_compliance.check_property(address)
+        report = publish.prepare_city_report(
+            raw,
+            spec=mn_spec,
+            address_fallback=address.strip(),
+        )
     except Exception:
         log.warning("mn/property-check join failed after settle", exc_info=True)
         settlement = result.get("settlement") or {}
         tx = settlement.get("transaction") or settlement.get("txHash")
-        from app.city_compliance import agentmail, registry
-
         mn_spec = registry.get_city("mn").SPEC
         agentmail.notify_city_call(
             "error",
@@ -1761,9 +1774,6 @@ async def mn_property_check(
 
     settlement = result.get("settlement") or {}
     tx = settlement.get("transaction") or settlement.get("txHash")
-    from app.city_compliance import agentmail, registry
-
-    mn_spec = registry.get_city("mn").SPEC
     agentmail.notify_city_call(
         "paid_settle",
         city_code="mn",
