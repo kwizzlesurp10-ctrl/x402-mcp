@@ -139,7 +139,7 @@ async def us_city_property_check(
         )
 
     input_example = {"address": spec.sample_address}
-    output_example = mod.discovery_output_example()
+    output_example = publish.discovery_output_example(mod)
     try:
         payment_required = gate.build_payment_required_header(
             spec, input_example=input_example, output_example=output_example

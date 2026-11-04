@@ -187,12 +187,16 @@ def output_examples() -> dict[str, dict[str, Any]]:
         property_due_diligence_agent,
         tx_decision,
     )
-    from app.city_compliance import registry as city_registry
+    from app.city_compliance import publish, registry as city_registry
 
     examples: dict[str, dict[str, Any]] = {
         "/base/tx-decision": tx_decision.DISCOVERY_OUTPUT_EXAMPLE,
         "/base/finality-check": finality_check.DISCOVERY_OUTPUT_EXAMPLE,
-        "/mn/property-check": mn_compliance.DISCOVERY_OUTPUT_EXAMPLE,
+        "/mn/property-check": publish.prepare_city_report(
+            dict(mn_compliance.DISCOVERY_OUTPUT_EXAMPLE),
+            spec=city_registry.get_city("mn").SPEC,
+            address_fallback=mn_compliance.SAMPLE_ADDRESS,
+        ),
         "/tasks/us-rental-diligence": diligence_pack.DISCOVERY_OUTPUT_EXAMPLE,
         "/agent/property-due-diligence": (
             property_due_diligence_agent.DISCOVERY_OUTPUT_EXAMPLE
@@ -209,7 +213,7 @@ def output_examples() -> dict[str, dict[str, Any]]:
     # Concrete per-city paid paths (x402scan matches the exact resource path).
     for code in city_registry.known_codes():
         mod = city_registry.get_city(code)
-        examples[f"/us/{code}/property-check"] = mod.discovery_output_example()
+        examples[f"/us/{code}/property-check"] = publish.discovery_output_example(mod)
     return examples
 
 

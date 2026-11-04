@@ -130,7 +130,7 @@ def _artifact_from_result(result: dict[str, Any], name: str = "result.json") -> 
 
 def _skill_bindings() -> dict[str, SkillBinding]:
     from app import diligence_pack, property_due_diligence_agent as pdd_agent, tx_decision
-    from app.city_compliance import registry
+    from app.city_compliance import publish, registry
 
     bindings: dict[str, SkillBinding] = {}
 
@@ -276,11 +276,12 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             inp: dict[str, Any], *, city_code: str = code
         ) -> dict[str, Any]:
             mod = registry.get_city(city_code)
-            report = await mod.check_property(str(inp.get("address") or ""))
-            if not isinstance(report, dict):
-                report = {"result": report}
-            out = dict(report)
-            out.setdefault("city", city_code)
+            spec = mod.SPEC
+            addr = str(inp.get("address") or "")
+            raw = await mod.check_property(addr)
+            if not isinstance(raw, dict):
+                raw = {"result": raw}
+            out = publish.prepare_city_report(raw, spec=spec, address_fallback=addr)
             out["payment_settled"] = True
             return out
 
@@ -290,12 +291,12 @@ def _skill_bindings() -> dict[str, SkillBinding]:
                 return "address must be 1-120 chars"
             return None
 
-        from app.city_compliance import gate as city_gate
+        from app.city_compliance import gate as city_gate, publish
 
         mod = registry.get_city(code)
         spec = mod.SPEC
         input_example = {"address": spec.sample_address}
-        output_example = mod.discovery_output_example()
+        output_example = publish.discovery_output_example(mod)
         pid = city_gate.product_id(spec)
 
         bindings[skill_id] = SkillBinding(

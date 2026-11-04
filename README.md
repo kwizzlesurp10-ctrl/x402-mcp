@@ -52,7 +52,7 @@ Fiat Sponsors (GitHub Sponsors / Polar / thanks.dev) do **not** credit `payTo` o
 | Product | Price | What you get |
 |---------|-------|--------------|
 | `GET /mn/property-check?address=…` | $0.01 USDC | Minneapolis rental-compliance snapshot composed from 3 live City of Minneapolis open datasets — the first machine-payable housing-compliance data for agents |
-| `GET /us/{code}/property-check?address=…` | $0.01 USDC | **US City Open-Data Compliance Network** (public catalog; see `/us/cities`) — same wire protocol; free catalog `/us/cities` + free `/sample`; MCP: `city.list` → `city.sample` → `city.check` |
+| `GET /us/{code}/property-check?address=…` | $0.01 USDC | **US City Open-Data Compliance Network** (public catalog; see `/us/cities`) — same wire protocol; free catalog `/us/cities` + free `/sample`; MCP: `city.list` → `city.sample` → `city.check`. Every city returns the same JSON shape: lead with `verdict` + `summary`, then `registrations` / `violation_cases` under `records`. See [docs/CITY-RESPONSE-SCHEMA.md](docs/CITY-RESPONSE-SCHEMA.md). |
 | `GET /swarm/products/d22bbf5f3c4b4666a6f80980c7bc7c50/purchase` | $0.05 USDC | Base Network Pulse: live settlement-conditions intelligence (EIP-1559 math + real RPC + ETH spot), pinned listing with the x402 Bazaar discovery extension |
 
 The public seller host holds **no spend key** — it only verifies and settles inbound payments ([docs/SELLER-STOREFRONT.md](docs/SELLER-STOREFRONT.md)). Roadmap: [ROADMAP.md](ROADMAP.md).
