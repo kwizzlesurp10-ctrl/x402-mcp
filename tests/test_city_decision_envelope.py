@@ -172,6 +172,97 @@ def test_each_city_compliance_token_maps(code: str, compliance: str, expected: s
     assert out["compliance_verdict"] == compliance
 
 
+def test_open_violation_count_reads_adapter_aliases() -> None:
+    assert (
+        decision.open_violation_count(
+            {"violation_cases": {"total": 3, "open_count": 2, "recent": []}}
+        )
+        == 2
+    )
+    assert (
+        decision.open_violation_count(
+            {"violation_cases": {"total": 1, "openish_count": 1, "recent": []}}
+        )
+        == 1
+    )
+
+
+def test_moco_openish_count_surfaces_violations_open_verdict() -> None:
+    mod = registry.get_city("moco")
+    report = _minimal_report(
+        "licensed_with_violations",
+        city="moco",
+        registered=True,
+        registrations=[{"status": "Active", "address": "1 Main"}],
+        violation_cases={"total": 2, "openish_count": 1, "recent": []},
+    )
+    out = publish.prepare_city_report(report, spec=mod.SPEC, address_fallback="1 Main")
+    assert out["verdict"] == VERDICT_VIOLATIONS_OPEN
+    assert out["open_violations_count"] == 1
+
+
+def test_best_registration_skips_inactive_before_active() -> None:
+    report = _minimal_report(
+        "registered_active",
+        registered=True,
+        registrations=[
+            {
+                "status": "Inactive Registration",
+                "expiration_date": "2020-01-01",
+                "address": "1531 BELMONT AVE",
+            },
+            {
+                "status": "Active Registration",
+                "expiration_date": "2027-04-21",
+                "address": "1531 BELMONT AVE",
+            },
+        ],
+    )
+    dates = decision.key_dates(report)
+    assert dates["expires"] == "2027-04-21"
+
+
+def test_nyc_and_orlando_registration_date_fields() -> None:
+    nyc = {
+        "registrations": [
+            {
+                "last_registration_date": "2024-06-01",
+                "registration_end_date": "2026-06-01",
+            }
+        ]
+    }
+    assert decision.key_dates(nyc)["issued"] == "2024-06-01"
+    assert decision.key_dates(nyc)["expires"] == "2026-06-01"
+    orl = {
+        "registrations": [
+            {
+                "issued_date": "2023-01-15",
+                "expire_date": "2025-01-15",
+                "status": "active",
+            }
+        ]
+    }
+    assert decision.key_dates(orl)["issued"] == "2023-01-15"
+    assert decision.key_dates(orl)["expires"] == "2025-01-15"
+
+
+def test_chi_enforcement_only_never_not_licensed_with_registered_false() -> None:
+    mod = registry.get_city("chi")
+    out = publish.prepare_city_report(
+        _minimal_report(
+            "no_violations_found",
+            city="chi",
+            registered=False,
+            violation_cases={"total": 0, "recent": []},
+        ),
+        spec=mod.SPEC,
+        address_fallback="121 N LaSalle St",
+    )
+    assert out["verdict"] == VERDICT_NO_VIOLATIONS_FOUND
+    assert out["verdict"] != VERDICT_NOT_LICENSED
+    assert out["product_mode"] == "violations_only"
+
+
 def test_sample_route_includes_decision_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
