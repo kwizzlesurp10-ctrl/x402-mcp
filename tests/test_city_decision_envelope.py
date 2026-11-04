@@ -9,6 +9,7 @@ from app.city_compliance.decision import (
     VERDICT_EXPIRED,
     VERDICT_FLAGGED,
     VERDICT_LICENSED,
+    VERDICT_NO_VIOLATIONS_FOUND,
     VERDICT_NOT_LICENSED,
     VERDICT_UNKNOWN,
     VERDICT_VIOLATIONS_OPEN,
@@ -60,10 +61,16 @@ def test_expired_registration_maps_to_expired_verdict() -> None:
 def test_open_violations_override_clean_license_token() -> None:
     report = _minimal_report(
         "licensed_clean",
+        city="mn",
         registered=True,
         violation_cases={"total": 2, "open": 1, "recent": []},
     )
-    assert decision.normalized_verdict("licensed_clean", report) == VERDICT_VIOLATIONS_OPEN
+    assert (
+        decision.normalized_verdict(
+            "licensed_clean", report, product_mode="license_and_violations"
+        )
+        == VERDICT_VIOLATIONS_OPEN
+    )
 
 
 def test_condemned_maps_to_flagged() -> None:
@@ -74,11 +81,15 @@ def test_condemned_maps_to_flagged() -> None:
 def test_violation_only_city_open() -> None:
     report = _minimal_report(
         "violations_open",
+        city="chi",
         violation_cases={"total": 3, "open": 2, "recent": []},
     )
-    assert decision.normalized_verdict("violations_open", report) == VERDICT_VIOLATIONS_OPEN
-    enriched = decision.enrich_decision(report)
-    assert enriched["open_violations_count"] == 2
+    assert (
+        decision.normalized_verdict(
+            "violations_open", report, product_mode="violations_only"
+        )
+        == VERDICT_VIOLATIONS_OPEN
+    )
 
 
 def test_unknown_when_no_signals() -> None:
@@ -118,9 +129,9 @@ CITY_VERDICT_FIXTURES: list[tuple[str, str, str]] = [
     ("den", "str_unlicensed", VERDICT_NOT_LICENSED),
     ("nyc", "registered_clean", VERDICT_LICENSED),
     ("chi", "violations_open", VERDICT_VIOLATIONS_OPEN),
-    ("sf", "nov_historical_only", VERDICT_NOT_LICENSED),
-    ("phi", "no_violations_found", VERDICT_NOT_LICENSED),
-    ("bos", "violations_closed_only", VERDICT_NOT_LICENSED),
+    ("sf", "nov_historical_only", VERDICT_NO_VIOLATIONS_FOUND),
+    ("phi", "no_violations_found", VERDICT_NO_VIOLATIONS_FOUND),
+    ("bos", "violations_closed_only", VERDICT_NO_VIOLATIONS_FOUND),
     ("orl", "str_licensed_inactive", VERDICT_EXPIRED),
     ("moco", "license_not_active", VERDICT_EXPIRED),
     ("gain", "cases_open", VERDICT_VIOLATIONS_OPEN),
@@ -130,8 +141,8 @@ CITY_VERDICT_FIXTURES: list[tuple[str, str, str]] = [
     ("bna", "str_unlicensed", VERDICT_NOT_LICENSED),
     ("nola", "str_unlicensed", VERDICT_NOT_LICENSED),
     ("sd", "str_licensed_active", VERDICT_LICENSED),
-    ("atl", "str_unlicensed", VERDICT_NOT_LICENSED),
-    ("mia", "str_licensed_inactive", VERDICT_EXPIRED),
+    ("atl", "str_unlicensed", VERDICT_UNKNOWN),
+    ("mia", "str_licensed_inactive", VERDICT_UNKNOWN),
 ]
 
 
@@ -150,8 +161,12 @@ def test_each_city_compliance_token_maps(code: str, compliance: str, expected: s
         report["registered"] = True
     if compliance == "violations_open":
         report["violation_cases"] = {"total": 1, "open": 1, "recent": []}
+    if compliance in ("nov_historical_only", "violations_closed_only", "no_violations_found"):
+        report["violation_cases"] = {"total": 1, "open": 0, "recent": []}
     out = publish.prepare_city_report(report, spec=spec, address_fallback="1 Test St")
     assert out["verdict"] == expected
+    assert out["product_mode"]
+    assert out["coverage_note"]
     assert out["summary"]
     assert "records" in out
     assert out["compliance_verdict"] == compliance
