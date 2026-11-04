@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="FL",
     service_name="Gainesville Code Cases",
     tags=("gainesville", "code", "violations", "housing", "property"),
-    description=(
-        "Does this Gainesville, Florida address have open code enforcement "
-        "cases? Query a street address and get case numbers, types, status, "
-        "and parcel from city open data. For landlord diligence and agent "
-        "workflows. Input: address string. Output: JSON, live City of "
-        "Gainesville open data."
-    ),
+    description=outcome_copy.paid_route_description(code="gain", name="Gainesville"),
     sample_address="0 W 1ST ST",
     sample_note=(
         "Free fixed-address sample of Gainesville code cases. "

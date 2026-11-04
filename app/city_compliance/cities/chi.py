@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -18,14 +19,7 @@ SPEC = CitySpec(
     state="IL",
     service_name="Chicago Building Violations",
     tags=("chicago", "building", "violations", "housing", "diligence"),
-    description=(
-        "Chicago building violations address check: open DOB code cases for a "
-        "street address. Property due diligence agent for Chicago Illinois "
-        "housing compliance open data. GET ?address= → recent building "
-        "violations with codes, status, inspector comments (JSON). Tenant "
-        "screening, landlord diligence, lending. Note: citywide rental-license "
-        "registry is not a single open feed."
-    ),
+    description=outcome_copy.paid_route_description(code="chi", name="Chicago"),
     sample_address="7840 S WESTERN AVE",
     sample_note=(
         "Free fixed-address sample of Chicago building violations. "

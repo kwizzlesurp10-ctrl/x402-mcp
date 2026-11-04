@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec
 
 SPEC = CitySpec(
@@ -18,14 +19,7 @@ SPEC = CitySpec(
     state="MN",
     service_name="MN Rental License Check",
     tags=("minneapolis", "rental-license", "compliance", "housing", "diligence"),
-    description=(
-        "Minneapolis rental license check: is this property licensed? Property "
-        "due diligence agent path for Minneapolis Minnesota (Hennepin) housing "
-        "compliance open data. GET ?address= → rental license status/tier/units/"
-        "expiration, violation history, condemned/boarded, compliance_verdict. "
-        "Tenant screening, landlord DD, lending. Live City JSON. US network alias "
-        "of /mn/property-check."
-    ),
+    description=outcome_copy.paid_route_description(code="mn", name="Minneapolis"),
     sample_address="1700 Penn Ave N",
     sample_note=(
         "Free fixed-address sample of the live Minneapolis ArcGIS join "

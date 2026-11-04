@@ -7,6 +7,7 @@ import urllib.parse
 from typing import Any
 import httpx
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 
 # Placeholder URL for Miami Certificate of Use as an explicit open data layer wasn't easily found
@@ -20,12 +21,7 @@ SPEC = CitySpec(
     state="FL",
     service_name="Miami STR/Certificate of Use Check",
     tags=("miami", "str", "rental-license", "certificate-of-use", "housing", "diligence"),
-    description=(
-        "Miami short term rental / Certificate of Use check (placeholder): is this property licensed for "
-        "STR? Property due diligence agent for Miami Florida housing "
-        "compliance open data via ArcGIS MapServer. GET ?address= → short-term rental license, "
-        "status."
-    ),
+    description=outcome_copy.paid_route_description(code="mia", name="Miami"),
     sample_address="123 OCEAN DR",
     sample_note=(
         "Free fixed-address sample of Miami short-term rental licenses. "

@@ -61,7 +61,7 @@ INSTRUCTIONS = (
     "swarm.* composite research resale, pulse.base settlement timing, "
     "ops.metrics host health, city.* US open-data property compliance. "
     "Buyer path: x402.discover → x402.probe → x402.pay_and_fetch. "
-    "City path: city.list → city.sample → city.check. "
+    "City path: city.list → city.sample → city.check (verdict + source link, $0.01). "
     "Pro quota: commerce.activate_pro (MCP x402/payment) or commerce.pro_requirements → pay → activate. "
     "Credits: commerce.credits_requirements → pay → commerce.purchase_credits. "
     "Public seller hosts have no spend key — probe tools still work; "
@@ -894,8 +894,9 @@ async def get_os_metrics(
     name="city.list",
     title="List US compliance cities",
     description=(
-        "List US City Open-Data Compliance Network cities with paid_url, sample_url, and price. "
-        "Call first, then city.sample, then city.check for the paid address lookup."
+        "List US cities with paid_url and free sample_url for property compliance. "
+        "Start here — each paid lookup is $0.01 USDC and returns a normalized "
+        "verdict plus source link, not raw portal JSON. Then city.sample, then city.check."
     ),
     annotations=READONLY,
 )
@@ -918,8 +919,8 @@ async def list_us_cities(
     name="city.sample",
     title="US city property sample",
     description=(
-        "Get a free fixed-address property compliance sample for one US city code. "
-        "Use before city.check to validate city_code and response shape without paying."
+        "Free fixed-address preview of paid property-check JSON (verdict, summary, schema). "
+        "Use before city.check to validate parsing without spending $0.01 USDC."
     ),
     annotations=READONLY_EXTERNAL,
 )
@@ -950,10 +951,10 @@ async def get_us_city_property_sample(
     name="city.check",
     title="Paid US city property check",
     description=(
-        "Paid US city property compliance check (MCP seller x402). "
-        "Unpaid calls return PaymentRequired with accepts; pay via _meta['x402/payment']. "
-        "Prefer city.sample first. "
-        "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
+        "Is this US address licensed / flagged / showing open violations? "
+        "One city.check ($0.01 USDC, x402 on Base) returns verdict, summary, "
+        "dates, and source_url. Unpaid → PaymentRequired; pay via _meta['x402/payment']. "
+        "Prefer city.sample first."
     ),
     annotations=WRITE_PAYMENT,
     structured_output=False,

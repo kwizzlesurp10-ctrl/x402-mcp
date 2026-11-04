@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from app.city_compliance.ckan import datastore_search, resource_page
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 
 PORTAL = "https://data.boston.gov"
@@ -19,13 +20,7 @@ SPEC = CitySpec(
     state="MA",
     service_name="Boston Property Violations",
     tags=("boston", "violations", "housing", "property", "code"),
-    description=(
-        "Does this Boston address have building and property code violations? "
-        "Query street number + street name and get case numbers, codes, "
-        "status, and descriptions from Analyze Boston. For tenant screening "
-        "and landlord diligence. Input: address string. Output: JSON, live "
-        "City of Boston open data."
-    ),
+    description=outcome_copy.paid_route_description(code="bos", name="Boston"),
     sample_address="302 Sumner ST East Boston",
     sample_note=(
         "Free fixed-address sample of Boston building/property violations. "

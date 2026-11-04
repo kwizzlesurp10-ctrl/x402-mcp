@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import escape_soda, soda_get, source_url
 
@@ -18,13 +19,7 @@ SPEC = CitySpec(
     state="CA",
     service_name="LA Code Enforcement Open",
     tags=("losangeles", "code", "violations", "housing", "property"),
-    description=(
-        "Does this Los Angeles address have open Building & Safety code "
-        "enforcement cases? Query street number + street name and get open "
-        "case numbers, type, district, and parcel id. For tenant screening "
-        "and landlord diligence. Input: address string. Output: JSON, live "
-        "LA Open Data."
-    ),
+    description=outcome_copy.paid_route_description(code="lax", name="Los Angeles"),
     sample_address="1015 S LA BREA AVE",
     sample_note=(
         "Free fixed-address sample of open LA Building & Safety code cases. "

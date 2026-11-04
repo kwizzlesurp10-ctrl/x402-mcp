@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 
 SPEC = CitySpec(
@@ -13,11 +14,7 @@ SPEC = CitySpec(
     state="GA",
     service_name="Atlanta STR License Check",
     tags=("atlanta", "str", "rental-license", "housing", "diligence"),
-    description=(
-        "Atlanta short term rental license check (placeholder). The city of Atlanta "
-        "does not currently publish a stable open data feed for STR licenses. "
-        "This endpoint acts as a stub for future integration."
-    ),
+    description=outcome_copy.paid_route_description(code="atl", name="Atlanta"),
     sample_address="123 Peachtree St",
     sample_note=(
         "Free fixed-address sample for Atlanta. Returns no data as the city "
