@@ -94,9 +94,14 @@ def open_violation_count(report: dict[str, Any]) -> int | None:
     viol = report.get("violation_cases") or {}
     if not isinstance(viol, dict):
         return None
-    if "open" in viol and viol.get("open") is not None:
+    for key in ("open", "open_count", "openish_count", "active_count"):
+        if key not in viol:
+            continue
+        val = viol.get(key)
+        if val is None:
+            continue
         try:
-            return int(viol["open"])
+            return int(val)
         except (TypeError, ValueError):
             return None
     recent = viol.get("recent")
@@ -201,14 +206,25 @@ def normalized_verdict(
     return VERDICT_UNKNOWN
 
 
+def _registration_status_is_active(status: str) -> bool:
+    text = (status or "").lower().strip()
+    if not text:
+        return False
+    if "inactive" in text or "expired" in text or "not active" in text:
+        return False
+    if text.startswith("registered") and "unregistered" not in text:
+        return True
+    return "active" in text
+
+
 def _best_registration(registrations: list[Any]) -> dict[str, Any] | None:
     if not registrations:
         return None
     for row in registrations:
-        if isinstance(row, dict):
-            status = (row.get("status") or "").lower()
-            if "active" in status or status.startswith("registered"):
-                return row
+        if isinstance(row, dict) and _registration_status_is_active(
+            str(row.get("status") or "")
+        ):
+            return row
     first = registrations[0]
     return first if isinstance(first, dict) else None
 
@@ -224,6 +240,9 @@ def key_dates(report: dict[str, Any]) -> dict[str, str | None]:
             "issue_date",
             "registered_date",
             "license_issue_date",
+            "license_date",
+            "issued_date",
+            "last_registration_date",
             "start_date",
         ),
         "expires": _pick_date(
@@ -232,6 +251,9 @@ def key_dates(report: dict[str, Any]) -> dict[str, str | None]:
             "expires_date",
             "expiry_date",
             "license_expiration_date",
+            "registration_end_date",
+            "expire_date",
+            "next_renew_date",
         ),
     }
 
