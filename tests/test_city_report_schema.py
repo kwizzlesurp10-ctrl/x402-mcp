@@ -73,6 +73,8 @@ def test_discovery_example_matches_canonical_shape(code: str) -> None:
     for key in CANONICAL_REPORT_KEYS:
         assert key in example, f"{code} discovery example missing {key}"
     assert example.get("verdict")
+    assert example.get("product_mode")
+    assert example.get("coverage_note")
 
 
 def test_json_schema_document_lists_required_keys() -> None:
