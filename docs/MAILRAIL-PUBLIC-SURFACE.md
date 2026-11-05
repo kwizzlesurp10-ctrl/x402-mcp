@@ -22,9 +22,10 @@ That is open-relay + inbox disclosure on a public seller host. **Do not expose t
 | `GET /mailrail/ledger` / `inbox` / `stats` | No | Same postmaster gate |
 | `GET /agent/mailrail` | Card only (`public: false`) | No token. No message bodies. |
 | `GET /mailrail/health` | Yes, readiness only | `enabled` and `provider`. No admin recipient, from-address, or key flags. |
+| `POST /mailrail/webhooks/agentmail` | Yes (AgentMail only) | Svix signature via `MAILRAIL_AGENTMAIL_WEBHOOK_SECRET`. Ingests `message.received` into the same inbound ledger as operator POST. |
 | Internal `mailrail.send_agent_mail` from settlement code | Yes (server-side) | Not an HTTP/MCP public tool |
 
-The seller sets `MAILRAIL_ENABLED=true` and `MAILRAIL_PROVIDER=mock`. Mock records mail and does not call Resend or a webhook. Do not put `MAILRAIL_API_KEY`, `MAILRAIL_WEBHOOK_URL`, or `GITHUB_TOKEN` in `render.yaml`.
+Production uses `MAILRAIL_PROVIDER=agentmail` with `MAILRAIL_FROM_ADDRESS` set to the AgentMail inbox address. Do not commit `MAILRAIL_API_KEY`, `MAILRAIL_AGENTMAIL_WEBHOOK_SECRET`, `MAILRAIL_WEBHOOK_URL`, or `GITHUB_TOKEN` in `render.yaml`.
 
 Public Streamable HTTP catalog (https://x402-mcp.onrender.com/mcp) is x402 / commerce / swarm / pulse / ops / city only.
 

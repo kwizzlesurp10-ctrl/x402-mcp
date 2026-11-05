@@ -14,6 +14,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from app.config import settings
 
@@ -54,6 +55,48 @@ def _record_inbound_ledger(record: dict[str, Any]) -> None:
             f.write(json.dumps(record) + "\n")
     except Exception as e:
         log.warning("Failed to write to mailrail inbox ledger: %s", e)
+
+
+def _dispatch_agentmail(to: str, subject: str, body: str) -> bool:
+    """Dispatch via AgentMail send API."""
+    from app.mailrail_agentmail import AGENTMAIL_SEND_API, resolve_inbox_id
+
+    api_key = settings.mailrail_api_key
+    if not api_key:
+        log.warning("AgentMail requested but MAILRAIL_API_KEY is not set.")
+        return False
+    inbox_id = resolve_inbox_id()
+    if not inbox_id:
+        log.warning("AgentMail requested but inbox id / from address is empty.")
+        return False
+    try:
+        import httpx
+
+        url = AGENTMAIL_SEND_API.format(inbox_id=quote(inbox_id, safe=""))
+        res = httpx.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "to": to,
+                "subject": subject,
+                "text": body,
+            },
+            timeout=15.0,
+        )
+        if res.status_code not in (200, 201):
+            log.warning(
+                "AgentMail dispatch failed: status=%s body=%s",
+                res.status_code,
+                res.text[:500],
+            )
+            return False
+        return True
+    except Exception as e:
+        log.warning("AgentMail dispatch failed: %s", e)
+        return False
 
 
 def _dispatch_resend(to: str, subject: str, body: str) -> bool:
@@ -140,6 +183,8 @@ def send_agent_mail(
     if settings.mailrail_enabled:
         if provider == "resend":
             live_success = _dispatch_resend(recipient, clean_subject, clean_body)
+        elif provider == "agentmail":
+            live_success = _dispatch_agentmail(recipient, clean_subject, clean_body)
         elif provider == "webhook":
             live_success = _dispatch_webhook(recipient, clean_subject, clean_body)
 
@@ -308,6 +353,9 @@ def get_mailrail_stats() -> dict[str, Any]:
         "dedup_keys_cached": len(_SEEN_KEYS),
         "channels": {
             "resend_active": bool(settings.mailrail_api_key),
+            "agentmail_active": bool(settings.mailrail_api_key)
+            and (settings.mailrail_provider or "").lower() == "agentmail",
+            "agentmail_webhook_active": bool(settings.mailrail_agentmail_webhook_secret),
             "webhook_active": bool(settings.mailrail_webhook_url),
             "smtp_active": bool(settings.mailrail_smtp_url),
         },

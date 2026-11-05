@@ -25,13 +25,23 @@ services:
         sync: false
       - key: OPERATOR_TOKEN
         sync: false           # operator auth: /stats agent list, /quota, /events ids, /pulse/publish, /swarm/run, MailRail
-      # MailRail is enabled and stays on the mock provider. That records mail
-      # and does not call Resend or a webhook. Do not set MAILRAIL_API_KEY,
-      # MAILRAIL_WEBHOOK_URL, or GITHUB_TOKEN in this file.
+      # MailRail uses AgentMail for live send + Svix-signed inbound webhooks.
+      # Set MAILRAIL_API_KEY and MAILRAIL_AGENTMAIL_WEBHOOK_SECRET in the
+      # Render dashboard only (sync: false). Register webhook URL
+      # https://x402-mcp.onrender.com/mailrail/webhooks/agentmail for
+      # message.received on the inbox.
       - key: MAILRAIL_ENABLED
         value: "true"
       - key: MAILRAIL_PROVIDER
-        value: "mock"
+        value: "agentmail"
+      - key: MAILRAIL_FROM_ADDRESS
+        value: "x402-mcp@agentmail.to"
+      - key: MAILRAIL_ADMIN_RECIPIENT
+        value: "kwizzlesurp10@gmail.com"
+      - key: MAILRAIL_API_KEY
+        sync: false
+      - key: MAILRAIL_AGENTMAIL_WEBHOOK_SECRET
+        sync: false
       - key: REDIS_URL
         sync: false           # REQUIRED here: this box has no persistent disk, so
                               # without Redis the spend/revenue ledgers and paid

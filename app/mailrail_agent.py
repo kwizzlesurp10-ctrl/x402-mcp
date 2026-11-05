@@ -70,6 +70,7 @@ def agent_card() -> dict[str, Any]:
             "health": f"{base}/mailrail/health",
             "card": f"{base}/agent/mailrail",
             "inbound": f"{base}/mailrail/inbound",
+            "agentmail_webhook": f"{base}/mailrail/webhooks/agentmail",
             "inbox": f"{base}/mailrail/inbox",
             "ledger": f"{base}/mailrail/ledger",
             "stats": f"{base}/mailrail/stats",
