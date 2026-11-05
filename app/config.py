@@ -255,6 +255,9 @@ class Settings(BaseSettings):
     mailrail_admin_recipient: str | None = None
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
+    # Svix signing secret for POST /mailrail/webhooks/agentmail (whsec_...).
+    # Dashboard-only. Never commit the value.
+    mailrail_agentmail_webhook_secret: str | None = None
     # Extra postmaster ids, comma-separated. x402-mailrail-postmaster is always allowed.
     # GITHUB_TOKEN and GITHUB_REPO are host secrets for operator notify. Leave them
     # unset and MailRail does not open GitHub issues. Do not commit them.

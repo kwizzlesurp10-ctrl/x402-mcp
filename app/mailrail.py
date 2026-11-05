@@ -6,14 +6,17 @@ and background watchers to send alerts, customer receipts, and inter-agent messa
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from app.config import settings
 
@@ -22,6 +25,8 @@ log = logging.getLogger("x402.mailrail")
 MAILRAIL_LEDGER_FILE = Path("ledger/mailrail.jsonl")
 MAILRAIL_INBOX_FILE = Path("ledger/mailrail_inbox.jsonl")
 _SEEN_KEYS: set[str] = set()
+_AGENTMAIL_TOLERANCE_SECONDS = 5 * 60
+_AGENTMAIL_MAX_BODY_BYTES = 1_000_000
 _MENTION_RE = re.compile(r"(?<![\w.-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)")
 
 
@@ -256,6 +261,153 @@ def process_inbound_mail(
     except Exception as exc:  # noqa: BLE001
         log.warning("operator notify after inbound failed: %s", exc)
     return result
+
+
+class AgentMailWebhookError(Exception):
+    """Verified-webhook failure. ``code`` is safe to return to the caller."""
+
+    def __init__(self, status_code: int, code: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        super().__init__(code)
+
+
+def agentmail_webhook_status() -> dict[str, Any]:
+    """Public probe. Says the route exists and whether a signing secret is set."""
+    secret = (settings.mailrail_agentmail_webhook_secret or "").strip()
+    return {
+        "ok": True,
+        "accepts": "POST",
+        "secret_configured": secret.startswith("whsec_") and len(secret) > len("whsec_"),
+    }
+
+
+def _agentmail_secret_bytes() -> bytes:
+    secret = (settings.mailrail_agentmail_webhook_secret or "").strip()
+    if not secret.startswith("whsec_"):
+        raise AgentMailWebhookError(503, "agentmail_webhook_unconfigured")
+    try:
+        key = base64.b64decode(secret[len("whsec_") :], validate=True)
+    except Exception as exc:
+        raise AgentMailWebhookError(503, "agentmail_webhook_unconfigured") from exc
+    if not key:
+        raise AgentMailWebhookError(503, "agentmail_webhook_unconfigured")
+    return key
+
+
+def _header(headers: Mapping[str, str], *names: str) -> str:
+    for name in names:
+        value = headers.get(name)
+        if value:
+            return value.strip()
+    return ""
+
+
+def _agentmail_signature_ok(key: bytes, signed: bytes, signature_header: str) -> bool:
+    mac = hmac.new(key, signed, hashlib.sha256).digest()
+    expected = base64.b64encode(mac).decode("ascii")
+    for part in signature_header.split():
+        version, sep, sig = part.partition(",")
+        if sep != "," or version != "v1" or len(sig) != len(expected):
+            continue
+        if hmac.compare_digest(sig, expected):
+            return True
+    return False
+
+
+def verify_agentmail_webhook(
+    body: bytes,
+    headers: Mapping[str, str],
+    *,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Verify a Svix-signed AgentMail delivery and return the JSON object.
+
+    Fail closed when the secret is missing or not a ``whsec_`` key.
+    """
+    if len(body) > _AGENTMAIL_MAX_BODY_BYTES:
+        raise AgentMailWebhookError(413, "payload_too_large")
+    key = _agentmail_secret_bytes()
+    msg_id = _header(headers, "svix-id", "webhook-id")
+    timestamp = _header(headers, "svix-timestamp", "webhook-timestamp")
+    signature = _header(headers, "svix-signature", "webhook-signature")
+    if not msg_id or not timestamp or not signature:
+        raise AgentMailWebhookError(401, "invalid_signature")
+    try:
+        sent_at = int(timestamp)
+    except ValueError as exc:
+        raise AgentMailWebhookError(401, "invalid_signature") from exc
+    current = time.time() if now is None else now
+    if abs(current - sent_at) > _AGENTMAIL_TOLERANCE_SECONDS:
+        raise AgentMailWebhookError(401, "invalid_signature")
+    signed = f"{msg_id}.{timestamp}.".encode("utf-8") + body
+    if not _agentmail_signature_ok(key, signed, signature):
+        raise AgentMailWebhookError(401, "invalid_signature")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AgentMailWebhookError(400, "invalid_payload") from exc
+    if not isinstance(payload, dict):
+        raise AgentMailWebhookError(400, "invalid_payload")
+    return payload
+
+
+def _agentmail_address(value: Any) -> str:
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    text = str(value or "").strip()
+    return text or "unknown@agentmail.to"
+
+
+def ingest_agentmail_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Record ``message.received``. Other event types are acknowledged and ignored."""
+    event_type = str(event.get("event_type") or "")
+    event_id = str(event.get("event_id") or "")
+    if event_type != "message.received":
+        return {"ok": True, "status": "ignored", "event_type": event_type, "event_id": event_id}
+
+    message = event.get("message")
+    if not isinstance(message, dict):
+        raise AgentMailWebhookError(400, "invalid_payload")
+
+    dedup = event_id or str(message.get("message_id") or "")
+    dedup_key = f"agentmail:{dedup}" if dedup else ""
+    if dedup_key and dedup_key in _SEEN_KEYS:
+        return {"ok": True, "status": "duplicate", "event_id": event_id}
+
+    text = message.get("text") or message.get("extracted_text") or message.get("preview") or ""
+    if not isinstance(text, str):
+        text = str(text)
+    subject = message.get("subject") or "(no subject)"
+    if not isinstance(subject, str):
+        subject = str(subject)
+    received = process_inbound_mail(
+        sender=_agentmail_address(message.get("from_") or message.get("from")),
+        subject=subject,
+        body=text,
+        metadata={
+            "source": "agentmail",
+            "event_id": event_id,
+            "event_type": event_type,
+            "inbox_id": message.get("inbox_id"),
+            "message_id": message.get("message_id"),
+            "to": message.get("to"),
+            "body_omitted": bool(message.get("body_url")) and not message.get("text"),
+        },
+    )
+    if dedup_key:
+        _SEEN_KEYS.add(dedup_key)
+    return {
+        "ok": True,
+        "status": "received",
+        "event_id": event_id,
+        "inbound_id": received.get("inbound_id"),
+    }
+
+
+def handle_agentmail_webhook(body: bytes, headers: Mapping[str, str]) -> dict[str, Any]:
+    """Verify one AgentMail delivery and ingest it when it is inbound mail."""
+    return ingest_agentmail_event(verify_agentmail_webhook(body, headers))
 
 
 def get_inbox_messages(limit: int = 50) -> list[dict[str, Any]]:

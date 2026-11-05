@@ -73,7 +73,9 @@ def agent_card() -> dict[str, Any]:
             "inbox": f"{base}/mailrail/inbox",
             "ledger": f"{base}/mailrail/ledger",
             "stats": f"{base}/mailrail/stats",
+            "agentmail_webhook": f"{base}/mailrail/webhooks/agentmail",
         },
+        "agentmail_webhook_auth": "Svix svix-id, svix-timestamp, svix-signature",
     }
 
 

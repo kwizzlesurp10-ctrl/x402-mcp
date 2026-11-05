@@ -941,6 +941,25 @@ async def mailrail_stats(request: Request) -> dict:
     return get_mailrail_stats()
 
 
+@app.get("/mailrail/webhooks/agentmail")
+async def mailrail_agentmail_webhook_status() -> dict:
+    """Public probe so the AgentMail URL is mounted. No secret and no mail."""
+    from app.mailrail import agentmail_webhook_status
+
+    return agentmail_webhook_status()
+
+
+@app.post("/mailrail/webhooks/agentmail")
+async def mailrail_agentmail_webhook(request: Request) -> dict:
+    """AgentMail ``message.received`` receiver. Svix signature, not operator bearer."""
+    from app.mailrail import AgentMailWebhookError, handle_agentmail_webhook
+
+    body = await request.body()
+    try:
+        return handle_agentmail_webhook(body, request.headers)
+    except AgentMailWebhookError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"error": exc.code}) from exc
+
 
 @app.get("/analytics-dashboard", include_in_schema=False, response_class=HTMLResponse)
 async def analytics_dashboard() -> HTMLResponse:

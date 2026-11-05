@@ -28,6 +28,9 @@ services:
       # MailRail is enabled and stays on the mock provider. That records mail
       # and does not call Resend or a webhook. Do not set MAILRAIL_API_KEY,
       # MAILRAIL_WEBHOOK_URL, or GITHUB_TOKEN in this file.
+      # AgentMail inbound signing secret is dashboard-only (already set).
+      - key: MAILRAIL_AGENTMAIL_WEBHOOK_SECRET
+        sync: false
       - key: MAILRAIL_ENABLED
         value: "true"
       - key: MAILRAIL_PROVIDER
