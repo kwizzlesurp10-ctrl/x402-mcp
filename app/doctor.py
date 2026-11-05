@@ -429,6 +429,15 @@ def run_checks() -> dict[str, Any]:
                 checks.append(_check("mailrail", "MailRail provider", "pass", f"Webhook active (URL: {settings.mailrail_webhook_url[:30]}...)"))
             else:
                 checks.append(_check("mailrail", "MailRail provider", "fail", "Webhook selected but MAILRAIL_WEBHOOK_URL missing or invalid", "Set MAILRAIL_WEBHOOK_URL=https://..."))
+        elif provider == "agentmail":
+            if settings.mailrail_api_key and settings.mailrail_from_address and "@" in settings.mailrail_from_address:
+                detail = f"AgentMail active (inbox: {settings.mailrail_inbox_id or settings.mailrail_from_address})"
+                if not settings.mailrail_agentmail_webhook_secret:
+                    checks.append(_check("mailrail", "MailRail provider", "warn", detail + " — inbound webhook secret not set", "Set MAILRAIL_AGENTMAIL_WEBHOOK_SECRET=whsec_..."))
+                else:
+                    checks.append(_check("mailrail", "MailRail provider", "pass", detail))
+            else:
+                checks.append(_check("mailrail", "MailRail provider", "fail", "AgentMail selected but MAILRAIL_API_KEY or FROM address missing", "Set MAILRAIL_API_KEY and MAILRAIL_FROM_ADDRESS"))
         elif provider == "smtp":
             if settings.mailrail_smtp_url and settings.mailrail_smtp_url.startswith(("smtp://", "smtps://")):
                 checks.append(_check("mailrail", "MailRail provider", "pass", f"SMTP active (from: {settings.mailrail_from_address})"))

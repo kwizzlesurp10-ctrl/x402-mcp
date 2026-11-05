@@ -922,6 +922,45 @@ async def mailrail_inbound(request: Request, payload: models.InboundMailInput) -
     return received
 
 
+@app.post("/mailrail/webhooks/agentmail")
+async def mailrail_agentmail_webhook(request: Request) -> dict:
+    """Ingest AgentMail message.received events (Svix-signed). Public URL; secret required."""
+    from app.mailrail import process_inbound_mail
+    from app.mailrail_agentmail import (
+        AgentMailWebhookConfigError,
+        AgentMailWebhookVerificationError,
+        MESSAGE_RECEIVED,
+        parse_message_received,
+        verify_agentmail_webhook,
+    )
+
+    body = await request.body()
+    try:
+        payload = verify_agentmail_webhook(body, request.headers)
+    except AgentMailWebhookConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AgentMailWebhookVerificationError as exc:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature") from exc
+
+    event_type = payload.get("event_type")
+    if event_type != MESSAGE_RECEIVED:
+        return {"status": "ignored", "event_type": event_type}
+
+    parsed = parse_message_received(payload)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail="Malformed message.received payload")
+
+    sender, subject, text_body, metadata = parsed
+    received = process_inbound_mail(
+        sender=sender,
+        subject=subject,
+        body=text_body,
+        metadata=metadata,
+    )
+    received["source"] = "agentmail_webhook"
+    return received
+
+
 @app.get("/mailrail/inbox")
 async def mailrail_inbox(request: Request, limit: int = 50) -> dict:
     """Read recent MailRail inbound messages (newest first). Operator-only."""

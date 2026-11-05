@@ -128,3 +128,12 @@ def test_doctor_mailrail_checks(monkeypatch) -> None:
     mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
     assert mail_check["status"] == "fail"
 
+    # AgentMail with key + webhook secret
+    monkeypatch.setattr(settings, "mailrail_provider", "agentmail")
+    monkeypatch.setattr(settings, "mailrail_api_key", "am_test")
+    monkeypatch.setattr(settings, "mailrail_from_address", "x402-mcp@agentmail.to")
+    monkeypatch.setattr(settings, "mailrail_agentmail_webhook_secret", "whsec_test")
+    report = run_checks()
+    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    assert mail_check["status"] == "pass"
+

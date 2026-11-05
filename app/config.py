@@ -249,10 +249,14 @@ class Settings(BaseSettings):
 
     # MailRail communication & alert dispatch rail
     mailrail_enabled: bool = False
-    mailrail_provider: str = "mock"  # "mock", "file", "smtp", "resend", "webhook"
+    mailrail_provider: str = "mock"  # "mock", "file", "smtp", "resend", "webhook", "agentmail"
     mailrail_api_key: str | None = None
     mailrail_from_address: str = "agents@x402.org"
     mailrail_admin_recipient: str | None = None
+    # AgentMail inbox id (defaults to MAILRAIL_FROM_ADDRESS when unset).
+    mailrail_inbox_id: str | None = None
+    # Svix signing secret from the AgentMail webhook (whsec_...).
+    mailrail_agentmail_webhook_secret: str | None = None
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
     # Extra postmaster ids, comma-separated. x402-mailrail-postmaster is always allowed.
