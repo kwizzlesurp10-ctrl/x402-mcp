@@ -1,12 +1,17 @@
 # PR #793 — policy-check coordination verification (agent run)
 
-**HEAD:** `78c8dcd` (branch tip after push). **Tests below** were run at **`66d6f41`** (coordination fix + artifact); later commits are documentation-only.
+**HEAD:** see immutable SHA on PR branch tip after multiprocess Redis artifact land.
+
+**Tests below** were run at **`66d6f41`** (coordination fix + artifact); later commits add docs and optional real-Redis multiprocess coverage.
+
+See also **`artifacts/pr793-redis-multiprocess-verification.md`** for opt-in `X402_REDIS_MP_TESTS=1` evidence against local `redis-server`.
 
 ## Python (repo root)
 
 ```bash
 python3 -m pytest -q --tb=line
-# 2026-11-06 agent run: exit 0 — 1068 passed, 23 skipped
+# default: multiprocess Redis tests skipped — 1069 passed, 27 skipped (2026-11-06)
+# opt-in: X402_REDIS_MP_TESTS=1 — 1073 passed, 23 skipped (requires redis-server)
 ```
 
 ## Frontend (dashboard)
