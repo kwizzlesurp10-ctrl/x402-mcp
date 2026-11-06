@@ -43,7 +43,24 @@ See `.env.example`. Critical:
 - `EVM_PRIVATE_KEY` — buyer wallet for `pay_and_fetch` (x402 alternate rail)
 - `X402_PAY_TO_ADDRESS` — seller recipient for x402 revenue tools (future/alternate)
 - `X402_FACILITATOR_URL` — testnet: `https://x402.org/facilitator`
-- `REDIS_URL` — optional; swap in Redis quota store when scaling. When set and reachable, **MCP commerce** (`commerce.activate_pro` / `commerce.purchase_credits`) also uses the same Redis for **cross-worker settlement dedup** (`mcp_settle:*` keys). No extra env.
+- `REDIS_URL` — optional; swap in Redis quota store when scaling. When set, **MCP commerce** (`commerce.activate_pro` / `commerce.purchase_credits`) uses the same Redis for **cross-worker settlement coordination** (`mcp_settle:*` keys: result cache, attempt state, token locks). No extra connection string beyond this env.
+- `MCP_COMMERCE_REDIS_STRICT` — default `true`. When `REDIS_URL` is set, MCP commerce **fails closed** (payment rejected, no on-chain retry in that request) if Redis is unreachable at session start, if lock acquisition hits a Redis I/O error, or if the client is nil after a failed ping. Set `false` only for intentional **single-process / dev** use where cross-worker duplicate settlement is acceptable; it is not silent degradation in production—document the tradeoff before toggling.
+
+### MCP commerce settlement guarantees (Redis + facilitator)
+
+| Guarantee | When |
+|-----------|------|
+| Same payment + same server-issued challenge → at most one successful settle recorded in Redis | `REDIS_URL` set, Redis healthy, `MCP_COMMERCE_REDIS_STRICT=true` |
+| Cached result cannot authorize a different challenge | Result blobs carry `challenge_fp`; reads require a match |
+| Lock safety | Random token; release uses compare-and-delete (wrong token does not delete) |
+| Contention | Loser waits (async poll); timeout → `settlement_contention_timeout`; ambiguous peer state → `settlement_ambiguous_manual_reconciliation` |
+| Verify/settle exception after success unclear | `ambiguous_settlement` attempt record; response `settlement_exception_ambiguous` (no automatic repeat settle in-process) |
+
+**Facilitator-dependent gaps:** If the facilitator accepts a settlement but the process crashes before Redis records success, or Redis is lost mid-flight after `settle_payment` returned, on-chain state may not match server idempotency—**manual reconciliation** (ledger / chain) remains the source of truth for “was USDC actually moved?”. This server does not auto-retry ambiguous outcomes.
+
+**Dev / no Redis:** With `REDIS_URL` unset, idempotency is **in-process only** (single worker); do not rely on it across replicas.
+
+**Dev / strict off:** `MCP_COMMERCE_REDIS_STRICT=false` with `REDIS_URL` set uses Redis when the client connects but does **not** fail closed on unreachable Redis; suitable only when you accept that multi-worker safety is not enforced.
 
 ### A2A JSON-RPC (`POST /a2a`)
 

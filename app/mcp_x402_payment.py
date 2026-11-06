@@ -32,7 +32,8 @@ logger = logging.getLogger("mcp_x402_payment")
 
 CommerceMcpTool = Literal["commerce.activate_pro", "commerce.purchase_credits"]
 
-# Idempotent settlement cache: payment fingerprint → verify+settle result dict.
+# In-process idempotency when REDIS_URL is unset (single-worker / dev only).
+# Key: composite (payload hash + challenge fingerprint).
 _settlement_cache: dict[str, dict[str, Any]] = {}
 
 
@@ -40,6 +41,16 @@ def clear_mcp_settlement_cache() -> None:
     """Test helper: reset in-memory settlement idempotency cache."""
     _settlement_cache.clear()
     mcp_settlement_store.clear_mcp_settlement_redis_test()
+
+
+def _challenge_fingerprint(header: str) -> str:
+    return mcp_settlement_store.challenge_fingerprint(header)
+
+
+def _strip_mcp_internal(result: dict[str, Any]) -> dict[str, Any]:
+    out = dict(result)
+    out.pop("_mcp_meta", None)
+    return out
 
 
 def extract_payment_from_context(ctx: Any) -> dict[str, Any] | None:
@@ -161,28 +172,61 @@ async def verify_and_settle_mcp_payload(
     except Exception as exc:  # noqa: BLE001
         return _invalid_payment_result(f"malformed_payment: {exc}")
 
-    cache_key = _idempotency_key(payload)
-    cached = _settlement_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    redis_cached = mcp_settlement_store.get_cached_settlement(cache_key)
-    if redis_cached is not None:
-        _settlement_cache[cache_key] = redis_cached
-        return redis_cached
+    payment_hash = _idempotency_key(payload)
+    challenge_fp = _challenge_fingerprint(challenge.payment_required_header)
+    composite = mcp_settlement_store.composite_cache_key(
+        payment_hash, challenge.payment_required_header
+    )
 
-    had_lock = mcp_settlement_store.acquire_settlement_lock(cache_key)
-    if not had_lock:
-        merged = mcp_settlement_store.wait_for_cached_settlement(cache_key)
-        if merged is not None:
-            _settlement_cache[cache_key] = merged
-            return merged
-        return _invalid_payment_result("settlement_contention_timeout")
+    wants_redis = mcp_settlement_store.redis_required_for_mcp_commerce()
+    use_redis = mcp_settlement_store.mcp_commerce_redis_ready()
+    if settings.mcp_commerce_redis_strict and wants_redis and not use_redis:
+        return _invalid_payment_result("redis_unavailable_mcp_commerce")
+
+    cached_local = _settlement_cache.get(composite)
+    if cached_local is not None:
+        return _strip_mcp_internal(cached_local)
+
+    if use_redis:
+        redis_first = mcp_settlement_store.get_cached_settlement(
+            composite, expected_challenge_fp=challenge_fp
+        )
+        if redis_first is not None:
+            _settlement_cache[composite] = redis_first
+            return _strip_mcp_internal(redis_first)
+
+    lock_token: str | None = None
+    if use_redis:
+        acquired, lock_token, lock_redis_error = (
+            mcp_settlement_store.acquire_settlement_lock(composite)
+        )
+        if lock_redis_error:
+            return _invalid_payment_result("redis_unavailable_mcp_commerce")
+        if not acquired:
+            merged = await mcp_settlement_store.wait_for_cached_settlement_async(
+                composite,
+                expected_challenge_fp=challenge_fp,
+            )
+            if merged is not None:
+                _settlement_cache[composite] = merged
+                return _strip_mcp_internal(merged)
+            att = mcp_settlement_store.get_attempt_state(composite)
+            if att and att.get("status") == "ambiguous_settlement":
+                return _invalid_payment_result("settlement_ambiguous_manual_reconciliation")
+            return _invalid_payment_result("settlement_contention_timeout")
 
     try:
-        again = mcp_settlement_store.get_cached_settlement(cache_key)
-        if again is not None:
-            _settlement_cache[cache_key] = again
-            return again
+        if use_redis:
+            again = mcp_settlement_store.get_cached_settlement(
+                composite, expected_challenge_fp=challenge_fp
+            )
+            if again is not None:
+                _settlement_cache[composite] = again
+                return _strip_mcp_internal(again)
+            mcp_settlement_store.set_attempt_state(
+                composite,
+                {"status": "in_progress", "challenge_fp": challenge_fp},
+            )
 
         accepts = _payment_requirements_models(challenge.payment_required_header)
         if not accepts:
@@ -199,8 +243,8 @@ async def verify_and_settle_mcp_payload(
         try:
             verify_result = await server.verify_payment(payload, matched)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("mcp payment verify failed: %s", exc)
-            return _invalid_payment_result(f"verify_failed: {exc}")
+            logger.warning("mcp payment verify failed: %s", type(exc).__name__, exc_info=False)
+            return _invalid_payment_result(f"verify_failed: {type(exc).__name__}")
 
         if not verify_result.is_valid:
             return {
@@ -215,37 +259,77 @@ async def verify_and_settle_mcp_payload(
             }
 
         settlement = None
-        settlement_error = None
+        settlement_error: str | None = None
         try:
             settle_result = await server.settle_payment(payload, matched)
             settlement = settle_result.model_dump(by_alias=True, exclude_none=True)
         except Exception as exc:  # noqa: BLE001
-            settlement_error = str(exc)
+            settlement_error = type(exc).__name__
+            logger.warning("mcp settle_payment raised (%s)", settlement_error, exc_info=False)
+            if use_redis:
+                mcp_settlement_store.set_attempt_state(
+                    composite,
+                    {
+                        "status": "ambiguous_settlement",
+                        "reason": "settle_exception",
+                        "challenge_fp": challenge_fp,
+                    },
+                )
+            return _invalid_payment_result("settlement_exception_ambiguous")
 
         settle_success = settlement is not None and settlement.get("success") is True
         tx_recorded = bool(
             (settlement or {}).get("transaction") or (settlement or {}).get("txHash")
         )
 
-        result = {
+        result: dict[str, Any] = {
             "is_valid": True,
             "invalid_reason": None,
             "settlement": settlement,
             "settlement_error": settlement_error,
-            "payment_settled": settle_success,
+            "payment_settled": settle_success and tx_recorded,
             "facilitator_url": None,
             "sdk": "x402ResourceServer.verify_payment + settle_payment",
         }
 
-        if settle_success:
-            _settlement_cache[cache_key] = result
-            if tx_recorded:
-                written = mcp_settlement_store.try_cache_settlement(cache_key, result)
+        if settle_success and tx_recorded:
+            if use_redis:
+                written = mcp_settlement_store.try_cache_settlement(
+                    composite, result, challenge_fp=challenge_fp
+                )
                 if not written:
-                    merged = mcp_settlement_store.wait_for_cached_settlement(cache_key)
+                    merged = await mcp_settlement_store.wait_for_cached_settlement_async(
+                        composite,
+                        expected_challenge_fp=challenge_fp,
+                    )
                     if merged is not None:
-                        _settlement_cache[cache_key] = merged
-                        return merged
+                        _settlement_cache[composite] = merged
+                        return _strip_mcp_internal(merged)
+                mcp_settlement_store.set_attempt_state(
+                    composite,
+                    {
+                        "status": "succeeded",
+                        "challenge_fp": challenge_fp,
+                        "tx": str(
+                            (settlement or {}).get("transaction")
+                            or (settlement or {}).get("txHash")
+                            or ""
+                        ),
+                    },
+                )
+            _settlement_cache[composite] = result
+        elif settle_success and not tx_recorded:
+            result["payment_settled"] = False
+            result["invalid_reason"] = "settlement_success_without_tx_ambiguous"
+            if use_redis:
+                mcp_settlement_store.set_attempt_state(
+                    composite,
+                    {
+                        "status": "ambiguous_settlement",
+                        "reason": "success_without_tx",
+                        "challenge_fp": challenge_fp,
+                    },
+                )
         elif settlement is not None and settlement.get("success") is False:
             err = (
                 settlement.get("errorReason")
@@ -254,11 +338,22 @@ async def verify_and_settle_mcp_payload(
             )
             result["invalid_reason"] = str(err)
             result["payment_settled"] = False
+            if use_redis:
+                mcp_settlement_store.set_attempt_state(
+                    composite,
+                    {"status": "failed", "reason": str(err), "challenge_fp": challenge_fp},
+                )
+        else:
+            if use_redis:
+                mcp_settlement_store.set_attempt_state(
+                    composite,
+                    {"status": "ambiguous_settlement", "reason": "null_settlement"},
+                )
 
-        return result
+        return _strip_mcp_internal(result)
     finally:
-        if had_lock:
-            mcp_settlement_store.release_settlement_lock(cache_key)
+        if use_redis and lock_token is not None:
+            mcp_settlement_store.release_settlement_lock(composite, lock_token)
 
 
 def _success_call_tool_result(

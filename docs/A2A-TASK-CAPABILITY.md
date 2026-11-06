@@ -22,3 +22,9 @@ Older clients that only passed `taskId` will receive JSON-RPC error **-32003** `
 ## Rollback
 
 Deploy the previous release; no data migration (in-memory task store is ephemeral).
+
+## Limitations (lifecycle)
+
+- Tasks live in an **in-memory** store (`app/a2a_rpc.py`). Restart drops all tasks, capability tokens, and payment-continuation context; clients must start new tasks.
+- Paid continuation (`x402.payment.payload`) requires the capability token in message metadata; this **does not** persist across server restarts.
+- Horizontal scaling without a shared task store is unsupported: each instance has its own task namespace.
