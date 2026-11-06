@@ -356,6 +356,23 @@ def _settlement_receipt(settlement: dict[str, Any] | None, *, network: str) -> d
     return out
 
 
+def _settlement_dict_from_receipts(receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reconstruct facilitator settlement fields from A2A receipt strip."""
+    for r in reversed(receipts):
+        if not r.get("success"):
+            continue
+        tx = r.get("transaction") or r.get("txHash")
+        if not tx:
+            continue
+        return {
+            "success": True,
+            "transaction": str(tx),
+            "txHash": str(tx),
+            "payer": r.get("payer"),
+        }
+    return {}
+
+
 def _task_dict(
     *,
     task_id: str,
@@ -400,7 +417,7 @@ def _artifact_from_result(result: dict[str, Any], name: str = "result.json") -> 
 
 
 def _skill_bindings() -> dict[str, SkillBinding]:
-    from app import diligence_pack, property_due_diligence_agent as pdd_agent, tx_decision
+    from app import diligence_pack, policy_check, property_due_diligence_agent as pdd_agent, tx_decision
     from app.city_compliance import publish, registry
 
     bindings: dict[str, SkillBinding] = {}
@@ -509,6 +526,50 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         ),
         payment_text="Payment is required for the US multi-city rental diligence pack.",
     )
+
+    if settings.policy_check_enabled and settings.x402_pay_to_address:
+
+        async def _policy_check_execute(inp: dict[str, Any]) -> dict[str, Any]:
+            body = policy_check.PolicyCheckBody.model_validate(
+                {
+                    "payment_required_header": inp.get("payment_required_header"),
+                    "policy": inp.get("policy") or {},
+                    "request_digest": inp.get("request_digest"),
+                    "idempotency_key": inp.get("idempotency_key"),
+                }
+            )
+            settlement = inp.get("_a2a_settlement") or {}
+            if not isinstance(settlement, dict):
+                settlement = {}
+            return policy_check.build_paid_analysis_dict(body, settlement=settlement)
+
+        def _policy_check_validate(inp: dict[str, Any]) -> str | None:
+            try:
+                policy_check.PolicyCheckBody.model_validate(
+                    {
+                        "payment_required_header": inp.get("payment_required_header"),
+                        "policy": inp.get("policy") or {},
+                        "request_digest": inp.get("request_digest"),
+                        "idempotency_key": inp.get("idempotency_key"),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                return str(exc)
+            return None
+
+        bindings["buyer-payment-policy-check"] = SkillBinding(
+            skill_id="buyer-payment-policy-check",
+            product_id=policy_check.PRODUCT_ID,
+            price_usdc=policy_check.price_string(),
+            build_payment_header=policy_check.build_payment_required_header,
+            verify_and_settle=policy_check.verify_and_settle,
+            validate_input=_policy_check_validate,
+            execute=_policy_check_execute,
+            record_revenue=lambda st, _r: _record_product_revenue(
+                policy_check.PRODUCT_ID, policy_check.price_string(), st
+            ),
+            payment_text="Payment is required for offline buyer payment-policy consistency analysis.",
+        )
 
     async def _pdd_execute(inp: dict[str, Any]) -> dict[str, Any]:
         return await pdd_agent.run_check(
@@ -920,6 +981,9 @@ async def _continue_paid_task(
             return _jsonrpc_result(req_id, _client_task_view(stored))
         receipts = list(stored.get("receipts") or [])
         skill_input = stored.get("input") or {}
+        if stored.get("skillId") == "buyer-payment-policy-check":
+            skill_input = dict(skill_input)
+            skill_input["_a2a_settlement"] = _settlement_dict_from_receipts(receipts)
         if not a2a_fulfillment_lock.try_acquire(task_id):
             msg = _agent_message(
                 "Fulfillment in progress on another worker; poll tasks/get.",
@@ -1062,6 +1126,9 @@ async def _continue_paid_task(
         binding.record_revenue(settlement, stored.get("input") or {})
 
     skill_input = stored.get("input") or {}
+    if stored.get("skillId") == "buyer-payment-policy-check":
+        skill_input = dict(skill_input)
+        skill_input["_a2a_settlement"] = settlement
     settled_ok = bool(result.get("payment_settled"))
     tx_present = bool((settlement or {}).get("transaction") or (settlement or {}).get("txHash"))
     if settled_ok and tx_present:

@@ -89,7 +89,7 @@ Free samples: `GET /pulse` (Base Network Pulse preview), `GET /us/cities`, `GET 
 - [x] x402 v2 wire format implementation (challenge generation → payment → verification → settlement)
 - [x] Coinbase CDP facilitator integration on Base mainnet
 - [x] Stripe fiat alternative payment rail (checkout + webhook handling)
-- [x] 22 MCP tools across buyer/seller/commerce/swarm/city/mailrail flows
+- [x] 21 MCP tools across buyer/seller/commerce/swarm/city/mailrail flows (see `TOOL_COUNT`)
 - [x] Quota system: 500 calls/month free tier, 10/min rate limit
 - [x] FastMCP + FastAPI with both stdio and HTTP/SSE transports
 - [x] Redis-ready state persistence (in-memory fallback)
@@ -151,7 +151,7 @@ x402-mcp/
 ### Key Design Patterns
 
 **1. Single Source of Truth Pattern**
-- `app/tools_registry.py` is the canonical inventory for all 22 MCP tools (`TOOL_COUNT`)
+- `app/tools_registry.py` is the canonical inventory for all MCP tools (`TOOL_COUNT`)
 - README, `/.well-known/mcp`, and test manifests are derived from this
 - Guarded by automated tests (`test_manifest.py`, `test_readme.py`)
 

@@ -17,7 +17,10 @@ from x402.mcp.constants import MCP_PAYMENT_RESPONSE_META_KEY
 
 
 @pytest.fixture(autouse=True)
-def _reset_state() -> None:
+def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Session conftest may set REDIS_URL for other tests; these flows use in-memory
+    # settlement paths unless Redis is explicitly wired (see test_mcp_settlement_redis).
+    monkeypatch.setattr(settings, "redis_url", None)
     clear_commerce_challenges()
     mcp_x402_payment.clear_mcp_settlement_cache()
     yield

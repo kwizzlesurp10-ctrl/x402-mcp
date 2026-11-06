@@ -15,7 +15,9 @@ from app.commerce_payment import (
     credits_to_grant,
     resolve_credits_authoritative_header,
     resolve_pro_authoritative_header,
+    resolve_policy_check_authoritative_header,
     store_credits_challenge,
+    store_policy_check_challenge,
     store_pro_challenge,
 )
 from app.config import settings
@@ -910,6 +912,23 @@ def build_pro_upgrade_requirements(agent_id: str) -> dict[str, Any]:
         "rate_limit_per_min": settings.pro_tier_rate_limit_per_min,
     }
     store_pro_challenge(agent_id, result)
+    return result
+
+
+def build_policy_check_mcp_requirements(agent_id: str) -> dict[str, Any]:
+    """Issue MCP policy-check server fee challenge and store authoritative header."""
+    from app import policy_check as pc
+
+    if not settings.x402_pay_to_address:
+        raise ValueError("X402_PAY_TO_ADDRESS required to sell policy_check via MCP.")
+
+    header = pc.build_payment_required_header()
+    result = {
+        "payment_required_header": header,
+        "purpose": "policy_check_analysis",
+        "agent_id": agent_id,
+    }
+    store_policy_check_challenge(agent_id, result)
     return result
 
 

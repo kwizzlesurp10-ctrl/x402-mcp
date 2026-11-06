@@ -265,6 +265,17 @@ class Settings(BaseSettings):
     # before.
     finality_check_price: str = "$0.01"
 
+    # Buyer payment-policy consistency inspector (POST /x402/policy-check, MCP, A2A).
+    # Default disabled: enable only after operator review (hypothesis pricing).
+    policy_check_enabled: bool = False
+    policy_check_price: str = "$0.01"
+    policy_check_max_header_bytes: int = 65536
+    policy_check_max_decoded_bytes: int = 262_144
+    policy_check_max_accepts: int = 16
+    # When Redis is configured but unreachable, refuse paid idempotent delivery
+    # instead of single-worker in-memory dedup.
+    policy_check_idempotency_redis_strict: bool = True
+
     # MailRail communication & alert dispatch rail
     mailrail_enabled: bool = False
     mailrail_provider: str = "mock"  # "mock", "file", "smtp", "resend", "webhook", "agentmail"

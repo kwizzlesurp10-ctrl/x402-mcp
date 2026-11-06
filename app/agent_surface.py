@@ -234,6 +234,26 @@ def paid_resources() -> list[dict[str, Any]]:
             f"Free sample: {base}/mn/property-check/sample.",
             "params": {"address": "street address string, 1-120 chars (required)"},
         },
+        *(
+            [
+                {
+                    "url": f"{base}/x402/policy-check",
+                    "method": "POST",
+                    "price": settings.policy_check_price,
+                    "network": settings.x402_default_network,
+                    "name": "Buyer payment-policy consistency (offline)",
+                    "what": "POST inspected PAYMENT-REQUIRED wire + buyer policy JSON — "
+                    "returns pass/fail/inconclusive per accept; does not fetch merchant URLs. "
+                    "Requires POLICY_CHECK_ENABLED.",
+                    "params": {
+                        "payment_required_header": "merchant PAYMENT-REQUIRED header value (required)",
+                        "policy": "buyer policy object (required)",
+                    },
+                }
+            ]
+            if getattr(settings, "policy_check_enabled", False)
+            else []
+        ),
         {
             "url": f"{base}/tasks/us-rental-diligence",
             "method": "POST",
@@ -663,6 +683,40 @@ def agent_card() -> dict[str, Any]:
                 "required": ["properties"],
             },
         },
+        *(
+            [
+                {
+                    "id": "buyer-payment-policy-check",
+                    "name": "Buyer payment-policy consistency (offline)",
+                    "description": (
+                        "Offline inspector: compares a caller-supplied merchant PAYMENT-REQUIRED "
+                        "wire against buyer policy (networks, pay_to, assets, max atomic amount). "
+                        f"POST JSON to {base}/x402/policy-check at "
+                        f"{getattr(settings, 'policy_check_price', '$0.01')} USDC (own-service fee). "
+                        "Does not probe merchant URLs or settle the inspected purchase."
+                    ),
+                    "tags": ["x402", "policy", "buyer", "offline", "compliance", "usdc"],
+                    "examples": [
+                        "Verify a Base Sepolia challenge matches my spend policy before paying a third party",
+                        f"POST {base}/x402/policy-check with payment_required_header + policy",
+                    ],
+                    "inputModes": ["application/json"],
+                    "outputModes": ["application/json"],
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["payment_required_header", "policy"],
+                        "properties": {
+                            "payment_required_header": {"type": "string"},
+                            "policy": {"type": "object"},
+                            "request_digest": {"type": "object"},
+                            "idempotency_key": {"type": "string", "maxLength": 128},
+                        },
+                    },
+                }
+            ]
+            if getattr(settings, "policy_check_enabled", False) and settings.x402_pay_to_address
+            else []
+        ),
         {
             "id": "mailrail-postmaster",
             "name": "MailRail Postmaster & In/Out Dispatcher",
@@ -738,6 +792,17 @@ def agent_card() -> dict[str, Any]:
             "POST",
             f"{base}/tasks/us-rental-diligence",
         ),
+        **(
+            {
+                "buyer-payment-policy-check": (
+                    getattr(settings, "policy_check_price", "$0.01"),
+                    "POST",
+                    f"{base}/x402/policy-check",
+                )
+            }
+            if getattr(settings, "policy_check_enabled", False) and settings.x402_pay_to_address
+            else {}
+        ),
         "mailrail-postmaster": (None, "GET", f"{base}/mailrail/health"),
     }
     if settings.x402_pay_to_address:
@@ -753,6 +818,11 @@ def agent_card() -> dict[str, Any]:
         "us-rental-diligence-pack",
         "property-due-diligence-agent",
         *(f"property-check-{code}" for code in city_price),
+        *(
+            {"buyer-payment-policy-check"}
+            if getattr(settings, "policy_check_enabled", False) and settings.x402_pay_to_address
+            else set()
+        ),
     }
     for sk in skills:
         ep = endpoints.get(sk["id"])
