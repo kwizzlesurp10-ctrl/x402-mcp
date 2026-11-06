@@ -41,7 +41,33 @@ from typing import Any
 
 logging.disable(logging.CRITICAL)
 
-ROOT = Path(__file__).resolve().parents[1]
+
+def _repo_root() -> Path:
+    """Resolve repo root when the script is copied to /tmp (compare_a2a_benchmark_refs.sh)."""
+    env_root = os.environ.get("REPO_ROOT")
+    if env_root:
+        p = Path(env_root).resolve()
+        if (p / "app").is_dir():
+            return p
+    try:
+        top = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            text=True,
+            cwd=os.getcwd(),
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        p = Path(top)
+        if (p / "app").is_dir():
+            return p
+    except Exception:  # noqa: BLE001
+        pass
+    here = Path(__file__).resolve().parent
+    if (here / "app").is_dir():
+        return here
+    return Path.cwd()
+
+
+ROOT = _repo_root()
 sys.path.insert(0, str(ROOT))
 
 
@@ -640,7 +666,12 @@ def main() -> None:
     _install_fakeredis_if_configured()
 
     try:
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
     except Exception:  # noqa: BLE001
         commit = os.environ.get("GIT_COMMIT", "")
 

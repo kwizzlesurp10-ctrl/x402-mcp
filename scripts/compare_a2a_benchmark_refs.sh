@@ -18,6 +18,7 @@ mkdir -p "$ARTIFACTS"
 export X402_PAY_TO_ADDRESS="${X402_PAY_TO_ADDRESS:-0x0d25A44f74868eCE53B305C97139CF4B62963410}"
 export REDIS_URL="${REDIS_URL:-redis://benchmark-fake}"
 export PYTHONPATH="$ROOT"
+export REPO_ROOT="$ROOT"
 # Stable knobs unless operator overrides
 export BENCH_WARMUP="${BENCH_WARMUP:-15}"
 export BENCH_SAMPLES="${BENCH_SAMPLES:-120}"
