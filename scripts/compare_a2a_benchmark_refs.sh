@@ -82,6 +82,14 @@ for r0 in base.get("results", []):
     for k in ("p50_ms", "p95_ms", "p99_ms", "throughput_per_s", "n", "errors"):
         if k in r0 or k in r1:
             lines.append(f"| {name} | {k} | {r0.get(k)} | {r1.get(k)} |")
+    if "verify_settle_call_count" in r0 or "verify_settle_call_count" in r1:
+        lines.append(
+            f"| {name} | verify_settle_call_count | {r0.get('verify_settle_call_count')} | {r1.get('verify_settle_call_count')} |"
+        )
+    if r0.get("skipped") or r1.get("skipped"):
+        lines.append(
+            f"| {name} | skipped_reason | {r0.get('reason')} | {r1.get('reason')} |"
+        )
 lines += [
     "",
     "## Limitations",
