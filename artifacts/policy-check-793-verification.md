@@ -1,6 +1,6 @@
 # PR #793 — policy-check coordination verification (agent run)
 
-**HEAD:** `66d6f41a8d2a4c91727917fa9f33addb587c3e7b` (this branch tip at verification time).
+**HEAD:** `a3995f0d29fdb9cca0d8e9132550fcfe0dcd65e1` (branch tip after push). Test runs below were executed at parent `66d6f41a8d2a4c91727917fa9f33addb587c3e7b` (documentation-only delta after).
 
 ## Python (repo root)
 
