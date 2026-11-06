@@ -283,7 +283,13 @@ def _payment_required_header_for_task(task_id: str) -> str:
         pass
     from app import a2a_rpc
 
-    rec = a2a_rpc._get_task_record(task_id)
+    getter = getattr(a2a_rpc, "_get_task_record", None)
+    if callable(getter):
+        rec = getter(task_id)
+    else:
+        store = getattr(a2a_rpc, "_TASKS_MEM", None) or getattr(a2a_rpc, "_TASKS", None)
+        assert isinstance(store, dict)
+        rec = store.get(task_id)
     assert rec is not None
     ph = rec.get("payment_required_header")
     assert isinstance(ph, str)

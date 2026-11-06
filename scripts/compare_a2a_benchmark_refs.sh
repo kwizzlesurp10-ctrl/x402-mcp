@@ -26,7 +26,7 @@ export BENCH_CONCURRENCY="${BENCH_CONCURRENCY:-8}"
 START_REF="$(git rev-parse HEAD)"
 # Use the harness **from the PR head** on both checkouts so scenarios stay identical.
 TMP_BENCH="$(mktemp)"
-trap 'rm -f "$TMP_BENCH"' EXIT
+trap 'rm -f "$TMP_BENCH"; git checkout -q "$START_REF" 2>/dev/null || true' EXIT
 git show "${HEAD_REF}:scripts/benchmark_x402_latency.py" >"$TMP_BENCH"
 
 run_at_ref() {
@@ -47,7 +47,7 @@ run_at_ref "$HEAD_REF" "$HEAD_JSON"
 git checkout -q "$START_REF"
 
 export BASE_JSON HEAD_JSON ARTIFACTS
-python - <<'PY'
+python3 - <<'PY'
 import json, os, sys
 from pathlib import Path
 base_p = Path(os.environ["BASE_JSON"])
