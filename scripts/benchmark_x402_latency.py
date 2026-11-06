@@ -120,7 +120,10 @@ def _install_fakeredis_if_configured() -> None:
     commerce.quota_store = commerce.build_quota_store()
     mcp_settlement_store._CLIENT = r
     settings.redis_url = os.environ.get("REDIS_URL", "redis://fake")
-    settings.a2a_task_store_redis = True
+    # Baseline commits may lack newer Settings fields — skip when absent.
+    fields = getattr(settings.__class__, "model_fields", None)
+    if isinstance(fields, dict) and "a2a_task_store_redis" in fields:
+        settings.a2a_task_store_redis = True  # type: ignore[misc]
 
 
 def run_challenge_build_sequential() -> dict[str, Any]:
@@ -490,6 +493,15 @@ def run_redis_write_failure_flag() -> dict[str, Any]:
     r = a2a_task_store._redis()
     if r is None:
         return {"name": "redis_injection", "skipped": True, "reason": "no redis client"}
+
+    strict_field = getattr(settings.__class__, "model_fields", None)
+    has_strict = isinstance(strict_field, dict) and "a2a_task_store_redis_strict" in strict_field
+    if not has_strict:
+        return {
+            "name": "redis_strict_write_injection",
+            "skipped": True,
+            "reason": "A2A_TASK_STORE_REDIS_STRICT not in Settings on this checkout",
+        }
 
     orig_set = r.set
     failures = {"n": 0}
