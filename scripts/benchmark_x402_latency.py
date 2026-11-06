@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import cProfile
+import io
 import json
 import logging
 import math
 import os
+import pstats
 import statistics
 import subprocess
 import sys
@@ -98,6 +101,7 @@ PAID_SAMPLES = _env_int("BENCH_PAID_SAMPLES", 40)
 MOCK_VERIFY_MS = _env_float("BENCH_MOCK_VERIFY_MS", 12.0)
 MOCK_SETTLE_MS = _env_float("BENCH_MOCK_SETTLE_MS", 8.0)
 MOCK_EXECUTE_MS = _env_float("BENCH_MOCK_EXECUTE_MS", 3.0)
+REPEAT_RUNS = _env_int("BENCH_REPEAT", 1)
 
 
 def _pct(sorted_samples: list[float], p: float) -> float:
@@ -658,12 +662,38 @@ def main() -> None:
         type=Path,
         help="Write full report JSON to this path",
     )
+    parser.add_argument(
+        "--profile-out",
+        type=Path,
+        help="Write cProfile pstats text (one challenge_build pass) to this path",
+    )
+    parser.add_argument(
+        "--repeat-runs",
+        type=int,
+        default=None,
+        help="Override BENCH_REPEAT: full sequential challenge scenario repeated with same warmup/samples",
+    )
     args = parser.parse_args()
 
     if not os.environ.get("X402_PAY_TO_ADDRESS"):
         os.environ["X402_PAY_TO_ADDRESS"] = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 
     _install_fakeredis_if_configured()
+
+    repeat = args.repeat_runs if args.repeat_runs is not None else REPEAT_RUNS
+    repeat = max(1, int(repeat))
+
+    if args.profile_out is not None:
+        prof = cProfile.Profile()
+        prof.runcall(run_challenge_build_sequential)
+        buf = io.StringIO()
+        pstats.Stats(prof, stream=buf).sort_stats(pstats.SortKey.CUMULATIVE).print_stats(40)
+        args.profile_out.parent.mkdir(parents=True, exist_ok=True)
+        args.profile_out.write_text(buf.getvalue(), encoding="utf-8")
+
+    seq_runs: list[dict[str, Any]] = []
+    for _ in range(repeat):
+        seq_runs.append(run_challenge_build_sequential())
 
     try:
         commit = subprocess.check_output(
@@ -680,6 +710,7 @@ def main() -> None:
         "samples": SAMPLES,
         "paid_samples": PAID_SAMPLES,
         "concurrency": CONCURRENCY,
+        "repeat_runs": repeat,
         "mock_delays_ms": {
             "verify": MOCK_VERIFY_MS,
             "settle": MOCK_SETTLE_MS,
@@ -691,8 +722,9 @@ def main() -> None:
             "fakeredis is in-process and single-threaded; concurrency results "
             "do not model Redis Cluster or real network latency."
         ),
+        "sequential_challenge_repeated": seq_runs,
         "results": [
-            run_challenge_build_sequential(),
+            seq_runs[-1],
             run_challenge_build_concurrent(),
             run_paid_path_with_mock_delays(),
             run_duplicate_payment_retry(),

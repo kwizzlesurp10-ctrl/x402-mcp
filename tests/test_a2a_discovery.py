@@ -118,7 +118,7 @@ async def test_resolve_rejects_redirect_final_url_blocked(monkeypatch: pytest.Mo
     import httpx
 
     from app import a2a_discovery
-    from app.http_shared import bind_async_http_client_for_test
+    from app.http_shared import bind_discovery_async_http_client_for_test
 
     class _Resp:
         status_code = 200
@@ -135,10 +135,45 @@ async def test_resolve_rejects_redirect_final_url_blocked(monkeypatch: pytest.Mo
         async def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
             return _Resp()
 
-    bind_async_http_client_for_test(_Client())
+    bind_discovery_async_http_client_for_test(_Client())
     try:
         res = await a2a_discovery.resolve_agent_card("https://example.com")
         assert res["status"] == "unresolved"
         assert "SSRF" in res["error"] or "blocked" in res["error"].lower()
     finally:
-        bind_async_http_client_for_test(None)
+        bind_discovery_async_http_client_for_test(None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_private_redirect_target_never_fetched(fake_dns) -> None:
+    """302 to loopback: first hop must be validated; private Location must not be requested."""
+    import httpx
+
+    from app import a2a_discovery
+    from app.http_shared import bind_discovery_async_http_client_for_test
+
+    fake_dns({"example.com": "93.184.215.14"})
+
+    requested: list[str] = []
+
+    class _RespRedirect:
+        status_code = 302
+        url = "https://example.com/.well-known/agent-card.json"
+
+        @property
+        def headers(self):
+            return httpx.Headers({"location": "http://127.0.0.1/evil.json"})
+
+    class _Client(httpx.AsyncClient):
+        async def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
+            requested.append(str(url))
+            return _RespRedirect()
+
+    bind_discovery_async_http_client_for_test(_Client())
+    try:
+        a2a_discovery.clear_discovery_cache_for_test()
+        res = await a2a_discovery.resolve_agent_card("example.com")
+        assert res["status"] == "unresolved"
+        assert not any("127.0.0.1" in u for u in requested)
+    finally:
+        bind_discovery_async_http_client_for_test(None)

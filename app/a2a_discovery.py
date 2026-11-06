@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from app.config import settings
-from app.http_shared import get_async_http_client
+from app.http_shared import get_discovery_async_http_client
 from app.ssrf_guard import validate_probe_url
 from app import x402_latency
 
@@ -18,6 +18,24 @@ logger = logging.getLogger("x402_mcp.a2a_discovery")
 _CACHE_LOCK = threading.Lock()
 # target_normalized -> (monotonic_expiry, parsed_card); LRU by access order
 _DISCOVERY_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+
+_MAX_REDIRECTS = 8
+
+
+async def _get_json_follow_ssrf(url: str, client: Any, headers: dict[str, str], timeout_seconds: float) -> Any:
+    """GET with manual redirects; validate each hop before issuing the request."""
+    cur = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        validate_probe_url(cur)
+        resp = await client.get(cur, headers=headers, timeout=timeout_seconds)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("location")
+            if not loc:
+                return resp
+            cur = urljoin(str(resp.url), loc)
+            continue
+        return resp
+    raise RuntimeError("discovery redirect limit exceeded")
 
 
 def _cache_put(key: str, value: tuple[float, dict[str, Any]]) -> None:
@@ -151,16 +169,15 @@ async def resolve_agent_card(target: str, timeout_seconds: float = 8.0) -> dict[
     }
 
     t0 = time.perf_counter()
-    client = get_async_http_client()
+    client = get_discovery_async_http_client()
     for url in candidate_urls:
         try:
-            validate_probe_url(url)
-            resp = await client.get(url, headers=headers, timeout=timeout_seconds)
+            resp = await _get_json_follow_ssrf(url, client, headers, timeout_seconds)
             if resp.status_code == 200:
                 try:
                     validate_probe_url(str(resp.url))
                 except Exception as exc:
-                    last_error = f"post-redirect ssrf guard: {type(exc).__name__}"
+                    last_error = f"response url ssrf guard: {type(exc).__name__}"
                     continue
                 data = resp.json()
                 if isinstance(data, dict):

@@ -29,7 +29,18 @@ def test_rate_limit_ip_uses_xff_when_peer_trusted() -> None:
     assert ip == "198.51.100.7"
 
 
-def test_cf_connecting_ip_takes_precedence_over_xff() -> None:
+def test_cf_connecting_ip_ignored_when_peer_untrusted() -> None:
+    """Direct clients can forge CF-Connecting-IP; only trust reverse-proxy peers."""
+    hdr = Headers(
+        {
+            "cf-connecting-ip": "198.51.100.1",
+            "x-forwarded-for": "198.51.100.99",
+        }
+    )
+    assert _rate_limit_client_ip(hdr, request_scope={"x402.peer_trusted": False}) == "unknown"
+
+
+def test_cf_connecting_ip_takes_precedence_over_xff_when_trusted() -> None:
     hdr = Headers(
         {
             "cf-connecting-ip": "198.51.100.1",

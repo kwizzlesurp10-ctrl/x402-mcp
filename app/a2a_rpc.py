@@ -17,7 +17,7 @@ from starlette.datastructures import Headers
 
 from app.agent_surface import A2A_X402_EXTENSION_URI, A2A_X402_EXTENSION_URIS
 from app.config import settings
-from app import a2a_fulfillment_lock, a2a_task_store, x402_latency
+from app import a2a_fulfillment_lock, a2a_task_store, demand, x402_latency
 
 log = logging.getLogger("x402")
 
@@ -52,6 +52,7 @@ _INTERNAL_TASK_KEYS = frozenset(
         "created_at_monotonic",
         "fulfillment_status",  # reconciliation hint; internal
         "fulfillment_done",
+        a2a_task_store.TASK_REV_KEY,
     }
 )
 
@@ -136,19 +137,19 @@ def _rate_limit_client_ip(
 ) -> str:
     """Effective client IP for A2A creation rate limiting.
 
-    ``CF-Connecting-IP`` / ``X-Real-IP`` are treated as end-client identifiers.
-    ``X-Forwarded-For`` is only trusted when the TCP peer is a configured
-    reverse proxy (``scope['x402.peer_trusted']``); otherwise the first hop in
-    XFF is attacker-controlled and must not bypass the cap.
+    ``CF-Connecting-IP``, ``X-Real-IP``, and ``X-Forwarded-For`` are all
+    spoofable by a direct HTTP client. They are honored only when the TCP peer
+    is a configured reverse proxy (``scope['x402.peer_trusted']``). Otherwise we
+    use the socket client host from ASGI scope.
     """
     if headers is None:
         return "unknown"
-    for name in ("cf-connecting-ip", "x-real-ip"):
-        raw = _header(headers, name)
-        if raw:
-            return raw.split(",")[0].strip() or "unknown"
     trusted = bool(request_scope and request_scope.get("x402.peer_trusted"))
     if trusted:
+        for name in ("cf-connecting-ip", "x-real-ip"):
+            raw = _header(headers, name)
+            if raw:
+                return raw.split(",")[0].strip() or "unknown"
         raw = _header(headers, "x-forwarded-for")
         if raw:
             return raw.split(",")[0].strip() or "unknown"
@@ -179,9 +180,18 @@ def _capability_digest(token: str) -> str:
 
 
 def _persist_task(task_id: str, record: dict[str, Any]) -> bool:
+    rev_key = a2a_task_store.TASK_REV_KEY
     if a2a_task_store.durable_enabled():
-        if not a2a_task_store.put_task(task_id, record):
-            return False
+        cur = a2a_task_store.get_task(task_id)
+        if isinstance(cur, dict):
+            cr = cur.get(rev_key)
+            if isinstance(cr, int):
+                record[rev_key] = cr
+            else:
+                # Legacy Redis payload without revision: treat as generation 0 for CAS.
+                record[rev_key] = 0
+    if not a2a_task_store.put_task(task_id, record):
+        return False
     _TASKS_MEM[task_id] = record
     return True
 
@@ -843,7 +853,7 @@ async def _message_send(
     tid = uuid.uuid4().hex
     hdrs = Headers({"user-agent": user_agent or ""})
     if not demand.is_self_traffic(hdrs):
-        await asyncio.to_thread(demand.record_challenge, binding.product_id, user_agent)
+        demand.record_challenge(binding.product_id, user_agent)
 
     pay_meta = {
         META_STATUS: "payment-required",
