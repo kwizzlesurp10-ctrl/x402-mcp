@@ -269,10 +269,30 @@ def _minimal_payload_from_payment_required_header(header: str) -> dict[str, Any]
     }
 
 
+def _payment_required_header_for_task(task_id: str) -> str:
+    """Resolve PAYMENT-REQUIRED header; works on trees with or without a2a_task_store."""
+    try:
+        from app import a2a_task_store
+
+        if a2a_task_store.durable_enabled():
+            raw = a2a_task_store.get_task(task_id) or {}
+            ph = raw.get("payment_required_header")
+            if isinstance(ph, str):
+                return ph
+    except ImportError:
+        pass
+    from app import a2a_rpc
+
+    rec = a2a_rpc._get_task_record(task_id)
+    assert rec is not None
+    ph = rec.get("payment_required_header")
+    assert isinstance(ph, str)
+    return ph
+
+
 def run_paid_path_with_mock_delays() -> dict[str, Any]:
     from fastapi.testclient import TestClient
 
-    from app import a2a_task_store
     from app.agent_surface import A2A_X402_EXTENSION_URI
     from app.a2a_rpc import META_STATUS, clear_task_store
     from app.config import settings
@@ -353,10 +373,7 @@ def run_paid_path_with_mock_delays() -> dict[str, Any]:
             assert start.status_code == 200
             tid = start.json()["result"]["id"]
             cap = start.json()["result"].get("capabilityToken")
-            stored_hdr = a2a_task_store.get_task(tid) or {}
-            pay_header = stored_hdr.get("payment_required_header")
-            assert isinstance(pay_header, str)
-            body = _minimal_payload_from_payment_required_header(pay_header)
+            body = _minimal_payload_from_payment_required_header(_payment_required_header_for_task(tid))
             pay = client.post(
                 "/a2a",
                 json={
@@ -398,7 +415,6 @@ def run_paid_path_with_mock_delays() -> dict[str, Any]:
 def run_duplicate_payment_retry() -> dict[str, Any]:
     from fastapi.testclient import TestClient
 
-    from app import a2a_task_store
     from app.agent_surface import A2A_X402_EXTENSION_URI
     from app.a2a_rpc import META_STATUS, clear_task_store
     from app.config import settings
@@ -449,9 +465,7 @@ def run_duplicate_payment_retry() -> dict[str, Any]:
         )
         tid = start.json()["result"]["id"]
         cap = start.json()["result"].get("capabilityToken")
-        hdr = (a2a_task_store.get_task(tid) or {}).get("payment_required_header")
-        assert isinstance(hdr, str)
-        body = _minimal_payload_from_payment_required_header(hdr)
+        body = _minimal_payload_from_payment_required_header(_payment_required_header_for_task(tid))
         pay = {
             "jsonrpc": "2.0",
             "id": "2",
@@ -484,7 +498,15 @@ def run_duplicate_payment_retry() -> dict[str, Any]:
 
 
 def run_redis_write_failure_flag() -> dict[str, Any]:
-    from app import a2a_task_store
+    try:
+        from app import a2a_task_store
+    except ImportError:
+        return {
+            "name": "redis_strict_write_injection",
+            "skipped": True,
+            "reason": "a2a_task_store module not in this checkout",
+        }
+
     from app.config import settings
 
     if not a2a_task_store.durable_enabled():
