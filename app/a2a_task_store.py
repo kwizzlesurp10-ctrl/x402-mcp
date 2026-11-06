@@ -24,7 +24,6 @@ _MEM: dict[str, dict[str, Any]] = {}
 
 _KEY_PREFIX = "a2a:task:"
 
-
 def _redis():
     from app import redis_client
 
@@ -49,7 +48,11 @@ def _key(task_id: str) -> str:
 
 def _json_safe(record: dict[str, Any]) -> dict[str, Any]:
     """Drop non-JSON and object refs; keep task JSON-serializable."""
-    drop = {"binding"}
+    drop: set[str] = {"binding"}
+    dig = record.get("capability_digest")
+    if isinstance(dig, str) and len(dig) == 64:
+        # Digest proves ownership; do not store the raw token in Redis.
+        drop.add("capability_token")
     out: dict[str, Any] = {}
     for k, v in record.items():
         if k in drop:
@@ -63,7 +66,8 @@ def _json_safe(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def put_task(task_id: str, record: dict[str, Any]) -> None:
+def put_task(task_id: str, record: dict[str, Any]) -> bool:
+    """Persist task. When strict durable mode is on, Redis failure returns False."""
     payload = _json_safe(record)
     r = _redis()
     if durable_enabled() and r is not None:
@@ -75,9 +79,13 @@ def put_task(task_id: str, record: dict[str, Any]) -> None:
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("a2a task redis write failed (%s)", type(exc).__name__)
+            if settings.a2a_task_store_redis_strict:
+                return False
             _MEM[task_id] = dict(record)
-        return
+            return True
+        return True
     _MEM[task_id] = dict(record)
+    return True
 
 
 def get_task(task_id: str) -> dict[str, Any] | None:
@@ -87,6 +95,8 @@ def get_task(task_id: str) -> dict[str, Any] | None:
             raw = r.get(_key(task_id))
         except Exception as exc:  # noqa: BLE001
             log.warning("a2a task redis read failed (%s)", type(exc).__name__)
+            if settings.a2a_task_store_redis_strict:
+                return None
             return _MEM.get(task_id)
         if not raw:
             return None

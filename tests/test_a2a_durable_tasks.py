@@ -75,6 +75,58 @@ def test_task_survives_clear_memory_cache(client: TestClient) -> None:
     assert got.json()["result"]["id"] == tid
 
 
+def test_redis_state_wins_over_stale_memory_after_cancel(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Another worker may cancel in Redis; this process must not serve stale _TASKS_MEM."""
+    from app import a2a_rpc, a2a_task_store
+    from app.a2a_rpc import _agent_message, _task_dict
+
+    monkeypatch.setattr(settings, "a2a_task_store_redis_strict", True)
+    resp = client.post(
+        "/a2a",
+        headers={"X-A2A-Extensions": A2A_X402_EXTENSION_URI},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "parts": [],
+                    "metadata": {
+                        "skillId": "us-cities-catalog",
+                        "input": {},
+                    },
+                }
+            },
+        },
+    )
+    tid = resp.json()["result"]["id"]
+    cap = resp.json()["result"]["capabilityToken"]
+
+    raw = a2a_task_store.get_task(tid)
+    assert raw is not None
+    msg = _agent_message("Task canceled by client.", {})
+    raw.update(_task_dict(task_id=tid, state="canceled", message=msg))
+    a2a_task_store.put_task(tid, raw)
+    stale = dict(raw)
+    stale["status"] = {"state": "completed"}
+    a2a_rpc._TASKS_MEM[tid] = stale
+
+    got = client.post(
+        "/a2a",
+        headers={"X-A2A-Task-Capability": cap},
+        json={
+            "jsonrpc": "2.0",
+            "id": "2",
+            "method": "tasks/get",
+            "params": {"id": tid},
+        },
+    )
+    assert got.json()["result"]["status"]["state"] == "canceled"
+
+
 def test_capability_digest_auth_roundtrip(client: TestClient) -> None:
     resp = client.post(
         "/a2a",
@@ -111,8 +163,9 @@ def test_capability_digest_auth_roundtrip(client: TestClient) -> None:
 
     raw = a2a_task_store.get_task(tid)
     assert raw is not None
-    assert isinstance(raw.get("capability_token"), str)
     assert isinstance(raw.get("capability_digest"), str)
+    # Raw token is not stored in Redis when digest is present (provenance in process only).
+    assert raw.get("capability_token") is None
 
     ok = client.post(
         "/a2a",
@@ -134,6 +187,7 @@ def test_paid_task_retry_skips_verify_when_receipt_has_tx(
     from types import SimpleNamespace
 
     from app import a2a_rpc
+    from x402.http import decode_payment_required_header
 
     _calls = {"n": 0}
 
@@ -179,10 +233,13 @@ def test_paid_task_retry_skips_verify_when_receipt_has_tx(
     )
     a2a_rpc._persist_task(tid, stored)
 
+    ph = stored.get("payment_required_header")
+    assert isinstance(ph, str)
+    accept = decode_payment_required_header(ph).accepts[0]
     body = {
         "x402Version": 2,
         "payload": {"signature": "0x", "authorization": {}},
-        "accepted": {"payTo": "0x" + "11" * 20},
+        "accepted": accept.model_dump(by_alias=True, exclude_none=True),
     }
     pay = {
         "jsonrpc": "2.0",

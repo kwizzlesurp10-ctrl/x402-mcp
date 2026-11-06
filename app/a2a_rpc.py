@@ -34,6 +34,7 @@ JSONRPC_TASK_NOT_FOUND = -32001
 JSONRPC_INVALID_PARAMS = -32602
 JSONRPC_METHOD_NOT_FOUND = -32601
 JSONRPC_FORBIDDEN = -32003
+JSONRPC_INTERNAL_ERROR = -32603
 
 # In-process cache when using Redis-backed persistence, or sole store when Redis off.
 _TASKS_MEM: dict[str, dict[str, Any]] = {}
@@ -88,6 +89,16 @@ def _header(headers: Mapping[str, str] | Headers | None, name: str) -> str | Non
     return s or None
 
 
+def _client_host_from_scope(request_scope: Mapping[str, Any] | None) -> str | None:
+    if not request_scope:
+        return None
+    client = request_scope.get("client")
+    if isinstance(client, (list, tuple)) and len(client) >= 1:
+        host = client[0]
+        return str(host) if host else None
+    return None
+
+
 def _creator_client_id(headers: Mapping[str, str] | Headers | None) -> str | None:
     return _header(headers, "x-a2a-client-id") or _header(headers, "a2a-client-id")
 
@@ -118,19 +129,40 @@ def _client_id_from_task_ops(
     return s or None
 
 
-def _client_ip_from_headers(headers: Mapping[str, str] | Headers | None) -> str:
+def _rate_limit_client_ip(
+    headers: Mapping[str, str] | Headers | None,
+    *,
+    request_scope: Mapping[str, Any] | None = None,
+) -> str:
+    """Effective client IP for A2A creation rate limiting.
+
+    ``CF-Connecting-IP`` / ``X-Real-IP`` are treated as end-client identifiers.
+    ``X-Forwarded-For`` is only trusted when the TCP peer is a configured
+    reverse proxy (``scope['x402.peer_trusted']``); otherwise the first hop in
+    XFF is attacker-controlled and must not bypass the cap.
+    """
     if headers is None:
         return "unknown"
-    for name in ("cf-connecting-ip", "x-real-ip", "x-forwarded-for"):
+    for name in ("cf-connecting-ip", "x-real-ip"):
         raw = _header(headers, name)
         if raw:
             return raw.split(",")[0].strip() or "unknown"
-    return "unknown"
+    trusted = bool(request_scope and request_scope.get("x402.peer_trusted"))
+    if trusted:
+        raw = _header(headers, "x-forwarded-for")
+        if raw:
+            return raw.split(",")[0].strip() or "unknown"
+    direct = _client_host_from_scope(request_scope)
+    return direct or "unknown"
 
 
-def _check_a2a_creation_rate(headers: Mapping[str, str] | Headers | None) -> str | None:
+def _check_a2a_creation_rate(
+    headers: Mapping[str, str] | Headers | None,
+    *,
+    request_scope: Mapping[str, Any] | None = None,
+) -> str | None:
     """Return error detail if over limit."""
-    ip = _client_ip_from_headers(headers)
+    ip = _rate_limit_client_ip(headers, request_scope=request_scope)
     now = time.monotonic()
     q = _creation_buckets[ip]
     cutoff = now - _A2A_CREATE_WINDOW_S
@@ -146,15 +178,48 @@ def _capability_digest(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def _persist_task(task_id: str, record: dict[str, Any]) -> None:
-    _TASKS_MEM[task_id] = record
+def _persist_task(task_id: str, record: dict[str, Any]) -> bool:
     if a2a_task_store.durable_enabled():
-        a2a_task_store.put_task(task_id, record)
+        if not a2a_task_store.put_task(task_id, record):
+            return False
+    _TASKS_MEM[task_id] = record
+    return True
+
+
+def _persist_task_fail_response(
+    req_id: Any, task_id: str, record: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Return JSON-RPC error if durable persistence failed; else None."""
+    if _persist_task(task_id, record):
+        return None
+    return _jsonrpc_error(
+        req_id,
+        JSONRPC_INTERNAL_ERROR,
+        "task persistence unavailable",
+        {"taskId": task_id},
+    )
 
 
 def _get_task_record(task_id: str) -> dict[str, Any] | None:
-    if task_id in _TASKS_MEM:
-        return _TASKS_MEM[task_id]
+    mem = _TASKS_MEM.get(task_id)
+    if a2a_task_store.durable_enabled():
+        got = a2a_task_store.get_task(task_id)
+        if got is None:
+            if task_id in _TASKS_MEM:
+                del _TASKS_MEM[task_id]
+            return None
+        _hydrate_task_record(task_id, got)
+        if mem:
+            bind = mem.get("binding")
+            if bind is not None and got.get("binding") is None:
+                got["binding"] = bind
+            tok = mem.get("capability_token")
+            if isinstance(tok, str) and tok and not got.get("capability_token"):
+                got["capability_token"] = tok
+        _TASKS_MEM[task_id] = got
+        return got
+    if mem is not None:
+        return mem
     got = a2a_task_store.get_task(task_id)
     if got is None:
         return None
@@ -186,18 +251,20 @@ def _hydrate_task_record(task_id: str, record: dict[str, Any]) -> None:
 
 def _register_task(
     task_id: str, record: dict[str, Any], *, client_id: str | None
-) -> None:
+) -> bool:
     record["capability_token"] = secrets.token_urlsafe(32)
     record["capability_digest"] = _capability_digest(record["capability_token"])
     record["client_id"] = client_id
     record["created_at_monotonic"] = time.monotonic()
     record["fulfillment_done"] = False
-    _persist_task(task_id, record)
+    return _persist_task(task_id, record)
 
 
 def _client_task_view(record: dict[str, Any]) -> dict[str, Any]:
     pub = {k: v for k, v in record.items() if k not in _INTERNAL_TASK_KEYS}
-    pub["capabilityToken"] = record["capability_token"]
+    tok = record.get("capability_token")
+    if isinstance(tok, str) and tok:
+        pub["capabilityToken"] = tok
     return pub
 
 
@@ -615,6 +682,7 @@ async def handle_jsonrpc(
     *,
     user_agent: str | None = None,
     headers: Mapping[str, str] | Headers | None = None,
+    request_scope: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Dispatch one JSON-RPC 2.0 request for POST /a2a."""
     req_id = body.get("id")
@@ -636,6 +704,7 @@ async def handle_jsonrpc(
             user_agent=user_agent,
             creator_client_id=creator,
             headers=headers,
+            request_scope=request_scope,
         )
     if method == "tasks/get":
         return _tasks_get(req_id, params, headers=headers)
@@ -651,6 +720,7 @@ async def _message_send(
     user_agent: str | None,
     creator_client_id: str | None = None,
     headers: Mapping[str, str] | Headers | None = None,
+    request_scope: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from app import demand
 
@@ -670,8 +740,10 @@ async def _message_send(
         )
         task = _task_dict(task_id=tid, state="canceled", message=msg)
         rec = {**task}
-        _register_task(tid, rec, client_id=creator_client_id)
-        _persist_task(tid, rec)
+        if not _register_task(tid, rec, client_id=creator_client_id):
+            pe = _persist_task_fail_response(req_id, tid, rec)
+            if pe is not None:
+                return pe
         return _jsonrpc_result(req_id, _client_task_view(rec))
 
     payload_obj = meta.get(META_PAYLOAD)
@@ -745,14 +817,16 @@ async def _message_send(
             artifacts=[_artifact_from_result(result)],
         )
         rec = {**task, "skillId": skill_id, "input": skill_input}
-        _register_task(tid, rec, client_id=creator_client_id)
-        _persist_task(tid, rec)
+        if not _register_task(tid, rec, client_id=creator_client_id):
+            pe = _persist_task_fail_response(req_id, tid, rec)
+            if pe is not None:
+                return pe
         return _jsonrpc_result(req_id, _client_task_view(rec))
 
     if not settings.x402_pay_to_address:
         return _jsonrpc_error(req_id, -32004, "seller not configured")
 
-    rl = _check_a2a_creation_rate(headers)
+    rl = _check_a2a_creation_rate(headers, request_scope=request_scope)
     if rl:
         return _jsonrpc_error(req_id, JSONRPC_INVALID_PARAMS, rl)
 
@@ -786,7 +860,10 @@ async def _message_send(
         "receipts": [],
         "binding": binding,
     }
-    _register_task(tid, rec, client_id=creator_client_id)
+    if not _register_task(tid, rec, client_id=creator_client_id):
+        pe = _persist_task_fail_response(req_id, tid, rec)
+        if pe is not None:
+            return pe
     return _jsonrpc_result(req_id, _client_task_view(rec))
 
 
@@ -840,7 +917,13 @@ async def _continue_paid_task(
             )
             task = _task_dict(task_id=task_id, state="working", message=msg)
             stored.update(task)
-            _persist_task(task_id, stored)
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
             return _jsonrpc_result(req_id, _client_task_view(stored))
         out2: dict[str, Any] | None = None
         try:
@@ -859,8 +942,15 @@ async def _continue_paid_task(
             )
             stored.update(task)
             stored["fulfillment_done"] = True
-            _persist_task(task_id, stored)
-            out2 = _jsonrpc_result(req_id, _client_task_view(stored))
+            if not _persist_task(task_id, stored):
+                out2 = _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            else:
+                out2 = _jsonrpc_result(req_id, _client_task_view(stored))
         except Exception:  # noqa: BLE001
             log.warning("a2a skill execution retry failed", exc_info=True)
             msg = _agent_message(
@@ -869,8 +959,15 @@ async def _continue_paid_task(
             )
             task = _task_dict(task_id=task_id, state="failed", message=msg)
             stored.update(task)
-            _persist_task(task_id, stored)
-            out2 = _jsonrpc_result(req_id, _client_task_view(stored))
+            if not _persist_task(task_id, stored):
+                out2 = _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            else:
+                out2 = _jsonrpc_result(req_id, _client_task_view(stored))
         finally:
             a2a_fulfillment_lock.release(task_id)
         assert out2 is not None
@@ -880,7 +977,13 @@ async def _continue_paid_task(
         msg = _agent_message("Task is missing payment challenge context.", {})
         task = _task_dict(task_id=task_id, state="failed", message=msg)
         stored.update(task)
-        _persist_task(task_id, stored)
+        if not _persist_task(task_id, stored):
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
     if not isinstance(binding, SkillBinding):
@@ -902,7 +1005,13 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="failed", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        _persist_task(task_id, stored)
+        if not _persist_task(task_id, stored):
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
     assert binding.verify_and_settle is not None
@@ -930,7 +1039,13 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="input-required", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        _persist_task(task_id, stored)
+        if not _persist_task(task_id, stored):
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
     if binding.record_revenue:
@@ -955,7 +1070,13 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="input-required", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        _persist_task(task_id, stored)
+        if not _persist_task(task_id, stored):
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
     if stored.get("fulfillment_done"):
@@ -969,7 +1090,13 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="working", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        _persist_task(task_id, stored)
+        if not _persist_task(task_id, stored):
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
     out: dict[str, Any] | None = None
@@ -993,8 +1120,15 @@ async def _continue_paid_task(
         stored.update(task)
         stored["receipts"] = receipts
         stored["fulfillment_done"] = True
-        _persist_task(task_id, stored)
-        out = _jsonrpc_result(req_id, _client_task_view(stored))
+        if not _persist_task(task_id, stored):
+            out = _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
+        else:
+            out = _jsonrpc_result(req_id, _client_task_view(stored))
     except Exception:  # noqa: BLE001
         log.warning("a2a skill execution failed after settle", exc_info=True)
         msg = _agent_message(
@@ -1007,8 +1141,15 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="failed", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        _persist_task(task_id, stored)
-        out = _jsonrpc_result(req_id, _client_task_view(stored))
+        if not _persist_task(task_id, stored):
+            out = _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
+        else:
+            out = _jsonrpc_result(req_id, _client_task_view(stored))
     finally:
         a2a_fulfillment_lock.release(task_id)
 
@@ -1075,7 +1216,13 @@ def _tasks_cancel(
     msg = _agent_message("Task canceled by client.", {})
     task = _task_dict(task_id=task_id, state="canceled", message=msg)
     stored.update(task)
-    _persist_task(task_id, stored)
+    if not _persist_task(task_id, stored):
+        return _jsonrpc_error(
+            req_id,
+            JSONRPC_INTERNAL_ERROR,
+            "task persistence unavailable",
+            {"taskId": task_id},
+        )
     return _jsonrpc_result(req_id, _client_task_view(stored))
 
 

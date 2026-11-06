@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -15,8 +16,16 @@ from app import x402_latency
 logger = logging.getLogger("x402_mcp.a2a_discovery")
 
 _CACHE_LOCK = threading.Lock()
-# target_normalized -> (monotonic_expiry, parsed_card)
-_DISCOVERY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+# target_normalized -> (monotonic_expiry, parsed_card); LRU by access order
+_DISCOVERY_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+
+
+def _cache_put(key: str, value: tuple[float, dict[str, Any]]) -> None:
+    max_n = max(0, int(getattr(settings, "a2a_discovery_cache_max_entries", 256)))
+    _DISCOVERY_CACHE[key] = value
+    _DISCOVERY_CACHE.move_to_end(key)
+    while max_n > 0 and len(_DISCOVERY_CACHE) > max_n:
+        _DISCOVERY_CACHE.popitem(last=False)
 
 A2A_X402_URI = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
 AP2_URI = "https://github.com/google-agentic-commerce/ap2/v1"
@@ -120,6 +129,7 @@ async def resolve_agent_card(target: str, timeout_seconds: float = 8.0) -> dict[
             if hit is not None:
                 exp, card = hit
                 if now < exp:
+                    _DISCOVERY_CACHE.move_to_end(norm_key)
                     out = dict(card)
                     out["cache"] = {"hit": True, "ttl_remaining_s": round(exp - now, 3)}
                     return out
@@ -147,15 +157,20 @@ async def resolve_agent_card(target: str, timeout_seconds: float = 8.0) -> dict[
             validate_probe_url(url)
             resp = await client.get(url, headers=headers, timeout=timeout_seconds)
             if resp.status_code == 200:
+                try:
+                    validate_probe_url(str(resp.url))
+                except Exception as exc:
+                    last_error = f"post-redirect ssrf guard: {type(exc).__name__}"
+                    continue
                 data = resp.json()
                 if isinstance(data, dict):
                     parsed = parse_agent_card(data, str(resp.url))
                     x402_latency.record_span("a2a_discovery", "http_fetch", t0)
                     if ttl > 0 and norm_key:
                         with _CACHE_LOCK:
-                            _DISCOVERY_CACHE[norm_key] = (
-                                time.monotonic() + ttl,
-                                dict(parsed),
+                            _cache_put(
+                                norm_key,
+                                (time.monotonic() + ttl, dict(parsed)),
                             )
                     parsed["cache"] = {"hit": False, "ttl_s": ttl}
                     return parsed
@@ -176,3 +191,8 @@ async def resolve_agent_card(target: str, timeout_seconds: float = 8.0) -> dict[
 def clear_discovery_cache_for_test() -> None:
     with _CACHE_LOCK:
         _DISCOVERY_CACHE.clear()
+
+
+def discovery_cache_len_for_test() -> int:
+    with _CACHE_LOCK:
+        return len(_DISCOVERY_CACHE)

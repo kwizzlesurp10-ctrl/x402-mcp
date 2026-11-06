@@ -1165,6 +1165,7 @@ async def a2a_jsonrpc_endpoint(request: Request) -> JSONResponse:
         body,
         user_agent=request.headers.get("user-agent"),
         headers=request.headers,
+        request_scope=request.scope,
     )
     return JSONResponse(
         content=payload,
