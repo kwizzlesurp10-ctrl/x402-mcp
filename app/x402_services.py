@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -27,6 +29,9 @@ from app.models import (
 )
 
 logger = logging.getLogger("x402")
+
+_server_lock = threading.Lock()
+_servers: dict[str | None, tuple[Any, float]] = {}
 
 # The CDP Facilitator rejects BOTH verify and settle when a resource description
 # exceeds this many characters, which would silently break discovery AND revenue.
@@ -142,16 +147,35 @@ def svm_available() -> bool:
 
 
 def _resource_server(network: str | None = None):
+    """Return a cached x402ResourceServer per network (refreshed on TTL)."""
     from x402 import x402ResourceServer
 
-    facilitator = _facilitator_client(network)
-    server = x402ResourceServer(facilitator)
-    _register_server_schemes(server)
-    try:
-        server.initialize()
-    except Exception as exc:
-        logger.warning("Facilitator initialize skipped (unauthenticated/offline): %s", exc)
-    return server
+    ttl = float(getattr(settings, "x402_resource_server_ttl_seconds", 300.0))
+    now = time.monotonic()
+    net = str(network).strip() if network is not None else ""
+    fac_url = _facilitator_url_for(network) or ""
+    key = f"{net}|{fac_url}"
+    with _server_lock:
+        hit = _servers.get(key)
+        if hit is not None:
+            server, born = hit
+            if ttl <= 0 or now - born < ttl:
+                return server
+        facilitator = _facilitator_client(network)
+        server = x402ResourceServer(facilitator)
+        _register_server_schemes(server)
+        try:
+            server.initialize()
+        except Exception as exc:
+            logger.warning("Facilitator initialize skipped (unauthenticated/offline): %s", exc)
+        _servers[key] = (server, now)
+        return server
+
+
+def clear_resource_servers_for_test() -> None:
+    """Test hook: drop cached servers."""
+    with _server_lock:
+        _servers.clear()
 
 
 def _facilitator_url_for(network: str | None) -> str:

@@ -83,6 +83,18 @@ Replace `InMemoryQuotaStore` in `app/commerce.py`:
 pytest -v
 ```
 
+## Latency instrumentation
+
+- **In-process histograms:** `app/x402_latency.py` records **low-cardinality** `(bucket, stage)` timings (e.g. `a2a/challenge_build`, `a2a/verify_settle`, `mcp_commerce/redis_lock_acquire`). Client signing and chain finality are **not** server-observable unless you add correlated client telemetry.
+- **Operator export:** `GET /stats` includes `x402_latency_seconds` (p50/p95/p99 per stage) when called with `Authorization: Bearer <OPERATOR_TOKEN>`.
+
+## A2A performance / durability
+
+- **Durable tasks:** when `REDIS_URL` is set and `A2A_TASK_STORE_REDIS=true` (default), tasks persist under `a2a:task:*` with TTL. Capability is stored as `capability_digest`; fulfillment uses `a2a:fulfill:lock:*` for single-flight execution across workers.
+- **Rate limit:** new **paid** challenge creations are capped at **30 per client IP per minute** (`X-Forwarded-For` first hop when present).
+- **Discovery cache:** `GET /a2a/resolve` caches successful agent-card JSON for `A2A_DISCOVERY_CACHE_TTL_SECONDS` (default 300s); responses include a small `cache` stanza.
+- **Benchmark harness (mock / no mainnet):** `python scripts/benchmark_x402_latency.py` — logs JSON with p50/p95/p99 for the in-process `POST /a2a` paid challenge path (see script for warmup/sample counts).
+
 ## Drive Artifact Location
 
 Target folder: `/Forge/MCP_Projects/x402-micropayments/`

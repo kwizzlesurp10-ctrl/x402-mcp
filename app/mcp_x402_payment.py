@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
@@ -27,6 +28,7 @@ from app.commerce_payment import (
 from app.config import settings
 from app import mcp_settlement_store
 from app.models import ToolResponse
+from app import x402_latency
 
 logger = logging.getLogger("mcp_x402_payment")
 
@@ -165,7 +167,9 @@ async def verify_and_settle_mcp_payload(
     """Verify + settle using only the server-stored PAYMENT-REQUIRED header."""
     from app.x402_services import _invalid_payment_result, _network_of, _resource_server
 
+    t_validate0 = time.perf_counter()
     _validate_authoritative_challenge(challenge)
+    x402_latency.record_span("mcp_commerce", "challenge_validate", t_validate0)
 
     try:
         payload = PaymentPayload.model_validate(payment_data)
@@ -188,45 +192,57 @@ async def verify_and_settle_mcp_payload(
         return _strip_mcp_internal(cached_local)
 
     if use_redis:
-        redis_first = mcp_settlement_store.get_cached_settlement(
+        tr0 = time.perf_counter()
+        redis_first = await mcp_settlement_store.get_cached_settlement_async(
             composite, expected_challenge_fp=challenge_fp
         )
+        x402_latency.record_span("mcp_commerce", "redis_result_read", tr0)
         if redis_first is not None:
             _settlement_cache[composite] = redis_first
             return _strip_mcp_internal(redis_first)
 
     lock_token: str | None = None
     if use_redis:
+        tl0 = time.perf_counter()
         acquired, lock_token, lock_redis_error = (
-            mcp_settlement_store.acquire_settlement_lock(composite)
+            await mcp_settlement_store.acquire_settlement_lock_async(composite)
         )
+        x402_latency.record_span("mcp_commerce", "redis_lock_acquire", tl0)
         if lock_redis_error:
             return _invalid_payment_result("redis_unavailable_mcp_commerce")
         if not acquired:
+            tw0 = time.perf_counter()
             merged = await mcp_settlement_store.wait_for_cached_settlement_async(
                 composite,
                 expected_challenge_fp=challenge_fp,
             )
+            x402_latency.record_span("mcp_commerce", "redis_contention_wait", tw0)
             if merged is not None:
                 _settlement_cache[composite] = merged
                 return _strip_mcp_internal(merged)
-            att = mcp_settlement_store.get_attempt_state(composite)
+            ta0 = time.perf_counter()
+            att = await mcp_settlement_store.get_attempt_state_async(composite)
+            x402_latency.record_span("mcp_commerce", "redis_attempt_read", ta0)
             if att and att.get("status") == "ambiguous_settlement":
                 return _invalid_payment_result("settlement_ambiguous_manual_reconciliation")
             return _invalid_payment_result("settlement_contention_timeout")
 
     try:
         if use_redis:
-            again = mcp_settlement_store.get_cached_settlement(
+            ta0 = time.perf_counter()
+            again = await mcp_settlement_store.get_cached_settlement_async(
                 composite, expected_challenge_fp=challenge_fp
             )
+            x402_latency.record_span("mcp_commerce", "redis_result_reread", ta0)
             if again is not None:
                 _settlement_cache[composite] = again
                 return _strip_mcp_internal(again)
-            mcp_settlement_store.set_attempt_state(
+            tai0 = time.perf_counter()
+            await mcp_settlement_store.set_attempt_state_async(
                 composite,
                 {"status": "in_progress", "challenge_fp": challenge_fp},
             )
+            x402_latency.record_span("mcp_commerce", "redis_attempt_write", tai0)
 
         accepts = _payment_requirements_models(challenge.payment_required_header)
         if not accepts:
@@ -241,7 +257,9 @@ async def verify_and_settle_mcp_payload(
             )
 
         try:
+            tv0 = time.perf_counter()
             verify_result = await server.verify_payment(payload, matched)
+            x402_latency.record_span("mcp_commerce", "facilitator_verify", tv0)
         except Exception as exc:  # noqa: BLE001
             logger.warning("mcp payment verify failed: %s", type(exc).__name__, exc_info=False)
             return _invalid_payment_result(f"verify_failed: {type(exc).__name__}")
@@ -261,13 +279,15 @@ async def verify_and_settle_mcp_payload(
         settlement = None
         settlement_error: str | None = None
         try:
+            ts0 = time.perf_counter()
             settle_result = await server.settle_payment(payload, matched)
             settlement = settle_result.model_dump(by_alias=True, exclude_none=True)
+            x402_latency.record_span("mcp_commerce", "facilitator_settle", ts0)
         except Exception as exc:  # noqa: BLE001
             settlement_error = type(exc).__name__
             logger.warning("mcp settle_payment raised (%s)", settlement_error, exc_info=False)
             if use_redis:
-                mcp_settlement_store.set_attempt_state(
+                await mcp_settlement_store.set_attempt_state_async(
                     composite,
                     {
                         "status": "ambiguous_settlement",
@@ -294,9 +314,11 @@ async def verify_and_settle_mcp_payload(
 
         if settle_success and tx_recorded:
             if use_redis:
-                written = mcp_settlement_store.try_cache_settlement(
+                tcw0 = time.perf_counter()
+                written = await mcp_settlement_store.try_cache_settlement_async(
                     composite, result, challenge_fp=challenge_fp
                 )
+                x402_latency.record_span("mcp_commerce", "redis_result_write", tcw0)
                 if not written:
                     merged = await mcp_settlement_store.wait_for_cached_settlement_async(
                         composite,
@@ -305,7 +327,7 @@ async def verify_and_settle_mcp_payload(
                     if merged is not None:
                         _settlement_cache[composite] = merged
                         return _strip_mcp_internal(merged)
-                mcp_settlement_store.set_attempt_state(
+                await mcp_settlement_store.set_attempt_state_async(
                     composite,
                     {
                         "status": "succeeded",
@@ -322,7 +344,7 @@ async def verify_and_settle_mcp_payload(
             result["payment_settled"] = False
             result["invalid_reason"] = "settlement_success_without_tx_ambiguous"
             if use_redis:
-                mcp_settlement_store.set_attempt_state(
+                await mcp_settlement_store.set_attempt_state_async(
                     composite,
                     {
                         "status": "ambiguous_settlement",
@@ -339,13 +361,13 @@ async def verify_and_settle_mcp_payload(
             result["invalid_reason"] = str(err)
             result["payment_settled"] = False
             if use_redis:
-                mcp_settlement_store.set_attempt_state(
+                await mcp_settlement_store.set_attempt_state_async(
                     composite,
                     {"status": "failed", "reason": str(err), "challenge_fp": challenge_fp},
                 )
         else:
             if use_redis:
-                mcp_settlement_store.set_attempt_state(
+                await mcp_settlement_store.set_attempt_state_async(
                     composite,
                     {"status": "ambiguous_settlement", "reason": "null_settlement"},
                 )
@@ -353,7 +375,9 @@ async def verify_and_settle_mcp_payload(
         return _strip_mcp_internal(result)
     finally:
         if use_redis and lock_token is not None:
-            mcp_settlement_store.release_settlement_lock(composite, lock_token)
+            trl0 = time.perf_counter()
+            await mcp_settlement_store.release_settlement_lock_async(composite, lock_token)
+            x402_latency.record_span("mcp_commerce", "redis_lock_release", trl0)
 
 
 def _success_call_tool_result(

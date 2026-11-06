@@ -219,13 +219,20 @@ def test_free_catalog_happy_path_with_capability(client: TestClient) -> None:
 
 
 def test_payment_continuation_requires_capability_meta(client: TestClient) -> None:
+    from x402.http import decode_payment_required_header
+
+    from app import a2a_rpc
     from app.a2a_rpc import META_PAYLOAD, META_STATUS
 
     tid, cap = _start_paid_task(client)
+    raw = a2a_rpc._get_task_record(tid) or {}
+    ph = raw.get("payment_required_header")
+    assert isinstance(ph, str)
+    accept = decode_payment_required_header(ph).accepts[0]
     body = {
         "x402Version": 2,
         "payload": {"signature": "0x", "authorization": {}},
-        "accepted": {"payTo": "0x" + "11" * 20},
+        "accepted": accept.model_dump(by_alias=True, exclude_none=True),
     }
     missing = client.post(
         "/a2a",

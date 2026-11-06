@@ -55,6 +55,22 @@ class Settings(BaseSettings):
     # commerce fails closed (402) instead of settling without coordination.
     mcp_commerce_redis_strict: bool = True
 
+    # A2A: when True and REDIS_URL is set with a live connection, persist tasks under
+    # ``a2a:task:*`` with TTL ``a2a_task_ttl_seconds``. When False or Redis is
+    # unavailable, tasks stay in-process only (same as pre-durability behavior).
+    a2a_task_store_redis: bool = True
+    a2a_task_ttl_seconds: int = 604_800  # 7 days
+    # When True (default), Redis errors while durable mode is active do not fall back
+    # to in-module memory for the authoritative store (fail closed vs stale shadow).
+    a2a_task_store_redis_strict: bool = True
+
+    # External A2A agent card fetch cache (stable discovery metadata only).
+    a2a_discovery_cache_ttl_seconds: int = 300
+    a2a_discovery_cache_max_entries: int = 256
+
+    # Re-use a facilitator-backed x402ResourceServer per network for warm HTTP pools.
+    x402_resource_server_ttl_seconds: float = 300.0
+
     # Upstash Advanced Analytics pipeline
     upstash_redis_rest_url: str | None = None
     upstash_redis_rest_token: str | None = None

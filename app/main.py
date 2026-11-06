@@ -53,7 +53,7 @@ from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
 from app.ssrf_guard import SSRFBlockedError, validate_probe_url
 from app.swarm import orchestrator as swarm_orchestrator
 from app.swarm.registry import swarm_registry
-from app import cache_warmer, demand, os_monitor, wallet_read, x402_services
+from app import cache_warmer, demand, http_shared, os_monitor, wallet_read, x402_services, x402_latency
 
 setup_logging()
 logger = logging.getLogger("x402")
@@ -118,6 +118,7 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
             pulse_refresh.cancel()
             with suppress(asyncio.CancelledError):
                 await pulse_refresh
+        await http_shared.aclose_async_http_client()
 
 
 class UpstashAnalyticsMiddleware(BaseHTTPMiddleware):
@@ -859,6 +860,7 @@ async def stats_snapshot(request: Request) -> dict:
     if is_operator(request):
         out["agents"] = agents
         out["scope"] = "operator"
+        out.update(x402_latency.snapshot())
     else:
         out["agents"] = []
         out["scope"] = "public"
@@ -1163,6 +1165,7 @@ async def a2a_jsonrpc_endpoint(request: Request) -> JSONResponse:
         body,
         user_agent=request.headers.get("user-agent"),
         headers=request.headers,
+        request_scope=request.scope,
     )
     return JSONResponse(
         content=payload,

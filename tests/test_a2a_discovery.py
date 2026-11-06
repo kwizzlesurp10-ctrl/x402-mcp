@@ -1,6 +1,8 @@
 """Tests for active A2A agent card discovery and resolution."""
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from app.a2a_discovery import (
@@ -96,3 +98,82 @@ def test_a2a_resolve_http_endpoint_ssrf_blocked() -> None:
     data = response.json()
     assert data["status"] == "unresolved"
     assert "SSRF" in data["error"] or "blocked" in data["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_discovery_cache_lru_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import a2a_discovery
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "a2a_discovery_cache_max_entries", 3)
+    a2a_discovery.clear_discovery_cache_for_test()
+    for i in range(5):
+        with a2a_discovery._CACHE_LOCK:  # noqa: SLF001
+            a2a_discovery._cache_put(f"host{i}.example.com", (time.monotonic() + 60.0, {"i": i}))  # noqa: SLF001
+    assert a2a_discovery.discovery_cache_len_for_test() == 3
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_redirect_final_url_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from app import a2a_discovery
+    from app.http_shared import bind_discovery_async_http_client_for_test
+
+    class _Resp:
+        status_code = 200
+        url = "http://127.0.0.1/.well-known/agent-card.json"
+
+        def json(self):
+            return {
+                "protocolVersion": "1.0",
+                "name": "evil",
+                "capabilities": {"extensions": []},
+            }
+
+    class _Client(httpx.AsyncClient):
+        async def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
+            return _Resp()
+
+    bind_discovery_async_http_client_for_test(_Client())
+    try:
+        res = await a2a_discovery.resolve_agent_card("https://example.com")
+        assert res["status"] == "unresolved"
+        assert "SSRF" in res["error"] or "blocked" in res["error"].lower()
+    finally:
+        bind_discovery_async_http_client_for_test(None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_private_redirect_target_never_fetched(fake_dns) -> None:
+    """302 to loopback: first hop must be validated; private Location must not be requested."""
+    import httpx
+
+    from app import a2a_discovery
+    from app.http_shared import bind_discovery_async_http_client_for_test
+
+    fake_dns({"example.com": "93.184.215.14"})
+
+    requested: list[str] = []
+
+    class _RespRedirect:
+        status_code = 302
+        url = "https://example.com/.well-known/agent-card.json"
+
+        @property
+        def headers(self):
+            return httpx.Headers({"location": "http://127.0.0.1/evil.json"})
+
+    class _Client(httpx.AsyncClient):
+        async def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
+            requested.append(str(url))
+            return _RespRedirect()
+
+    bind_discovery_async_http_client_for_test(_Client())
+    try:
+        a2a_discovery.clear_discovery_cache_for_test()
+        res = await a2a_discovery.resolve_agent_card("example.com")
+        assert res["status"] == "unresolved"
+        assert not any("127.0.0.1" in u for u in requested)
+    finally:
+        bind_discovery_async_http_client_for_test(None)
