@@ -14,6 +14,7 @@ payload cannot authorize a different server-issued challenge.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -125,6 +126,14 @@ def get_cached_settlement(
         return None
 
 
+async def get_cached_settlement_async(
+    composite: str, *, expected_challenge_fp: str
+) -> dict[str, Any] | None:
+    return await asyncio.to_thread(
+        get_cached_settlement, composite, expected_challenge_fp=expected_challenge_fp
+    )
+
+
 def try_cache_settlement(
     composite: str,
     result: dict[str, Any],
@@ -144,6 +153,22 @@ def try_cache_settlement(
         return False
 
 
+async def try_cache_settlement_async(
+    composite: str,
+    result: dict[str, Any],
+    *,
+    challenge_fp: str,
+    ttl_seconds: int = _DEFAULT_RESULT_TTL,
+) -> bool:
+    return await asyncio.to_thread(
+        try_cache_settlement,
+        composite,
+        result,
+        challenge_fp=challenge_fp,
+        ttl_seconds=ttl_seconds,
+    )
+
+
 def get_attempt_state(composite: str) -> dict[str, Any] | None:
     if _CLIENT is None:
         return None
@@ -155,6 +180,10 @@ def get_attempt_state(composite: str) -> dict[str, Any] | None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("MCP attempt read failed (%s)", type(exc).__name__)
         return None
+
+
+async def get_attempt_state_async(composite: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(get_attempt_state, composite)
 
 
 def set_attempt_state(
@@ -170,6 +199,12 @@ def set_attempt_state(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("MCP attempt write failed (%s)", type(exc).__name__)
+
+
+async def set_attempt_state_async(
+    composite: str, state: dict[str, Any], *, ttl_seconds: int = _DEFAULT_ATTEMPT_TTL
+) -> None:
+    await asyncio.to_thread(set_attempt_state, composite, state, ttl_seconds=ttl_seconds)
 
 
 def acquire_settlement_lock(
@@ -195,6 +230,14 @@ def acquire_settlement_lock(
         return False, None, True
 
 
+async def acquire_settlement_lock_async(
+    composite: str, *, ttl_seconds: int = _DEFAULT_LOCK_TTL
+) -> tuple[bool, str | None, bool]:
+    return await asyncio.to_thread(
+        acquire_settlement_lock, composite, ttl_seconds=ttl_seconds
+    )
+
+
 def release_settlement_lock(composite: str, token: str) -> None:
     if _CLIENT is None or not token:
         return
@@ -210,6 +253,10 @@ def release_settlement_lock(composite: str, token: str) -> None:
             pass
 
 
+async def release_settlement_lock_async(composite: str, token: str) -> None:
+    await asyncio.to_thread(release_settlement_lock, composite, token)
+
+
 async def wait_for_cached_settlement_async(
     composite: str,
     *,
@@ -217,13 +264,13 @@ async def wait_for_cached_settlement_async(
     attempts: int = _DEFAULT_POLL_ATTEMPTS,
     interval_s: float = _DEFAULT_POLL_INTERVAL_S,
 ) -> dict[str, Any] | None:
-    import asyncio
-
     for _ in range(attempts):
-        got = get_cached_settlement(composite, expected_challenge_fp=expected_challenge_fp)
+        got = await get_cached_settlement_async(
+            composite, expected_challenge_fp=expected_challenge_fp
+        )
         if got is not None:
             return got
-        att = get_attempt_state(composite)
+        att = await get_attempt_state_async(composite)
         if att and att.get("status") == "ambiguous_settlement":
             return None
         await asyncio.sleep(interval_s)
