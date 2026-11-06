@@ -215,7 +215,7 @@ def test_require_matching_resource_fail_and_incomplete_digest() -> None:
     assert out2.verdict == "inconclusive"
 
 
-def test_unknown_scheme_option_skipped_unless_policy_restricts() -> None:
+def test_unknown_scheme_option_is_inconclusive_unless_policy_restricts() -> None:
     req = PaymentRequirements(
         scheme="weird-scheme",
         network="eip155:84532",
@@ -229,7 +229,8 @@ def test_unknown_scheme_option_skipped_unless_policy_restricts() -> None:
         PaymentRequired(x402_version=2, accepts=[req], error="test")
     )
     out = evaluate_policy(payment_required_header=header, policy=BuyerPolicy(), request_digest=None)
-    assert out.verdict == "pass"
+    assert out.verdict == "inconclusive"
+    assert "scheme_unsupported_offline" in out.option_results[0].reasons
 
     out2 = evaluate_policy(
         payment_required_header=header,

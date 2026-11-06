@@ -12,6 +12,20 @@ Delivery surfaces:
 
 The **analysis receipt** digests actor inputs (inspected header hash + policy + optional digest fields) and optional own-fee settlement metadata — it is **not** a merchant settlement receipt.
 
+### Delivery coordination (tested in CI with mocks)
+
+Paid paths follow the same ordering on **HTTP**, **MCP**, and **A2A**:
+
+1. **Inspect validation first** — malformed or unprocessable merchant header / policy returns **422** (HTTP/MCP error) **before** any facilitator settle attempt for the **analysis fee**.
+2. **Verify payment proof** — `x402ResourceServer.verify_payment` only.
+3. **Claim delivery slot** — Redis `GET` + `SET NX` on `policy_check:delivery:*` when `REDIS_URL` is healthy and strict mode applies; in-process dict when Redis is unset (single-worker semantics only).
+4. **Settle** — `verify_payment` + `settle_payment` only after a successful claim (or return cached delivery on replay without a second settle).
+5. **Finalize** — write analysis JSON under the same key; replay with the same verified payer binding + idempotency key (or same payment proof when no client key) returns the stored body.
+
+**Without** `Idempotency-Key` / `idempotency_key`, replay is keyed by a digest of the **decoded payment proof** (same bytes → at most one settle for that analysis scope). **Cross-actor** replay of identical proof is addressed by binding claims to the payer identity derived from the decoded proof.
+
+Unsupported `accepts[i].scheme` values that are not evaluated offline yield **`inconclusive`** unless the buyer policy constrains `allowed_schemes` (then the option **fails** with `scheme_not_allowed` / `scheme_unsupported_offline` as appropriate).
+
 ## Configuration (env)
 
 | Variable | Default | Notes |
@@ -21,7 +35,7 @@ The **analysis receipt** digests actor inputs (inspected header hash + policy + 
 | `POLICY_CHECK_MAX_HEADER_BYTES` | `65536` | Raw base64/header cap. |
 | `POLICY_CHECK_MAX_DECODED_BYTES` | `262144` | Post-decode wire size cap. |
 | `POLICY_CHECK_MAX_ACCEPTS` | `16` | Max `accepts[]` length. |
-| `POLICY_CHECK_IDEMPOTENCY_REDIS_STRICT` | `true` | With `REDIS_URL` set + Redis unreachable, idempotent requests fail closed (**503**). |
+| `POLICY_CHECK_IDEMPOTENCY_REDIS_STRICT` | `true` | With `REDIS_URL` set + Redis unreachable, delivery claim / strict paths fail closed (**503**). |
 | `X402_PAY_TO_ADDRESS` | — | Required for any paid surface (seller misconfigured → **503**). |
 
 ## Rollout
@@ -34,7 +48,7 @@ The **analysis receipt** digests actor inputs (inspected header hash + policy + 
 
 ## Rollback
 
-Set `POLICY_CHECK_ENABLED=false` and redeploy. No migration: idempotency keys are best-effort TTL in Redis / process memory.
+Set `POLICY_CHECK_ENABLED=false` and redeploy. Delivery claim keys use a **24h TTL** in Redis when configured.
 
 ## Production validation gaps (explicit)
 

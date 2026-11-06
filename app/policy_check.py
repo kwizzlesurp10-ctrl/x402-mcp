@@ -9,6 +9,7 @@ See docs/superpowers/specs/2026-11-06-x402-policy-check-design.md
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -33,6 +34,10 @@ SERVICE_NAME = "Policy Check"  # <= 32 for Bazaar
 SERVICE_TAGS = ["x402", "policy", "compliance", "buyer", "offline"]
 POLICY_SCHEMA_VERSION = 1
 EVALUATOR_VERSION = 1
+
+# Schemes this offline evaluator can reason about (SDK `PaymentRequirements.scheme`).
+# Other schemes are never a policy `pass` — at best `inconclusive` when constraints apply.
+POLICY_CHECK_SUPPORTED_SCHEMES: frozenset[str] = frozenset({"exact"})
 
 # Bounded untrusted input (spec §4.4)
 DEFAULT_MAX_HEADER_BYTES = 65536
@@ -427,6 +432,12 @@ def evaluate_policy(
         scheme = str(getattr(acc, "scheme", "") or "").strip()
         net = str(getattr(acc, "network", "") or "").strip()
 
+        if scheme and scheme not in POLICY_CHECK_SUPPORTED_SCHEMES:
+            reasons.append("scheme_unsupported_offline")
+            # When buyer did not constrain schemes, unknown wire cannot be a confident fail.
+            if not policy.allowed_schemes:
+                global_inconclusive = True
+
         if policy.allowed_schemes:
             if not scheme:
                 reasons.append("scheme_missing")
@@ -656,6 +667,342 @@ async def verify_and_settle(payment_signature: str, payment_required: str) -> di
     )
 
 
+def payment_proof_fingerprint(
+    payment_signature: str,
+    payment_required: str,
+) -> tuple[str | None, str | None]:
+    """Stable digest of the buyer proof + server challenge (for claim namespaces).
+
+    Returns (fingerprint, decode_error). On decode failure fingerprint is None.
+    """
+    from app.x402_services import _decode_payment_inputs
+
+    try:
+        payload, _req = _decode_payment_inputs(payment_signature, payment_required)
+        blob = payload.model_dump(by_alias=True, mode="json")
+    except Exception as exc:  # noqa: BLE001
+        log.info("policy_check proof fingerprint decode failed: %s", type(exc).__name__)
+        return None, str(exc)
+
+    try:
+        canonical = json.dumps(blob, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        canonical = json.dumps(blob, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), None
+
+
+def payer_fingerprint_from_decoded_proof(payment_signature: str, payment_required: str) -> str | None:
+    """Namespace key derived from decoded payment proof (cryptographic identity where present)."""
+    from app.x402_services import _decode_payment_inputs
+
+    try:
+        payload, _req = _decode_payment_inputs(payment_signature, payment_required)
+    except Exception:
+        return None
+    blob = payload.model_dump(by_alias=True, mode="json") if hasattr(payload, "model_dump") else {}
+    inner = blob.get("payload") if isinstance(blob.get("payload"), dict) else None
+    if isinstance(inner, dict):
+        for key in ("from", "payer", "address"):
+            raw = inner.get(key)
+            if raw:
+                return hashlib.sha256(str(raw).strip().lower().encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(blob, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+async def verify_payment_only(payment_signature: str, payment_required: str) -> dict[str, Any]:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.verify_payment_payload(
+        VerifyPaymentInput(payment_signature=payment_signature, payment_required=payment_required)
+    )
+
+
+async def settle_payment_only(
+    payment_signature: str,
+    payment_required: str,
+) -> dict[str, Any]:
+    """Settle the analysis fee after non-financial gates (verify PaymentPayload again inside)."""
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+async def verify_and_settle_after_claim(
+    payment_signature: str,
+    payment_required: str,
+    *,
+    claim_key: str,
+    input_digest: str,
+) -> dict[str, Any]:
+    """Second-phase settlement for A2A: matching delivery claim must exist."""
+    pre = await delivery_read_async(claim_key)
+    if not pre or pre.get("input_digest") != input_digest:
+        return {
+            "is_valid": False,
+            "invalid_reason": "delivery_claim_missing",
+            "settlement": None,
+            "settlement_error": None,
+            "payment_settled": False,
+            "facilitator_url": None,
+            "sdk": "policy_check.verify_and_settle_after_claim",
+        }
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+def preflight_semantic_ok(body: PolicyCheckBody) -> tuple[bool, str | None]:
+    """Merchant/inspected content must be decodable and evaluable before any own-fee settle."""
+    if len(body.payment_required_header) > max_header_bytes():
+        return False, "oversized_input"
+    try:
+        pr = decode_payment_required_header(body.payment_required_header)
+    except Exception as exc:
+        return False, f"inspected_decode_error:{type(exc).__name__}"
+    if _wire_size_bytes(pr) > max_decoded_bytes():
+        return False, "oversized_decoded"
+    x402_ver = getattr(pr, "x402_version", None)
+    if x402_ver is not None and x402_ver != 2:
+        return False, "unsupported_x402_version"
+    accepts = list(getattr(pr, "accepts", []) or [])
+    if len(accepts) > max_accepts():
+        return False, "accepts_too_many"
+    ev = evaluate_policy(
+        payment_required_header=body.payment_required_header,
+        policy=body.policy,
+        request_digest=body.request_digest,
+    )
+    if any(r.get("code") == "decode_error" for r in ev.top_reasons):
+        return False, "inspected_decode_error"
+    return True, None
+
+
+# --- Delivery claim / finalize (before own-service settle; Redis when configured) ---
+
+_DELIVERY_PREFIX = "policy_check:delivery:"
+_DELIVERY_MEM: dict[str, dict[str, Any]] = {}
+_CLAIM_POLL_ATTEMPTS = 120
+_CLAIM_POLL_INTERVAL_S = 0.05
+
+
+def _delivery_redis():
+    from app import redis_client
+
+    return redis_client.client
+
+
+def policy_check_claim_key(
+    body: PolicyCheckBody,
+    *,
+    payer_fp: str,
+    proof_fp: str,
+) -> str:
+    """Stable bucket per verified payer identity + client idempotency key or proof."""
+    if body.idempotency_key and body.idempotency_key.strip():
+        raw = f"{payer_fp}\nidem:{body.idempotency_key.strip()}"
+    else:
+        raw = f"{payer_fp}\nproof:{proof_fp}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _delivery_storage_key(claim_key: str) -> str:
+    return _DELIVERY_PREFIX + claim_key
+
+
+def delivery_read_sync(claim_key: str) -> dict[str, Any] | None:
+    full_key = _delivery_storage_key(claim_key)
+    r = _delivery_redis()
+    if r is not None:
+        try:
+            raw = r.get(full_key)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            return None
+    return _DELIVERY_MEM.get(full_key)
+
+
+async def delivery_read_async(claim_key: str) -> dict[str, Any] | None:
+    full_key = _delivery_storage_key(claim_key)
+    r = _delivery_redis()
+    if r is not None:
+        try:
+            raw = await asyncio.to_thread(r.get, full_key)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            return None
+    return _DELIVERY_MEM.get(full_key)
+
+
+def _delivery_interpret_current(
+    cur: dict[str, Any] | None,
+    *,
+    input_digest: str,
+) -> tuple[str, dict[str, Any] | None] | None:
+    if cur is None:
+        return None
+    if cur.get("input_digest") != input_digest:
+        return "conflict", None
+    if cur.get("status") == "final":
+        return "final_hit", cur
+    if cur.get("status") == "claimed":
+        return "claimed_busy", None
+    return "claimed_busy", None
+
+
+async def delivery_try_claim_or_hit_async(
+    claim_key: str,
+    input_digest: str,
+) -> tuple[str, dict[str, Any] | None]:
+    """GET then SET NX before settle. Another in-flight claim → ``claimed_busy`` (poll final).
+
+    Returns:
+      - ``final_hit`` — delivery already stored (no settle).
+      - ``claimed_new`` — this request created the claim (may settle).
+      - ``claimed_busy`` — same inputs being settled elsewhere (poll, do not settle).
+      - ``conflict`` — same bucket, different digest (no settle).
+      - ``redis_error`` — strict Redis required but I/O failed.
+    """
+    full_key = _delivery_storage_key(claim_key)
+    claimed_json = json.dumps(
+        {"status": "claimed", "input_digest": input_digest},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+    def _redis_try_claim() -> tuple[str, dict[str, Any] | None]:
+        r = _delivery_redis()
+        if r is None:
+            return "redis_error", None
+        try:
+            cur_raw = r.get(full_key)
+            if cur_raw:
+                cur = json.loads(cur_raw)
+                hit = _delivery_interpret_current(cur, input_digest=input_digest)
+                return hit if hit else ("claimed_busy", None)
+            ok = bool(r.set(full_key, claimed_json, nx=True, ex=86400))
+            return ("claimed_new", None) if ok else ("retry_lost_race", None)
+        except Exception:
+            return "redis_error", None
+
+    strict = bool(settings.redis_url and getattr(settings, "policy_check_idempotency_redis_strict", True))
+
+    if _delivery_redis() is not None:
+        st, rec = await asyncio.to_thread(_redis_try_claim)
+        if st == "redis_error" and strict:
+            return "redis_error", None
+        if st == "retry_lost_race":
+            await asyncio.sleep(_CLAIM_POLL_INTERVAL_S)
+            st, rec = await asyncio.to_thread(_redis_try_claim)
+            if st == "redis_error" and strict:
+                return "redis_error", None
+        if st in ("final_hit", "conflict", "claimed_busy", "claimed_new"):
+            return st, rec
+
+    cur = _DELIVERY_MEM.get(full_key)
+    if cur is None:
+        _DELIVERY_MEM[full_key] = {"status": "claimed", "input_digest": input_digest}
+        return "claimed_new", None
+    hit = _delivery_interpret_current(cur, input_digest=input_digest)
+    if hit:
+        return hit
+    return "claimed_new", None
+
+
+async def delivery_wait_for_final_async(
+    claim_key: str,
+    input_digest: str,
+) -> dict[str, Any] | None:
+    """After ``claimed_busy``, poll until final body exists or attempts exhausted."""
+    for _ in range(_CLAIM_POLL_ATTEMPTS):
+        rec = await delivery_read_async(claim_key)
+        if rec and rec.get("status") == "final" and rec.get("input_digest") == input_digest:
+            body = rec.get("body")
+            return body if isinstance(body, dict) else None
+        await asyncio.sleep(_CLAIM_POLL_INTERVAL_S)
+    return None
+
+
+async def delivery_write_final_async(
+    claim_key: str,
+    *,
+    input_digest: str,
+    body: dict[str, Any],
+    payment_proof_fp: str,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Persist analysis after successful settle; must match claim digest."""
+    full_key = _delivery_storage_key(claim_key)
+    new_val = {
+        "status": "final",
+        "input_digest": input_digest,
+        "body": body,
+        "proof_fp": payment_proof_fp,
+    }
+    payload = json.dumps(new_val, separators=(",", ":"), sort_keys=True)
+
+    def _redis_commit() -> tuple[bool, dict[str, Any] | None]:
+        r = _delivery_redis()
+        if r is None:
+            return False, None
+        try:
+            cur_raw = r.get(full_key)
+            if not cur_raw:
+                return False, None
+            cur = json.loads(cur_raw)
+            if cur.get("input_digest") != input_digest:
+                return False, None
+            prev = cur.get("body") if cur.get("status") == "final" else None
+            r.set(full_key, payload, ex=86400)
+            return True, prev if isinstance(prev, dict) else None
+        except Exception:
+            return False, None
+
+    r = _delivery_redis()
+    if r is not None:
+        ok, prev = await asyncio.to_thread(_redis_commit)
+        if ok:
+            return True, prev
+        if settings.redis_url and getattr(settings, "policy_check_idempotency_redis_strict", True):
+            return False, None
+
+    cur = _DELIVERY_MEM.get(full_key)
+    if not cur or cur.get("input_digest") != input_digest:
+        return False, None
+    prev = cur.get("body") if cur.get("status") == "final" else None
+    _DELIVERY_MEM[full_key] = new_val
+    return True, prev if isinstance(prev, dict) else None
+
+
+def clear_delivery_test() -> None:
+    _DELIVERY_MEM.clear()
+
+
+def delivery_abort_claim_sync(claim_key: str) -> None:
+    """Remove claimed slot after a failed settle (caller was the claim owner)."""
+    full_key = _delivery_storage_key(claim_key)
+    r = _delivery_redis()
+    if r is not None:
+        try:
+            r.delete(full_key)
+        except Exception:
+            pass
+    _DELIVERY_MEM.pop(full_key, None)
+
+
 def run_evaluation(body: PolicyCheckBody) -> PolicyCheckResult:
     result = evaluate_policy(
         payment_required_header=body.payment_required_header,
@@ -689,72 +1036,13 @@ def build_paid_analysis_dict(
     return out
 
 
-# --- Idempotency (Redis when available; in-memory fallback) ---
-
-_IDEM_MEM: dict[str, tuple[str, dict[str, Any]]] = {}
-_IDEM_PREFIX = "policy_check:idem:"
-
-
-def _idem_redis():
-    from app import redis_client
-
-    return redis_client.client
+def clear_idempotency_test() -> None:
+    clear_delivery_test()
 
 
 def idempotency_strict_redis_unavailable() -> bool:
     return bool(
         getattr(settings, "policy_check_idempotency_redis_strict", True)
         and settings.redis_url
-        and _idem_redis() is None
+        and _delivery_redis() is None
     )
-
-
-def idempotency_get(key: str) -> tuple[str | None, dict[str, Any] | None]:
-    if not key:
-        return None, None
-    r = _idem_redis()
-    composite = hashlib.sha256(key.encode("utf-8")).hexdigest()
-    if r is not None:
-        try:
-            raw = r.get(_IDEM_PREFIX + composite)
-            if not raw:
-                return None, None
-            obj = json.loads(raw)
-            dg = obj.get("digest")
-            bd = obj.get("body")
-            if isinstance(dg, str) and isinstance(bd, dict):
-                return dg, bd
-            return None, None
-        except Exception:
-            return None, None
-    got = _IDEM_MEM.get(key)
-    if got is None:
-        return None, None
-    digest, body = got
-    return digest, body
-
-
-def idempotency_set(key: str, digest: str, body: dict[str, Any]) -> None:
-    r = _idem_redis()
-    composite = hashlib.sha256(key.encode("utf-8")).hexdigest()
-    payload = json.dumps({"digest": digest, "body": body}, separators=(",", ":"))
-    if r is not None:
-        try:
-            r.set(_IDEM_PREFIX + composite, payload, ex=86400)
-        except Exception:
-            log.warning("policy_check idempotency redis set failed", exc_info=False)
-    else:
-        _IDEM_MEM[key] = (digest, body)
-
-
-def clear_idempotency_test() -> None:
-    _IDEM_MEM.clear()
-
-
-def settle_payer_fingerprint(settlement: dict[str, Any]) -> str:
-    payer = str(settlement.get("payer") or "unknown")
-    return hashlib.sha256(payer.lower().encode("utf-8")).hexdigest()[:16]
-
-
-def composite_idempotency_key(payer_fp: str, client_key: str) -> str:
-    return f"{payer_fp}:{client_key}"

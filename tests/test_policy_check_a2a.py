@@ -81,7 +81,10 @@ def test_a2a_policy_check_unpaid_input_required(policy_on: None) -> None:
 async def test_a2a_policy_check_paid_completes(policy_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
     policy_check.clear_idempotency_test()
 
-    async def fake_settle(_sig: str, _hdr: str) -> dict[str, Any]:
+    async def fake_verify_only(_sig: str, _hdr: str) -> dict[str, Any]:
+        return {"is_valid": True, "invalid_reason": None}
+
+    async def fake_after_claim(*_a: Any, **_kw: Any) -> dict[str, Any]:
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -92,7 +95,14 @@ async def test_a2a_policy_check_paid_completes(policy_on: None, monkeypatch: pyt
             },
         }
 
-    monkeypatch.setattr(policy_check, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(policy_check, "verify_payment_only", fake_verify_only)
+    monkeypatch.setattr(policy_check, "verify_and_settle_after_claim", fake_after_claim)
+    monkeypatch.setattr(policy_check, "payment_proof_fingerprint", lambda s, h: ("a2a-proof", None))
+    monkeypatch.setattr(
+        policy_check,
+        "payer_fingerprint_from_decoded_proof",
+        lambda s, h: "a2a-payer-fp",
+    )
 
     start = client.post(
         "/a2a",

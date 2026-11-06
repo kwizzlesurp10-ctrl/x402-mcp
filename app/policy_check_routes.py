@@ -143,8 +143,93 @@ async def policy_check_post(request: Request) -> JSONResponse:
             },
         )
 
-    settle = await policy_check.verify_and_settle(signature, payment_req_own)
+    ok_semantic, sem_detail = policy_check.preflight_semantic_ok(body)
+    if not ok_semantic:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "inspected_validation_failed", "detail": sem_detail},
+        )
+
+    proof_fp, proof_err = policy_check.payment_proof_fingerprint(signature, payment_req_own)
+    if proof_fp is None:
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_req_own},
+            content={"error": "malformed_payment", "detail": proof_err or "decode_failed"},
+        )
+
+    verified = await policy_check.verify_payment_only(signature, payment_req_own)
+    if not verified.get("is_valid"):
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_req_own},
+            content={
+                "error": "payment_rejected",
+                "invalid_reason": verified.get("invalid_reason"),
+            },
+        )
+
+    payer_fp = policy_check.payer_fingerprint_from_decoded_proof(signature, payment_req_own)
+    if payer_fp is None:
+        return JSONResponse(
+            status_code=402,
+            headers={"PAYMENT-REQUIRED": payment_req_own},
+            content={"error": "malformed_payment", "detail": "cannot_bind_payer"},
+        )
+
+    input_digest = policy_check.analysis_input_digest(
+        inspected_header_digest=policy_check.inspected_header_digest(body.payment_required_header),
+        policy=body.policy,
+        request_digest=body.request_digest,
+    )
+    claim_key = policy_check.policy_check_claim_key(body, payer_fp=payer_fp, proof_fp=proof_fp)
+
+    claim_st, claim_rec = await policy_check.delivery_try_claim_or_hit_async(claim_key, input_digest)
+    if claim_st == "redis_error":
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "delivery_store_unavailable",
+                "detail": "REDIS_URL configured but unreachable; cannot claim delivery slot safely",
+            },
+        )
+    if claim_st == "conflict":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "idempotency_conflict",
+                "detail": "same idempotency scope with different analysis inputs",
+            },
+        )
+    if claim_st == "final_hit" and claim_rec and isinstance(claim_rec.get("body"), dict):
+        latency = round((time.monotonic() - t0) * 1000)
+        log.info(
+            "policy-check delivery replay (no settle)",
+            extra={"status_code": 200, "latency_ms": latency, "product": policy_check.PRODUCT_ID},
+        )
+        return JSONResponse(content=claim_rec["body"])
+
+    if claim_st == "claimed_busy":
+        waited = await policy_check.delivery_wait_for_final_async(claim_key, input_digest)
+        if isinstance(waited, dict):
+            latency = round((time.monotonic() - t0) * 1000)
+            log.info(
+                "policy-check concurrent replay (no second settle)",
+                extra={"status_code": 200, "latency_ms": latency, "product": policy_check.PRODUCT_ID},
+            )
+            return JSONResponse(content=waited)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "delivery_in_progress",
+                "detail": "identical payment in flight; retry with same proof shortly",
+            },
+        )
+
+    settle = await policy_check.settle_payment_only(signature, payment_req_own)
     if not settle.get("is_valid") or not settle.get("payment_settled"):
+        policy_check.delivery_abort_claim_sync(claim_key)
+
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_req_own},
@@ -160,6 +245,7 @@ async def policy_check_post(request: Request) -> JSONResponse:
     payer = settlement.get("payer")
 
     if settle.get("payment_settled") and not tx:
+        policy_check.delivery_abort_claim_sync(claim_key)
         return JSONResponse(
             status_code=402,
             content={
@@ -168,42 +254,22 @@ async def policy_check_post(request: Request) -> JSONResponse:
             },
         )
 
-    if body.idempotency_key:
-        comp = policy_check.composite_idempotency_key(
-            policy_check.settle_payer_fingerprint(settlement),
-            body.idempotency_key,
-        )
-        input_digest = policy_check.analysis_input_digest(
-            inspected_header_digest=policy_check.inspected_header_digest(body.payment_required_header),
-            policy=body.policy,
-            request_digest=body.request_digest,
-        )
-        prev_d, prev_body = policy_check.idempotency_get(comp)
-        if prev_d is not None:
-            if prev_d != input_digest:
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "error": "idempotency_conflict",
-                        "detail": "same Idempotency-Key with different analysis inputs",
-                    },
-                )
-            latency = round((time.monotonic() - t0) * 1000)
-            log.info(
-                "policy-check idempotent replay",
-                extra={"status_code": 200, "latency_ms": latency, "product": policy_check.PRODUCT_ID},
-            )
-            return JSONResponse(content=prev_body)
-
     out = policy_check.build_paid_analysis_dict(body, settlement=settlement)
-    eval_digest = out.get("analysis_input_digest")
-
-    if body.idempotency_key:
-        comp = policy_check.composite_idempotency_key(
-            policy_check.settle_payer_fingerprint(settlement),
-            body.idempotency_key,
+    written, _prev = await policy_check.delivery_write_final_async(
+        claim_key,
+        input_digest=input_digest,
+        body=out,
+        payment_proof_fp=proof_fp,
+    )
+    if not written:
+        policy_check.delivery_abort_claim_sync(claim_key)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "delivery_persist_failed",
+                "detail": "settlement succeeded but durable delivery record failed — reconcile",
+            },
         )
-        policy_check.idempotency_set(comp, str(eval_digest or ""), out)
 
     try:
         from app.swarm import ledger_writer

@@ -933,12 +933,30 @@ def build_policy_check_mcp_requirements(agent_id: str) -> dict[str, Any]:
 
 
 async def verify_payment_payload(params: VerifyPaymentInput) -> dict[str, Any]:
-    payload, requirements = _decode_payment_inputs(
-        params.payment_signature, params.payment_required
-    )
+    try:
+        payload, requirements = _decode_payment_inputs(
+            params.payment_signature, params.payment_required
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("payment decode failed: %s", exc)
+        return {
+            "is_valid": False,
+            "invalid_reason": f"malformed_payment: {exc}",
+            "facilitator_url": None,
+            "sdk": "x402ResourceServer.verify_payment",
+        }
+
     network = _network_of(requirements)
-    server = _resource_server(network)
-    result = await server.verify_payment(payload, requirements)
+    try:
+        result = await _verify_payment_decoded(payload, requirements, network=network)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("payment verify failed: %s", exc)
+        return {
+            "is_valid": False,
+            "invalid_reason": f"verify_failed: {exc}",
+            "facilitator_url": _facilitator_url_for(network),
+            "sdk": "x402ResourceServer.verify_payment",
+        }
 
     return {
         "is_valid": result.is_valid,
@@ -961,6 +979,102 @@ def _invalid_payment_result(reason: str) -> dict[str, Any]:
     }
 
 
+async def _verify_payment_decoded(payload: Any, requirements: Any, *, network: str | None) -> Any:
+    server = _resource_server(network)
+    return await server.verify_payment(payload, requirements)
+
+
+async def _settle_payment_decoded(payload: Any, requirements: Any, *, network: str | None) -> Any:
+    server = _resource_server(network)
+    return await server.settle_payment(payload, requirements)
+
+
+async def _mailrail_settlement_receipt(
+    payload: Any, requirements: Any, settlement: dict[str, Any], settle_result: Any
+) -> None:
+    try:
+        from app import mailrail
+
+        tx_hash = (
+            settlement.get("transaction")
+            or settlement.get("tx_hash")
+            or settlement.get("hash")
+            or getattr(settle_result, "transaction", None)
+        )
+        try:
+            amt = float(settlement.get("amount") or 0.0)
+        except (ValueError, TypeError):
+            amt = 0.0
+        sub, body = mailrail.format_settlement_receipt(
+            payer=str(settlement.get("payer") or getattr(payload, "address", "unknown")),
+            amount_usdc=amt,
+            resource=str(getattr(requirements, "description", None) or "x402-resource"),
+            tx_hash=tx_hash,
+        )
+        mailrail.send_agent_mail(
+            to=settings.mailrail_admin_recipient,
+            subject=sub,
+            body=body,
+            event_id=tx_hash,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("MailRail auto-receipt dispatch failed: %s", exc)
+
+
+async def settle_payment_after_verify(params: VerifyPaymentInput) -> dict[str, Any]:
+    """Decode, verify, then settle (second phase after a non-financial claim).
+
+    Use when the caller has already confirmed payment proof validity out-of-band;
+    this still re-verifies before settling so a client cannot swap payloads mid-flow.
+    """
+    try:
+        payload, requirements = _decode_payment_inputs(
+            params.payment_signature, params.payment_required
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("payment decode failed: %s", exc)
+        return _invalid_payment_result(f"malformed_payment: {exc}")
+
+    try:
+        network = _network_of(requirements)
+        verify_result = await _verify_payment_decoded(payload, requirements, network=network)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("payment verify failed: %s", exc)
+        return _invalid_payment_result(f"verify_failed: {exc}")
+
+    if not verify_result.is_valid:
+        return {
+            "is_valid": False,
+            "invalid_reason": getattr(verify_result, "invalid_reason", None)
+            or "payment_invalid",
+            "settlement": None,
+            "settlement_error": None,
+            "payment_settled": False,
+            "facilitator_url": _facilitator_url_for(network),
+            "sdk": "x402ResourceServer.verify_payment + settle_payment",
+        }
+
+    settlement = None
+    settlement_error = None
+    try:
+        settle_result = await _settle_payment_decoded(payload, requirements, network=network)
+        settlement = settle_result.model_dump()
+        if settlement.get("success") is True:
+            await _mailrail_settlement_receipt(payload, requirements, settlement, settle_result)
+    except Exception as exc:  # noqa: BLE001
+        settlement_error = str(exc)
+
+    return {
+        "is_valid": True,
+        "invalid_reason": None,
+        "settlement": settlement,
+        "settlement_error": settlement_error,
+        "payment_settled": settlement is not None and settlement.get("success") is True,
+        "facilitator_url": _facilitator_url_for(network),
+        "sdk": "x402ResourceServer.verify_payment + settle_payment",
+    }
+
+
 async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, Any]:
     """Seller revenue path: verify then settle via x402ResourceServer + facilitator.
 
@@ -979,8 +1093,7 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
 
     try:
         network = _network_of(requirements)
-        server = _resource_server(network)
-        verify_result = await server.verify_payment(payload, requirements)
+        verify_result = await _verify_payment_decoded(payload, requirements, network=network)
     except Exception as exc:  # noqa: BLE001 — facilitator/SDK faults
         logger.warning("payment verify failed: %s", exc)
         return _invalid_payment_result(f"verify_failed: {exc}")
@@ -989,35 +1102,10 @@ async def _verify_and_settle_payment(params: VerifyPaymentInput) -> dict[str, An
     settlement_error = None
     if verify_result.is_valid:
         try:
-            settle_result = await server.settle_payment(payload, requirements)
+            settle_result = await _settle_payment_decoded(payload, requirements, network=network)
             settlement = settle_result.model_dump()
             if settlement.get("success") is True:
-                try:
-                    from app import mailrail
-                    tx_hash = (
-                        settlement.get("transaction")
-                        or settlement.get("tx_hash")
-                        or settlement.get("hash")
-                        or getattr(settle_result, "transaction", None)
-                    )
-                    try:
-                        amt = float(settlement.get("amount") or 0.0)
-                    except (ValueError, TypeError):
-                        amt = 0.0
-                    sub, body = mailrail.format_settlement_receipt(
-                        payer=str(settlement.get("payer") or getattr(payload, "address", "unknown")),
-                        amount_usdc=amt,
-                        resource=str(getattr(requirements, "description", None) or "x402-resource"),
-                        tx_hash=tx_hash,
-                    )
-                    mailrail.send_agent_mail(
-                        to=settings.mailrail_admin_recipient,
-                        subject=sub,
-                        body=body,
-                        event_id=tx_hash,
-                    )
-                except Exception as exc:
-                    logger.warning("MailRail auto-receipt dispatch failed: %s", exc)
+                await _mailrail_settlement_receipt(payload, requirements, settlement, settle_result)
         except Exception as exc:
             settlement_error = str(exc)
 

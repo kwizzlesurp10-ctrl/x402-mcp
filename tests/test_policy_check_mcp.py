@@ -101,7 +101,16 @@ async def test_policy_check_mcp_paid_success_mocked_settle(
     }
     ctx = _payment_ctx(payment)
 
-    async def fake_verify(_payment: dict[str, Any], _challenge: Any) -> dict[str, Any]:
+    async def fake_verify_pc(_payment: dict[str, Any], _challenge: Any) -> dict[str, Any]:
+        return {
+            "is_valid": True,
+            "payment_signature": "mcp-test-sig",
+        }
+
+    settle_calls: list[int] = []
+
+    async def fake_settle_only(_sig: str, _hdr: str) -> dict[str, Any]:
+        settle_calls.append(1)
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -112,7 +121,14 @@ async def test_policy_check_mcp_paid_success_mocked_settle(
             },
         }
 
-    monkeypatch.setattr(mcp_x402_payment, "verify_and_settle_mcp_payload", fake_verify)
+    monkeypatch.setattr(mcp_x402_payment, "verify_policy_check_mcp_payment", fake_verify_pc)
+    monkeypatch.setattr(policy_check, "settle_payment_only", fake_settle_only)
+    monkeypatch.setattr(policy_check, "payment_proof_fingerprint", lambda s, h: ("mcp-proof-fp", None))
+    monkeypatch.setattr(
+        policy_check,
+        "payer_fingerprint_from_decoded_proof",
+        lambda s, h: "mcp-payer-fp",
+    )
     store = commerce.InMemoryQuotaStore()
     monkeypatch.setattr(mcp_server, "quota_store", store)
 
@@ -130,3 +146,16 @@ async def test_policy_check_mcp_paid_success_mocked_settle(
         outer = json.loads(raw)
     assert outer.get("data", {}).get("verdict") == "pass"
     assert outer.get("data", {}).get("own_service_settlement", {}).get("transaction") == "0xmcp123"
+    assert len(settle_calls) == 1
+
+    raw2 = await mcp_server.policy_check_tool(
+        payment_required_header=_merchant_inspected_header(),
+        policy='{"allowed_networks":["eip155:84532"],"max_amount_atomic":"10000000"}',
+        request_digest=None,
+        idempotency_key=None,
+        agent_id="mcp-pc-paid",
+        ctx=ctx,
+    )
+    outer2 = json.loads(raw2.content[0].text) if isinstance(raw2, CallToolResult) else json.loads(raw2)
+    assert outer2.get("data") == outer.get("data")
+    assert len(settle_calls) == 1

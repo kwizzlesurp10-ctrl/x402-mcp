@@ -61,7 +61,13 @@ def test_paid_success_and_idempotency(
     # would 503. Policy-check idempotency falls back to in-memory when Redis is unset.
     monkeypatch.setattr(settings, "redis_url", None)
 
-    async def fake_settle(_sig: str, _hdr: str) -> dict[str, Any]:
+    async def fake_verify_only(_sig: str, _hdr: str) -> dict[str, Any]:
+        return {"is_valid": True, "invalid_reason": None}
+
+    settle_calls: list[int] = []
+
+    async def fake_settle_only(_sig: str, _hdr: str) -> dict[str, Any]:
+        settle_calls.append(1)
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -72,7 +78,14 @@ def test_paid_success_and_idempotency(
             },
         }
 
-    monkeypatch.setattr(policy_check, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(policy_check, "verify_payment_only", fake_verify_only)
+    monkeypatch.setattr(policy_check, "settle_payment_only", fake_settle_only)
+    monkeypatch.setattr(policy_check, "payment_proof_fingerprint", lambda s, h: ("test-proof-fp", None))
+    monkeypatch.setattr(
+        policy_check,
+        "payer_fingerprint_from_decoded_proof",
+        lambda s, h: "test-payer-fp",
+    )
 
     body = {
         "payment_required_header": _merchant_header(),
@@ -88,6 +101,7 @@ def test_paid_success_and_idempotency(
     r2 = client.post("/x402/policy-check", json=body, headers={"PAYMENT-SIGNATURE": "sig2"})
     assert r2.status_code == 200
     assert r2.json() == j1
+    assert len(settle_calls) == 1
 
     body_conflict = dict(body)
     body_conflict["policy"] = {"allowed_networks": ["eip155:1"]}
@@ -98,6 +112,7 @@ def test_paid_success_and_idempotency(
     )
     assert r3.status_code == 409
     assert r3.json().get("error") == "idempotency_conflict"
+    assert len(settle_calls) == 1
 
 
 def test_redis_strict_idempotency_unavailable_503(
@@ -111,14 +126,24 @@ def test_redis_strict_idempotency_unavailable_503(
 
     monkeypatch.setattr(redis_client, "client", None)
 
-    async def fake_settle(_sig: str, _hdr: str) -> dict[str, Any]:
+    async def _fake_verify(_sig: str, _hdr: str) -> dict[str, Any]:
+        return {"is_valid": True, "invalid_reason": None}
+
+    async def _fake_settle(_sig: str, _hdr: str) -> dict[str, Any]:
         return {
             "is_valid": True,
             "payment_settled": True,
             "settlement": {"success": True, "transaction": "0x1", "payer": "0xp"},
         }
 
-    monkeypatch.setattr(policy_check, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(policy_check, "verify_payment_only", _fake_verify)
+    monkeypatch.setattr(policy_check, "settle_payment_only", _fake_settle)
+    monkeypatch.setattr(policy_check, "payment_proof_fingerprint", lambda s, h: ("test-proof-fp", None))
+    monkeypatch.setattr(
+        policy_check,
+        "payer_fingerprint_from_decoded_proof",
+        lambda s, h: "test-payer-fp",
+    )
     body = {
         "payment_required_header": _merchant_header(),
         "policy": {},
