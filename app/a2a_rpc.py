@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
+import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 from starlette.datastructures import Headers
 
@@ -21,17 +23,110 @@ META_REQUIRED = "x402.payment.required"
 META_PAYLOAD = "x402.payment.payload"
 META_RECEIPTS = "x402.payment.receipts"
 META_ERROR = "x402.payment.error"
+# Proves ownership for tasks/get, tasks/cancel, and paid message/send continuations.
+META_TASK_CAPABILITY = "x402.task.capability"
 
 JSONRPC_TASK_NOT_FOUND = -32001
 JSONRPC_INVALID_PARAMS = -32602
 JSONRPC_METHOD_NOT_FOUND = -32601
+JSONRPC_FORBIDDEN = -32003
 
 _TASKS: dict[str, dict[str, Any]] = {}
+
+# Never echoed in JSON-RPC; use _client_task_view.
+_INTERNAL_TASK_KEYS = frozenset(
+    {
+        "binding",
+        "payment_required_header",
+        "input",
+        "product_id",
+        "capability_token",
+        "client_id",
+        "created_at_monotonic",
+        "fulfillment_status",  # reconciliation hint; internal
+    }
+)
 
 
 def clear_task_store() -> None:
     """Test hook: drop in-memory A2A tasks."""
     _TASKS.clear()
+
+
+def _header(headers: Mapping[str, str] | Headers | None, name: str) -> str | None:
+    if headers is None:
+        return None
+    raw = headers.get(name)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
+
+
+def _creator_client_id(headers: Mapping[str, str] | Headers | None) -> str | None:
+    return _header(headers, "x-a2a-client-id") or _header(headers, "a2a-client-id")
+
+
+def _capability_from_task_ops(
+    headers: Mapping[str, str] | Headers | None, params: dict[str, Any]
+) -> str | None:
+    cap = _header(headers, "x-a2a-task-capability") or _header(headers, "a2a-task-capability")
+    if cap:
+        return cap
+    raw = params.get("capabilityToken")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
+
+
+def _client_id_from_task_ops(
+    headers: Mapping[str, str] | Headers | None, params: dict[str, Any]
+) -> str | None:
+    cid = _header(headers, "x-a2a-client-id") or _header(headers, "a2a-client-id")
+    if cid:
+        return cid
+    raw = params.get("clientId")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
+
+
+def _register_task(
+    task_id: str, record: dict[str, Any], *, client_id: str | None
+) -> None:
+    record["capability_token"] = secrets.token_urlsafe(32)
+    record["client_id"] = client_id
+    record["created_at_monotonic"] = time.monotonic()
+    _TASKS[task_id] = record
+
+
+def _client_task_view(record: dict[str, Any]) -> dict[str, Any]:
+    pub = {k: v for k, v in record.items() if k not in _INTERNAL_TASK_KEYS}
+    pub["capabilityToken"] = record["capability_token"]
+    return pub
+
+
+def _authorize_task_access(
+    stored: dict[str, Any],
+    *,
+    capability: str | None,
+    client_id: str | None,
+) -> str | None:
+    """Return an error detail if forbidden."""
+    if not capability:
+        return "missing task capability"
+    token = stored.get("capability_token")
+    if not isinstance(token, str) or not token:
+        return "task record missing capability"
+    if not secrets.compare_digest(token, capability):
+        return "invalid task capability"
+    bound = stored.get("client_id")
+    if isinstance(bound, str) and bound:
+        if not client_id or not secrets.compare_digest(bound, client_id):
+            return "client id does not match task binding"
+    return None
 
 
 @dataclass(frozen=True)
@@ -416,7 +511,12 @@ def _normalize_method(method: str) -> str | None:
     return aliases.get(m)
 
 
-async def handle_jsonrpc(body: dict[str, Any], *, user_agent: str | None = None) -> dict[str, Any]:
+async def handle_jsonrpc(
+    body: dict[str, Any],
+    *,
+    user_agent: str | None = None,
+    headers: Mapping[str, str] | Headers | None = None,
+) -> dict[str, Any]:
     """Dispatch one JSON-RPC 2.0 request for POST /a2a."""
     req_id = body.get("id")
     method = _normalize_method(str(body.get("method") or ""))
@@ -430,11 +530,12 @@ async def handle_jsonrpc(body: dict[str, Any], *, user_agent: str | None = None)
         return _jsonrpc_error(req_id, JSONRPC_INVALID_PARAMS, "params must be an object")
 
     if method == "message/send":
-        return await _message_send(req_id, params, user_agent=user_agent)
+        creator = _creator_client_id(headers)
+        return await _message_send(req_id, params, user_agent=user_agent, creator_client_id=creator)
     if method == "tasks/get":
-        return _tasks_get(req_id, params)
+        return _tasks_get(req_id, params, headers=headers)
     if method == "tasks/cancel":
-        return _tasks_cancel(req_id, params)
+        return _tasks_cancel(req_id, params, headers=headers)
     return _jsonrpc_error(req_id, JSONRPC_METHOD_NOT_FOUND, "method not found")
 
 
@@ -443,6 +544,7 @@ async def _message_send(
     params: dict[str, Any],
     *,
     user_agent: str | None,
+    creator_client_id: str | None = None,
 ) -> dict[str, Any]:
     from app import demand
 
@@ -461,8 +563,9 @@ async def _message_send(
             {META_STATUS: "payment-rejected"},
         )
         task = _task_dict(task_id=tid, state="canceled", message=msg)
-        _TASKS[tid] = task
-        return _jsonrpc_result(req_id, task)
+        rec = {**task}
+        _register_task(tid, rec, client_id=creator_client_id)
+        return _jsonrpc_result(req_id, _client_task_view(rec))
 
     payload_obj = meta.get(META_PAYLOAD)
     if pay_status == "payment-submitted" or payload_obj is not None:
@@ -472,6 +575,23 @@ async def _message_send(
                 JSONRPC_TASK_NOT_FOUND,
                 "task not found",
                 {"taskId": task_id},
+            )
+        cap = meta.get(META_TASK_CAPABILITY) or meta.get("taskCapability")
+        if isinstance(cap, str) and cap.strip():
+            cap = cap.strip()
+        else:
+            cap = None
+        reason = _authorize_task_access(
+            _TASKS[task_id],
+            capability=cap,
+            client_id=creator_client_id,
+        )
+        if reason:
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_FORBIDDEN,
+                reason,
+                {"taskId": task_id, "detail": reason},
             )
         return await _continue_paid_task(req_id, task_id, payload_obj, user_agent=user_agent)
 
@@ -509,8 +629,9 @@ async def _message_send(
             message=msg,
             artifacts=[_artifact_from_result(result)],
         )
-        _TASKS[tid] = {**task, "skillId": skill_id, "input": skill_input}
-        return _jsonrpc_result(req_id, task)
+        rec = {**task, "skillId": skill_id, "input": skill_input}
+        _register_task(tid, rec, client_id=creator_client_id)
+        return _jsonrpc_result(req_id, _client_task_view(rec))
 
     if not settings.x402_pay_to_address:
         return _jsonrpc_error(req_id, -32004, "seller not configured")
@@ -534,7 +655,7 @@ async def _message_send(
     }
     msg = _agent_message(binding.payment_text, pay_meta)
     task = _task_dict(task_id=tid, state="input-required", message=msg)
-    _TASKS[tid] = {
+    rec = {
         **task,
         "skillId": skill_id,
         "input": skill_input,
@@ -543,7 +664,8 @@ async def _message_send(
         "receipts": [],
         "binding": binding,
     }
-    return _jsonrpc_result(req_id, task)
+    _register_task(tid, rec, client_id=creator_client_id)
+    return _jsonrpc_result(req_id, _client_task_view(rec))
 
 
 async def _continue_paid_task(
@@ -574,7 +696,7 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="failed", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        return _jsonrpc_result(req_id, task)
+        return _jsonrpc_result(req_id, _client_task_view(stored))
 
     assert binding.verify_and_settle is not None
     result = await binding.verify_and_settle(signature, header)
@@ -599,12 +721,21 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="input-required", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        return _jsonrpc_result(req_id, task)
+        return _jsonrpc_result(req_id, _client_task_view(stored))
 
     if binding.record_revenue:
         binding.record_revenue(settlement, stored.get("input") or {})
 
     skill_input = stored.get("input") or {}
+    settled_ok = bool(result.get("payment_settled"))
+    tx_present = bool((settlement or {}).get("transaction") or (settlement or {}).get("txHash"))
+    if settled_ok and tx_present:
+        stored["fulfillment_status"] = "fulfilled"
+    elif settled_ok:
+        stored["fulfillment_status"] = "settled_pending_tx"
+    else:
+        stored["fulfillment_status"] = "unknown_settlement"
+
     try:
         deliverable = await binding.execute(skill_input)
     except Exception as exc:  # noqa: BLE001
@@ -619,7 +750,7 @@ async def _continue_paid_task(
         task = _task_dict(task_id=task_id, state="failed", message=msg)
         stored.update(task)
         stored["receipts"] = receipts
-        return _jsonrpc_result(req_id, task)
+        return _jsonrpc_result(req_id, _client_task_view(stored))
 
     msg = _agent_message(
         "Payment completed. Skill result attached as artifact.",
@@ -636,10 +767,15 @@ async def _continue_paid_task(
     )
     stored.update(task)
     stored["receipts"] = receipts
-    return _jsonrpc_result(req_id, task)
+    return _jsonrpc_result(req_id, _client_task_view(stored))
 
 
-def _tasks_get(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
+def _tasks_get(
+    req_id: Any,
+    params: dict[str, Any],
+    *,
+    headers: Mapping[str, str] | Headers | None,
+) -> dict[str, Any]:
     task_id = params.get("id") or params.get("taskId")
     if not task_id or task_id not in _TASKS:
         return _jsonrpc_error(
@@ -649,19 +785,25 @@ def _tasks_get(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
             {"taskId": task_id},
         )
     stored = _TASKS[task_id]
-    # Return public task shape only (omit binding/header).
-    task = {k: v for k, v in stored.items() if k not in {"binding", "payment_required_header", "input", "product_id"}}
-    if "kind" not in task:
-        task = _task_dict(
-            task_id=task_id,
-            state=stored.get("status", {}).get("state", "unknown"),
-            message=(stored.get("status") or {}).get("message"),
-            artifacts=stored.get("artifacts"),
+    cap = _capability_from_task_ops(headers, params)
+    cid = _client_id_from_task_ops(headers, params)
+    reason = _authorize_task_access(stored, capability=cap, client_id=cid)
+    if reason:
+        return _jsonrpc_error(
+            req_id,
+            JSONRPC_FORBIDDEN,
+            reason,
+            {"taskId": task_id, "detail": reason},
         )
-    return _jsonrpc_result(req_id, task)
+    return _jsonrpc_result(req_id, _client_task_view(stored))
 
 
-def _tasks_cancel(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
+def _tasks_cancel(
+    req_id: Any,
+    params: dict[str, Any],
+    *,
+    headers: Mapping[str, str] | Headers | None,
+) -> dict[str, Any]:
     task_id = params.get("id") or params.get("taskId")
     if not task_id or task_id not in _TASKS:
         return _jsonrpc_error(
@@ -671,13 +813,23 @@ def _tasks_cancel(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
             {"taskId": task_id},
         )
     stored = _TASKS[task_id]
+    cap = _capability_from_task_ops(headers, params)
+    cid = _client_id_from_task_ops(headers, params)
+    reason = _authorize_task_access(stored, capability=cap, client_id=cid)
+    if reason:
+        return _jsonrpc_error(
+            req_id,
+            JSONRPC_FORBIDDEN,
+            reason,
+            {"taskId": task_id, "detail": reason},
+        )
     state = (stored.get("status") or {}).get("state")
     if state in {"completed", "failed", "canceled"}:
         return _jsonrpc_error(req_id, -32002, "task not cancelable")
     msg = _agent_message("Task canceled by client.", {})
     task = _task_dict(task_id=task_id, state="canceled", message=msg)
     stored.update(task)
-    return _jsonrpc_result(req_id, task)
+    return _jsonrpc_result(req_id, _client_task_view(stored))
 
 
 def extension_activation_response_headers(requested: str | None) -> dict[str, str]:

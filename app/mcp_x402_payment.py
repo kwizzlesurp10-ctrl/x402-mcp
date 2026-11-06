@@ -25,6 +25,7 @@ from app.commerce_payment import (
     validate_commerce_requirements,
 )
 from app.config import settings
+from app import mcp_settlement_store
 from app.models import ToolResponse
 
 logger = logging.getLogger("mcp_x402_payment")
@@ -38,6 +39,7 @@ _settlement_cache: dict[str, dict[str, Any]] = {}
 def clear_mcp_settlement_cache() -> None:
     """Test helper: reset in-memory settlement idempotency cache."""
     _settlement_cache.clear()
+    mcp_settlement_store.clear_mcp_settlement_redis_test()
 
 
 def extract_payment_from_context(ctx: Any) -> dict[str, Any] | None:
@@ -163,57 +165,100 @@ async def verify_and_settle_mcp_payload(
     cached = _settlement_cache.get(cache_key)
     if cached is not None:
         return cached
+    redis_cached = mcp_settlement_store.get_cached_settlement(cache_key)
+    if redis_cached is not None:
+        _settlement_cache[cache_key] = redis_cached
+        return redis_cached
 
-    accepts = _payment_requirements_models(challenge.payment_required_header)
-    if not accepts:
-        return _invalid_payment_result("commerce challenge missing accepts[]")
-
-    network = _network_of(accepts[0])
-    server = _resource_server(network)
-    matched = server.find_matching_requirements(accepts, payload)
-    if matched is None:
-        return _invalid_payment_result(
-            "payment does not match server-authored requirements (payTo/amount/network)"
-        )
+    had_lock = mcp_settlement_store.acquire_settlement_lock(cache_key)
+    if not had_lock:
+        merged = mcp_settlement_store.wait_for_cached_settlement(cache_key)
+        if merged is not None:
+            _settlement_cache[cache_key] = merged
+            return merged
+        return _invalid_payment_result("settlement_contention_timeout")
 
     try:
-        verify_result = await server.verify_payment(payload, matched)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("mcp payment verify failed: %s", exc)
-        return _invalid_payment_result(f"verify_failed: {exc}")
+        again = mcp_settlement_store.get_cached_settlement(cache_key)
+        if again is not None:
+            _settlement_cache[cache_key] = again
+            return again
 
-    if not verify_result.is_valid:
-        return {
-            "is_valid": False,
-            "invalid_reason": getattr(verify_result, "invalid_reason", None)
-            or "payment_invalid",
-            "settlement": None,
-            "settlement_error": None,
-            "payment_settled": False,
+        accepts = _payment_requirements_models(challenge.payment_required_header)
+        if not accepts:
+            return _invalid_payment_result("commerce challenge missing accepts[]")
+
+        network = _network_of(accepts[0])
+        server = _resource_server(network)
+        matched = server.find_matching_requirements(accepts, payload)
+        if matched is None:
+            return _invalid_payment_result(
+                "payment does not match server-authored requirements (payTo/amount/network)"
+            )
+
+        try:
+            verify_result = await server.verify_payment(payload, matched)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mcp payment verify failed: %s", exc)
+            return _invalid_payment_result(f"verify_failed: {exc}")
+
+        if not verify_result.is_valid:
+            return {
+                "is_valid": False,
+                "invalid_reason": getattr(verify_result, "invalid_reason", None)
+                or "payment_invalid",
+                "settlement": None,
+                "settlement_error": None,
+                "payment_settled": False,
+                "facilitator_url": None,
+                "sdk": "x402ResourceServer.verify_payment + settle_payment",
+            }
+
+        settlement = None
+        settlement_error = None
+        try:
+            settle_result = await server.settle_payment(payload, matched)
+            settlement = settle_result.model_dump(by_alias=True, exclude_none=True)
+        except Exception as exc:  # noqa: BLE001
+            settlement_error = str(exc)
+
+        settle_success = settlement is not None and settlement.get("success") is True
+        tx_recorded = bool(
+            (settlement or {}).get("transaction") or (settlement or {}).get("txHash")
+        )
+
+        result = {
+            "is_valid": True,
+            "invalid_reason": None,
+            "settlement": settlement,
+            "settlement_error": settlement_error,
+            "payment_settled": settle_success,
             "facilitator_url": None,
             "sdk": "x402ResourceServer.verify_payment + settle_payment",
         }
 
-    settlement = None
-    settlement_error = None
-    try:
-        settle_result = await server.settle_payment(payload, matched)
-        settlement = settle_result.model_dump(by_alias=True, exclude_none=True)
-    except Exception as exc:  # noqa: BLE001
-        settlement_error = str(exc)
+        if settle_success:
+            _settlement_cache[cache_key] = result
+            if tx_recorded:
+                written = mcp_settlement_store.try_cache_settlement(cache_key, result)
+                if not written:
+                    merged = mcp_settlement_store.wait_for_cached_settlement(cache_key)
+                    if merged is not None:
+                        _settlement_cache[cache_key] = merged
+                        return merged
+        elif settlement is not None and settlement.get("success") is False:
+            err = (
+                settlement.get("errorReason")
+                or settlement.get("error")
+                or "settlement_failed"
+            )
+            result["invalid_reason"] = str(err)
+            result["payment_settled"] = False
 
-    result = {
-        "is_valid": True,
-        "invalid_reason": None,
-        "settlement": settlement,
-        "settlement_error": settlement_error,
-        "payment_settled": settlement is not None and settlement.get("success") is True,
-        "facilitator_url": None,
-        "sdk": "x402ResourceServer.verify_payment + settle_payment",
-    }
-    if result["payment_settled"]:
-        _settlement_cache[cache_key] = result
-    return result
+        return result
+    finally:
+        if had_lock:
+            mcp_settlement_store.release_settlement_lock(cache_key)
 
 
 def _success_call_tool_result(

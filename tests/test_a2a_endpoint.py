@@ -72,8 +72,10 @@ def test_a2a_tasks_get_round_trip() -> None:
         },
     )
     task_id = send.json()["result"]["id"]
+    cap = send.json()["result"]["capabilityToken"]
     got = client.post(
         "/a2a",
+        headers={"X-A2A-Task-Capability": cap},
         json={
             "jsonrpc": "2.0",
             "id": "2",
@@ -105,8 +107,10 @@ def test_a2a_tasks_cancel() -> None:
         },
     )
     task_id = send.json()["result"]["id"]
+    cap = send.json()["result"]["capabilityToken"]
     canceled = client.post(
         "/a2a",
+        headers={"X-A2A-Task-Capability": cap},
         json={
             "jsonrpc": "2.0",
             "id": "3",

@@ -43,7 +43,13 @@ See `.env.example`. Critical:
 - `EVM_PRIVATE_KEY` — buyer wallet for `pay_and_fetch` (x402 alternate rail)
 - `X402_PAY_TO_ADDRESS` — seller recipient for x402 revenue tools (future/alternate)
 - `X402_FACILITATOR_URL` — testnet: `https://x402.org/facilitator`
-- `REDIS_URL` — optional; swap in Redis quota store when scaling
+- `REDIS_URL` — optional; swap in Redis quota store when scaling. When set and reachable, **MCP commerce** (`commerce.activate_pro` / `commerce.purchase_credits`) also uses the same Redis for **cross-worker settlement dedup** (`mcp_settle:*` keys). No extra env.
+
+### A2A JSON-RPC (`POST /a2a`)
+
+Task ownership is enforced with a **capability token** returned on each new task as `capabilityToken`. Clients must send it on `tasks/get`, `tasks/cancel`, and when resuming paid flows (`message/send` with payment metadata). See [A2A-TASK-CAPABILITY.md](A2A-TASK-CAPABILITY.md).
+
+Optional header `X-A2A-Client-Id`: when sent on task creation, later calls must use the **same** id with the capability.
 
 ## Redis Migration
 

@@ -1160,7 +1160,9 @@ async def a2a_jsonrpc_endpoint(request: Request) -> JSONResponse:
         "A2A-Extensions"
     )
     payload = await handle_jsonrpc(
-        body, user_agent=request.headers.get("user-agent")
+        body,
+        user_agent=request.headers.get("user-agent"),
+        headers=request.headers,
     )
     return JSONResponse(
         content=payload,

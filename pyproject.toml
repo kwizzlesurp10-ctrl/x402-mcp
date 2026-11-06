@@ -8,7 +8,8 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "mcp>=1.6.0,<2",
-    "x402[httpx,evm,fastapi]>=2.14.0",
+    "x402[httpx,evm,svm,fastapi]>=2.14.0",
+    "solana>=0.36.0,<0.40.0",
     "eth-account>=0.13.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
@@ -34,6 +35,7 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 asyncio_debug = true
 testpaths = ["tests"]
 filterwarnings = [
