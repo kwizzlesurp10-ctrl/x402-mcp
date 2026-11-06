@@ -25,10 +25,12 @@ export BENCH_SAMPLES="${BENCH_SAMPLES:-120}"
 export BENCH_CONCURRENCY="${BENCH_CONCURRENCY:-8}"
 
 START_REF="$(git rev-parse HEAD)"
+HEAD_REV="$(git rev-parse "$HEAD_REF")"
+BASE_REV="$(git rev-parse "$BASE_REF")"
 # Use the harness **from the PR head** on both checkouts so scenarios stay identical.
 TMP_BENCH="$(mktemp)"
 trap 'rm -f "$TMP_BENCH"; git checkout -q "$START_REF" 2>/dev/null || true' EXIT
-git show "${HEAD_REF}:scripts/benchmark_x402_latency.py" >"$TMP_BENCH"
+git show "${HEAD_REV}:scripts/benchmark_x402_latency.py" >"$TMP_BENCH"
 
 run_at_ref() {
   local ref="$1"
@@ -37,14 +39,14 @@ run_at_ref() {
   python3 "$TMP_BENCH" --json-out "$out"
 }
 
-B_BASE="$(git rev-parse --short "$BASE_REF" 2>/dev/null || echo "$BASE_REF")"
-B_HEAD="$(git rev-parse --short "$HEAD_REF" 2>/dev/null || echo "$HEAD_REF")"
+B_BASE="$(git rev-parse --short "$BASE_REV" 2>/dev/null || echo "$BASE_REV")"
+B_HEAD="$(git rev-parse --short "$HEAD_REV" 2>/dev/null || echo "$HEAD_REV")"
 
 BASE_JSON="$ARTIFACTS/a2a_bench_${B_BASE}.json"
 HEAD_JSON="$ARTIFACTS/a2a_bench_${B_HEAD}.json"
 
-run_at_ref "$BASE_REF" "$BASE_JSON"
-run_at_ref "$HEAD_REF" "$HEAD_JSON"
+run_at_ref "$BASE_REV" "$BASE_JSON"
+run_at_ref "$HEAD_REV" "$HEAD_JSON"
 git checkout -q "$START_REF"
 
 export BASE_JSON HEAD_JSON ARTIFACTS
