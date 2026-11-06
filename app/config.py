@@ -50,7 +50,11 @@ class Settings(BaseSettings):
 
     # Redis-ready: set REDIS_URL to migrate from in-memory stores.
     redis_url: str | None = None
-    
+    # When True (default) and REDIS_URL is set, MCP commerce verify+settle requires a
+    # reachable Redis for cross-worker dedup + attempt state. If Redis is down, MCP
+    # commerce fails closed (402) instead of settling without coordination.
+    mcp_commerce_redis_strict: bool = True
+
     # Upstash Advanced Analytics pipeline
     upstash_redis_rest_url: str | None = None
     upstash_redis_rest_token: str | None = None
@@ -156,8 +160,6 @@ class Settings(BaseSettings):
     # Coinbase CDP facilitator (required to verify/settle x402 on Base mainnet;
     # x402.org only settles `exact` on Base Sepolia). Ed25519 API key from the
     # CDP portal — rotate any key that has ever been shared in plaintext.
-    cdp_api_key_id: str | None = None
-    cdp_api_key_secret: str | None = None
     cdp_facilitator_url: str = "https://api.cdp.coinbase.com/platform/v2/x402"
     # Networks routed to the CDP facilitator when CDP creds are set (comma-sep).
     cdp_networks: str = "eip155:8453"
