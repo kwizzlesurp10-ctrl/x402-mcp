@@ -1,5 +1,7 @@
 # PR #793 — real Redis, multiprocess coordination (local `redis-server`)
 
+**Immutable HEAD (tests below):** `cb4e097`
+
 Isolated loopback instance per test class/fixture: temp data dir, explicit key-prefix cleanup (no `FLUSHALL`), subprocesses do not inherit session `REDIS_URL` (`run_python_snippet` strips it).
 
 ## Environment

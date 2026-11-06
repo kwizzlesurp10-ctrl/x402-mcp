@@ -1,6 +1,6 @@
 # PR #793 — policy-check coordination verification (agent run)
 
-**HEAD:** see immutable SHA on PR branch tip after multiprocess Redis artifact land.
+**HEAD:** `cb4e097` (includes multiprocess Redis opt-in tests + artifact).
 
 **Tests below** were run at **`66d6f41`** (coordination fix + artifact); later commits add docs and optional real-Redis multiprocess coverage.
 
