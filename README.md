@@ -59,7 +59,7 @@ The public seller host holds **no spend key** — it only verifies and settles i
 
 ## Features
 
-- **20 MCP tools** for buyer, seller, x402 commerce, swarm-agency, US city compliance, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`. MailRail send/inbound is operator-only ([docs/MAILRAIL-PUBLIC-SURFACE.md](docs/MAILRAIL-PUBLIC-SURFACE.md)).
+- **21 MCP tools** for buyer, seller, x402 commerce, swarm-agency, US city compliance, Agent ID cards, and ops-monitoring flows — canonical inventory in `app/tools_registry.py` (single source for README, `/.well-known/mcp`, and tests); guarded by `tests/test_readme.py` and `tests/test_manifest.py`. MailRail send/inbound is operator-only ([docs/MAILRAIL-PUBLIC-SURFACE.md](docs/MAILRAIL-PUBLIC-SURFACE.md)).
 - **4 MCP prompts** (`onboarding_flow`, `x402_tool_selector`, `generate_quote`, `troubleshoot_payment`) for LLM orchestrators
 - **4 MCP resources** (`x402://agent-card`, `x402://server-card`, `x402://tools-manifest`, `x402://pricing-table`) exposing live machine descriptors
 - **A2A Protocol v1.0 Agent ID Cards** — HTTP Agent Card + MCP `x402.agent_card` / `x402://agent-card` with per-`agent_id` quota isolation
@@ -180,6 +180,7 @@ Tool names use domain.action trees so clients can route `x402.*`, `a2a.*`, `comm
 | `x402.pay_and_fetch` | Auto-pay and fetch protected resource |
 | `x402.build_seller` | Build seller payment requirements |
 | `x402.verify` | Verify payment via facilitator |
+| `x402.policy_check` | Offline buyer policy check on a caller-supplied merchant `PAYMENT-REQUIRED` (separate server fee; **off by default** — set `POLICY_CHECK_ENABLED=true`) |
 | `x402.networks` | Networks, facilitators, v2 headers |
 | `commerce.pro_requirements` | Build x402 payment requirements for Pro tier upgrade |
 | `commerce.activate_pro` | Verify x402 payment and unlock Pro tier quota |
@@ -205,6 +206,10 @@ Point any MCP client at `https://x402-mcp.onrender.com/mcp` or run `npx -y mcp-r
 ### Usage
 
 Connect an MCP client to Streamable HTTP `https://x402-mcp.onrender.com/mcp` (alias of `/mcp/mcp`). Call `x402.discover` then `x402.probe` then `x402.pay_and_fetch` for paid APIs; `city.list` → `city.sample` → `city.check` for US property compliance.
+
+### Buyer payment-policy check (offline)
+
+`x402.policy_check` and `POST /x402/policy-check` evaluate **decoded** merchant terms against an explicit buyer policy. They do **not** fetch merchant URLs and do **not** prove settlement on the inspected resource; the analysis receipt is scoped to actor + policy + digest — not a merchant delivery receipt. Default **`POLICY_CHECK_ENABLED=false`**. HTTP: unpaid `402` + `PAYMENT-REQUIRED` for the server analysis fee; MCP: same via `PaymentRequired` then `_meta["x402/payment"]`. A2A skill: **`buyer-payment-policy-check`**. Setup and ops: [docs/POLICY-CHECK-RUNBOOK.md](docs/POLICY-CHECK-RUNBOOK.md).
 
 ### MCP-native x402 buyer (`@x402/mcp`)
 

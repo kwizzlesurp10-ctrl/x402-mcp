@@ -62,6 +62,7 @@ INSTRUCTIONS = (
     "ops.metrics host health, city.* US open-data property compliance. "
     "Buyer path: x402.discover → x402.probe → x402.pay_and_fetch. "
     "City path: city.list → city.sample → city.check (verdict + source link, $0.01). "
+    "Buyer policy audit: x402.policy_check — offline inspect PAYMENT-REQUIRED + policy (own-service fee). "
     "Pro quota: commerce.activate_pro (MCP x402/payment) or commerce.pro_requirements → pay → activate. "
     "Credits: commerce.credits_requirements → pay → commerce.purchase_credits. "
     "Public seller hosts have no spend key — probe tools still work; "
@@ -525,6 +526,61 @@ async def verify_payment_payload(
         "x402.verify",
         agent_id,
         lambda _: x402_services.verify_payment_payload(params),
+    )
+
+
+@mcp.tool(
+    name="x402.policy_check",
+    title="Offline buyer payment-policy consistency check",
+    description=(
+        "Decode a caller-supplied merchant PAYMENT-REQUIRED header and evaluate each accepts[] "
+        "option against an explicit buyer policy (networks, pay_to, assets, max atomic amount). "
+        "Does not fetch merchant URLs or settle the inspected purchase. "
+        "Unpaid → PaymentRequired for this server's analysis fee; pay via _meta['x402/payment']. "
+        "Pass policy as a JSON object string."
+    ),
+    annotations=WRITE_PAYMENT,
+    structured_output=False,
+)
+async def policy_check_tool(
+    payment_required_header: Desc[
+        str,
+        Field(
+            description="Inspected merchant PAYMENT-REQUIRED header value (base64 wire from HTTP 402).",
+        ),
+    ],
+    policy: Desc[
+        str,
+        Field(
+            description='Buyer policy JSON object as a string. Example: {"allowed_networks":["eip155:84532"],"max_amount_atomic":"10000000"}',
+        ),
+    ],
+    request_digest: Desc[
+        str | None,
+        Field(
+            default=None,
+            description="Optional JSON string with canonical_url, http_method, body_sha256.",
+        ),
+    ] = None,
+    idempotency_key: Desc[
+        str | None,
+        Field(default=None, description="Optional idempotency key (max 128 chars)."),
+    ] = None,
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional agent identity for quota accounting."),
+    ] = None,
+    ctx: Context | None = None,
+) -> str | Any:
+    from app import mcp_x402_payment
+
+    return await mcp_x402_payment.handle_policy_check_mcp_tool(
+        payment_required_header_inspected=payment_required_header,
+        policy_json=policy,
+        request_digest_json=request_digest,
+        idempotency_key=idempotency_key,
+        agent_id=agent_id,
+        ctx=ctx,
     )
 
 

@@ -184,6 +184,7 @@ def output_examples() -> dict[str, dict[str, Any]]:
         diligence_pack,
         finality_check,
         mn_compliance,
+        policy_check,
         property_due_diligence_agent,
         tx_decision,
     )
@@ -198,6 +199,7 @@ def output_examples() -> dict[str, dict[str, Any]]:
             address_fallback=mn_compliance.SAMPLE_ADDRESS,
         ),
         "/tasks/us-rental-diligence": diligence_pack.DISCOVERY_OUTPUT_EXAMPLE,
+        "/x402/policy-check": policy_check.DISCOVERY_PAID_OUTPUT_EXAMPLE,
         "/agent/property-due-diligence": (
             property_due_diligence_agent.DISCOVERY_OUTPUT_EXAMPLE
         ),

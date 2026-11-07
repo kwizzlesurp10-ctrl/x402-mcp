@@ -64,6 +64,18 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "tier": "free",
     },
     {
+        "name": "x402.policy_check",
+        "description": (
+            "Offline buyer payment-policy check: decode a caller-supplied merchant PAYMENT-REQUIRED "
+            "header and evaluate each accepts[] option against an explicit policy (networks, pay_to, "
+            "assets, atomic amount, timeouts). Does not fetch merchant URLs or prove settlement on "
+            "the inspected resource. Unpaid returns PaymentRequired for this server's separate "
+            "analysis fee; pay via _meta['x402/payment']. Policy is consistency only, not proof."
+        ),
+        "tier": "paid",
+        "requires_env": ["X402_PAY_TO_ADDRESS"],
+    },
+    {
         "name": "x402.networks",
         "description": (
             "List supported settlement networks, facilitators, and x402 v2 header names. "

@@ -1,7 +1,7 @@
 """README accuracy and synchronization test suite.
 
 Verifies:
-1. Exact MCP tool count (20 MCP tools) and individual tool listing.
+1. Exact MCP tool count (matches `TOOL_COUNT` in `app/tools_registry.py`) and individual tool listing.
 2. Direct-connect Quickstart (Streamable HTTP URL; Smithery retired 2026-10-31).
 3. A2A Protocol v1.0 Agent ID Card & Machine Identity documentation.
 4. Complete MCP Prompts documentation (4 prompts).

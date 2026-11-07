@@ -17,7 +17,7 @@ from app.config import settings
 
 logger = logging.getLogger("commerce_payment")
 
-CommercePurpose = Literal["pro_tier_upgrade", "tool_credits"]
+CommercePurpose = Literal["pro_tier_upgrade", "tool_credits", "policy_check_analysis"]
 
 # Base Sepolia USDC (SDK registry may not resolve the "USDC" symbol on testnet).
 BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
@@ -34,6 +34,7 @@ class StoredCommerceChallenge:
 # In-memory challenge cache (mirrors swarm product storage; Redis not required).
 _pro_challenges: dict[str, StoredCommerceChallenge] = {}
 _credits_challenges: dict[tuple[str, int], StoredCommerceChallenge] = {}
+_policy_check_challenges: dict[str, StoredCommerceChallenge] = {}
 
 
 def _price_to_atomic(price: str) -> int:
@@ -149,6 +150,43 @@ def clear_commerce_challenges() -> None:
     """Test helper: reset in-memory challenge cache."""
     _pro_challenges.clear()
     _credits_challenges.clear()
+    _policy_check_challenges.clear()
+
+
+def store_policy_check_challenge(agent_id: str, built: dict[str, Any]) -> None:
+    header = built.get("payment_required_header")
+    if not header:
+        raise ValueError("policy check requirements missing payment_required_header")
+    _policy_check_challenges[agent_id] = StoredCommerceChallenge(
+        purpose="policy_check_analysis",
+        agent_id=agent_id,
+        payment_required_header=header,
+    )
+
+
+def resolve_policy_check_authoritative_header(
+    agent_id: str,
+    *,
+    rebuild: Any,
+) -> StoredCommerceChallenge:
+    stored = _policy_check_challenges.get(agent_id)
+    if stored is None:
+        rebuild()
+        stored = _policy_check_challenges.get(agent_id)
+    if stored is None:
+        raise ValueError("failed to issue policy-check payment challenge")
+
+    from app.config import settings as _settings
+
+    from app.x402_services import resolve_revenue_network
+
+    reqs = _requirements_from_header(stored.payment_required_header)
+    validate_commerce_requirements(
+        reqs,
+        min_amount_atomic=_price_to_atomic(_settings.policy_check_price),
+        expected_network=resolve_revenue_network(),
+    )
+    return stored
 
 
 def resolve_pro_authoritative_header(

@@ -17,12 +17,14 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from mcp.types import CallToolResult, TextContent
+from x402.http import encode_payment_signature_header
 from x402.mcp.constants import MCP_PAYMENT_META_KEY, MCP_PAYMENT_RESPONSE_META_KEY
 from x402.schemas import PaymentPayload, PaymentRequirements
 
 from app.commerce import QuotaExceededError, quota_store
 from app.commerce_payment import (
     StoredCommerceChallenge,
+    resolve_policy_check_authoritative_header,
     validate_commerce_requirements,
 )
 from app.config import settings
@@ -144,6 +146,9 @@ def _min_atomic_for_challenge(challenge: StoredCommerceChallenge) -> int:
     if challenge.purpose == "pro_tier_upgrade":
         raw = str(settings.pro_tier_price).strip().replace("$", "").replace(",", "")
         return int(round(float(raw) * 1_000_000))
+    if challenge.purpose == "policy_check_analysis":
+        raw = str(settings.policy_check_price).strip().replace("$", "").replace(",", "")
+        return int(round(float(raw) * 1_000_000))
     raw = str(settings.tool_credit_pack_price).strip().replace("$", "").replace(",", "")
     return int(round(float(raw) * 1_000_000))
 
@@ -158,6 +163,70 @@ def _validate_authoritative_challenge(challenge: StoredCommerceChallenge) -> lis
         expected_network=resolve_revenue_network(),
     )
     return reqs
+
+
+async def verify_policy_check_mcp_payment(
+    payment_data: dict[str, Any],
+    challenge: StoredCommerceChallenge,
+) -> dict[str, Any]:
+    """Verify-only for policy_check (no settle, no commerce Redis lock)."""
+    from app.x402_services import _invalid_payment_result, _network_of, _resource_server
+
+    t_validate0 = time.perf_counter()
+    _validate_authoritative_challenge(challenge)
+    x402_latency.record_span("mcp_commerce", "policy_check_challenge_validate", t_validate0)
+
+    try:
+        payload = PaymentPayload.model_validate(payment_data)
+    except Exception as exc:  # noqa: BLE001
+        return _invalid_payment_result(f"malformed_payment: {exc}")
+
+    accepts = _payment_requirements_models(challenge.payment_required_header)
+    if not accepts:
+        return _invalid_payment_result("commerce challenge missing accepts[]")
+
+    network = _network_of(accepts[0])
+    server = _resource_server(network)
+    matched = server.find_matching_requirements(accepts, payload)
+    if matched is None:
+        return _invalid_payment_result(
+            "payment does not match server-authored requirements (payTo/amount/network)"
+        )
+
+    try:
+        tv0 = time.perf_counter()
+        verify_result = await server.verify_payment(payload, matched)
+        x402_latency.record_span("mcp_commerce", "policy_check_facilitator_verify", tv0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("policy_check mcp verify failed: %s", type(exc).__name__, exc_info=False)
+        return _invalid_payment_result(f"verify_failed: {type(exc).__name__}")
+
+    if not verify_result.is_valid:
+        return {
+            "is_valid": False,
+            "invalid_reason": getattr(verify_result, "invalid_reason", None) or "payment_invalid",
+            "settlement": None,
+            "settlement_error": None,
+            "payment_settled": False,
+            "facilitator_url": None,
+            "sdk": "x402ResourceServer.verify_payment",
+        }
+
+    try:
+        sig_wire = encode_payment_signature_header(payload)
+    except Exception as exc:  # noqa: BLE001
+        return _invalid_payment_result(f"encode_signature_failed: {exc}")
+
+    return {
+        "is_valid": True,
+        "invalid_reason": None,
+        "payment_signature": sig_wire,
+        "settlement": None,
+        "settlement_error": None,
+        "payment_settled": False,
+        "facilitator_url": None,
+        "sdk": "x402ResourceServer.verify_payment",
+    }
 
 
 async def verify_and_settle_mcp_payload(
@@ -464,6 +533,270 @@ async def handle_commerce_mcp_tool(
     meta = quota_store.build_meta(snapshot)
     emit_tool_event(tool_name, resolved, meta.model_dump())
     return _success_call_tool_result(ToolResponse(data=data, meta=meta), settlement)
+
+
+async def handle_policy_check_mcp_tool(
+    *,
+    payment_required_header_inspected: str,
+    policy_json: str,
+    request_digest_json: str | None = None,
+    idempotency_key: str | None = None,
+    agent_id: str | None,
+    ctx: Any,
+) -> str | CallToolResult:
+    """MCP paid flow for `x402.policy_check`: own-service fee separate from inspected header."""
+    from pydantic import ValidationError
+
+    from app import policy_check as pc
+    from app.ops_events import emit_tool_event
+
+    if not settings.policy_check_enabled:
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "feature_disabled", "detail": "POLICY_CHECK_ENABLED is false"}),
+                )
+            ],
+            isError=True,
+        )
+
+    resolved = quota_store.resolve_agent_id(agent_id)
+    mcp_payment = extract_payment_from_context(ctx)
+
+    if mcp_payment is None:
+        from app import x402_services
+
+        header = x402_services.build_policy_check_mcp_requirements(resolved)[
+            "payment_required_header"
+        ]
+        return build_payment_required_result(
+            tool_name="x402.policy_check",
+            challenge_header=header,
+            description="Offline buyer policy consistency check (own-service fee).",
+        )
+
+    try:
+        policy_obj = json.loads(policy_json)
+        if not isinstance(policy_obj, dict):
+            raise ValueError("policy_json must be a JSON object")
+        raw: dict[str, Any] = {
+            "payment_required_header": payment_required_header_inspected,
+            "policy": policy_obj,
+        }
+        if request_digest_json:
+            rd = json.loads(request_digest_json)
+            if not isinstance(rd, dict):
+                raise ValueError("request_digest_json must be a JSON object")
+            raw["request_digest"] = rd
+        if idempotency_key:
+            raw["idempotency_key"] = idempotency_key
+        body = pc.PolicyCheckBody.model_validate(raw)
+    except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps({"error": "validation_error", "detail": str(exc)}))],
+            isError=True,
+        )
+
+    if body.idempotency_key and pc.idempotency_strict_redis_unavailable():
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "idempotency_store_unavailable", "detail": "redis unreachable"}),
+                )
+            ],
+            isError=True,
+        )
+
+    ok_sem, sem_detail = pc.preflight_semantic_ok(body)
+    if not ok_sem:
+        return CallToolResult(
+            content=[
+                TextContent(type="text", text=json.dumps({"error": "inspected_validation_failed", "detail": sem_detail})),
+            ],
+            isError=True,
+        )
+
+    from app import x402_services
+
+    challenge = resolve_policy_check_authoritative_header(
+        resolved,
+        rebuild=lambda: x402_services.build_policy_check_mcp_requirements(resolved),
+    )
+
+    verified_mcp = await verify_policy_check_mcp_payment(mcp_payment, challenge)
+    if not verified_mcp.get("is_valid"):
+        reason = verified_mcp.get("invalid_reason") or "payment_invalid"
+        return build_payment_required_result(
+            tool_name="x402.policy_check",
+            challenge_header=challenge.payment_required_header,
+            description="payment rejected",
+            error_message=str(reason),
+        )
+
+    sig_wire = str(verified_mcp.get("payment_signature") or "")
+    proof_fp, proof_err = pc.payment_proof_fingerprint(sig_wire, challenge.payment_required_header)
+    if proof_fp is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps({"error": "malformed_payment", "detail": proof_err}))],
+            isError=True,
+        )
+
+    payer_fp = pc.payer_fingerprint_from_decoded_proof(sig_wire, challenge.payment_required_header)
+    if payer_fp is None:
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps({"error": "malformed_payment", "detail": "cannot_bind_payer"}))],
+            isError=True,
+        )
+
+    input_digest = pc.analysis_input_digest(
+        inspected_header_digest=pc.inspected_header_digest(body.payment_required_header),
+        policy=body.policy,
+        request_digest=body.request_digest,
+    )
+    claim_key = pc.policy_check_claim_key(body, payer_fp=payer_fp, proof_fp=proof_fp)
+
+    claim_st, claim_rec = await pc.delivery_try_claim_or_hit_async(claim_key, input_digest)
+    if claim_st == "redis_error":
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "delivery_store_unavailable", "detail": "redis unreachable"}),
+                )
+            ],
+            isError=True,
+        )
+    if claim_st == "conflict":
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "idempotency_conflict", "detail": "same idempotency scope with different inputs"}),
+                )
+            ],
+            isError=True,
+        )
+
+    async def _finish_success(data: dict[str, Any], settlement_wrap: dict[str, Any], snapshot: Any) -> str | CallToolResult:
+        meta = quota_store.build_meta(snapshot)
+        emit_tool_event("x402.policy_check", resolved, meta.model_dump())
+        return _success_call_tool_result(ToolResponse(data=data, meta=meta), settlement_wrap)
+
+    if claim_st == "final_hit" and claim_rec and isinstance(claim_rec.get("body"), dict):
+        try:
+            snapshot = quota_store.consume_quota(resolved)
+        except QuotaExceededError as exc:
+            return build_payment_required_result(
+                tool_name="x402.policy_check",
+                challenge_header=challenge.payment_required_header,
+                description="quota exceeded",
+                error_message=str(exc.detail.get("error", "quota_exceeded")),
+            )
+        return await _finish_success(
+            claim_rec["body"],
+            {"is_valid": True, "payment_settled": True, "settlement": {}},
+            snapshot,
+        )
+
+    if claim_st == "claimed_busy":
+        waited = await pc.delivery_wait_for_final_async(claim_key, input_digest)
+        if isinstance(waited, dict):
+            try:
+                snapshot = quota_store.consume_quota(resolved)
+            except QuotaExceededError as exc:
+                return build_payment_required_result(
+                    tool_name="x402.policy_check",
+                    challenge_header=challenge.payment_required_header,
+                    description="quota exceeded",
+                    error_message=str(exc.detail.get("error", "quota_exceeded")),
+                )
+            return await _finish_success(waited, {"is_valid": True, "payment_settled": True, "settlement": {}}, snapshot)
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {"error": "delivery_in_progress", "detail": "identical payment in flight; retry shortly"}
+                    ),
+                )
+            ],
+            isError=True,
+        )
+
+    try:
+        snapshot = quota_store.consume_quota(resolved)
+    except QuotaExceededError as exc:
+        return build_payment_required_result(
+            tool_name="x402.policy_check",
+            challenge_header=challenge.payment_required_header,
+            description="quota exceeded",
+            error_message=str(exc.detail.get("error", "quota_exceeded")),
+        )
+
+    settle = await pc.settle_payment_only(sig_wire, challenge.payment_required_header)
+    if not settle.get("is_valid") or not settle.get("payment_settled"):
+        pc.delivery_abort_claim_sync(claim_key)
+        reason = settle.get("invalid_reason") or settle.get("settlement_error") or "payment_invalid"
+        return build_payment_required_result(
+            tool_name="x402.policy_check",
+            challenge_header=challenge.payment_required_header,
+            description="payment rejected",
+            error_message=str(reason),
+        )
+
+    st = settle.get("settlement") or {}
+    tx = st.get("transaction") or st.get("txHash")
+    if settle.get("payment_settled") and not tx:
+        pc.delivery_abort_claim_sync(claim_key)
+        return CallToolResult(
+            content=[
+                TextContent(type="text", text=json.dumps({"error": "settlement_ambiguous", "detail": "no tx id after settle"})),
+            ],
+            isError=True,
+        )
+
+    data = pc.build_paid_analysis_dict(body, settlement=st)
+    written, _prev = await pc.delivery_write_final_async(
+        claim_key,
+        input_digest=input_digest,
+        body=data,
+        payment_proof_fp=proof_fp,
+    )
+    if not written:
+        pc.delivery_abort_claim_sync(claim_key)
+        return CallToolResult(
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": "delivery_persist_failed", "detail": "settled but delivery record failed"}),
+                )
+            ],
+            isError=True,
+        )
+
+    try:
+        from app.swarm import ledger_writer
+
+        ledger_writer.record_revenue(
+            agent_id=pc.PRODUCT_ID,
+            amount_usdc=pc.parse_price_usdc(),
+            network=settings.x402_default_network.split(",")[0].strip(),
+            product_id=pc.PRODUCT_ID,
+            tx=str(tx) if tx else None,
+            payer=str(st.get("payer") or "") or None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("policy_check MCP revenue ledger write failed", exc_info=True)
+
+    return await _finish_success(data, settle, snapshot)
+
+
+def _policy_check_challenge_header(agent_id: str) -> str:
+    from app import x402_services
+
+    return x402_services.build_policy_check_mcp_requirements(agent_id)["payment_required_header"]
 
 
 def _issue_challenge_header(

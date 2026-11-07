@@ -356,6 +356,23 @@ def _settlement_receipt(settlement: dict[str, Any] | None, *, network: str) -> d
     return out
 
 
+def _settlement_dict_from_receipts(receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reconstruct facilitator settlement fields from A2A receipt strip."""
+    for r in reversed(receipts):
+        if not r.get("success"):
+            continue
+        tx = r.get("transaction") or r.get("txHash")
+        if not tx:
+            continue
+        return {
+            "success": True,
+            "transaction": str(tx),
+            "txHash": str(tx),
+            "payer": r.get("payer"),
+        }
+    return {}
+
+
 def _task_dict(
     *,
     task_id: str,
@@ -400,7 +417,7 @@ def _artifact_from_result(result: dict[str, Any], name: str = "result.json") -> 
 
 
 def _skill_bindings() -> dict[str, SkillBinding]:
-    from app import diligence_pack, property_due_diligence_agent as pdd_agent, tx_decision
+    from app import diligence_pack, policy_check, property_due_diligence_agent as pdd_agent, tx_decision
     from app.city_compliance import publish, registry
 
     bindings: dict[str, SkillBinding] = {}
@@ -509,6 +526,50 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         ),
         payment_text="Payment is required for the US multi-city rental diligence pack.",
     )
+
+    if settings.policy_check_enabled and settings.x402_pay_to_address:
+
+        async def _policy_check_execute(inp: dict[str, Any]) -> dict[str, Any]:
+            body = policy_check.PolicyCheckBody.model_validate(
+                {
+                    "payment_required_header": inp.get("payment_required_header"),
+                    "policy": inp.get("policy") or {},
+                    "request_digest": inp.get("request_digest"),
+                    "idempotency_key": inp.get("idempotency_key"),
+                }
+            )
+            settlement = inp.get("_a2a_settlement") or {}
+            if not isinstance(settlement, dict):
+                settlement = {}
+            return policy_check.build_paid_analysis_dict(body, settlement=settlement)
+
+        def _policy_check_validate(inp: dict[str, Any]) -> str | None:
+            try:
+                policy_check.PolicyCheckBody.model_validate(
+                    {
+                        "payment_required_header": inp.get("payment_required_header"),
+                        "policy": inp.get("policy") or {},
+                        "request_digest": inp.get("request_digest"),
+                        "idempotency_key": inp.get("idempotency_key"),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                return str(exc)
+            return None
+
+        bindings["buyer-payment-policy-check"] = SkillBinding(
+            skill_id="buyer-payment-policy-check",
+            product_id=policy_check.PRODUCT_ID,
+            price_usdc=policy_check.price_string(),
+            build_payment_header=policy_check.build_payment_required_header,
+            verify_and_settle=policy_check.verify_and_settle,
+            validate_input=_policy_check_validate,
+            execute=_policy_check_execute,
+            record_revenue=lambda st, _r: _record_product_revenue(
+                policy_check.PRODUCT_ID, policy_check.price_string(), st
+            ),
+            payment_text="Payment is required for offline buyer payment-policy consistency analysis.",
+        )
 
     async def _pdd_execute(inp: dict[str, Any]) -> dict[str, Any]:
         return await pdd_agent.run_check(
@@ -920,6 +981,9 @@ async def _continue_paid_task(
             return _jsonrpc_result(req_id, _client_task_view(stored))
         receipts = list(stored.get("receipts") or [])
         skill_input = stored.get("input") or {}
+        if stored.get("skillId") == "buyer-payment-policy-check":
+            skill_input = dict(skill_input)
+            skill_input["_a2a_settlement"] = _settlement_dict_from_receipts(receipts)
         if not a2a_fulfillment_lock.try_acquire(task_id):
             msg = _agent_message(
                 "Fulfillment in progress on another worker; poll tasks/get.",
@@ -1024,9 +1088,190 @@ async def _continue_paid_task(
             )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
-    assert binding.verify_and_settle is not None
-    tv0 = time.perf_counter()
-    result = await binding.verify_and_settle(signature, header)
+    policy_pc_body: Any = None
+    policy_pc_claim_key: str | None = None
+
+    if stored.get("skillId") == "buyer-payment-policy-check":
+        from app import policy_check as pc
+
+        inp = stored.get("input") or {}
+        try:
+            body = pc.PolicyCheckBody.model_validate(
+                {
+                    "payment_required_header": inp.get("payment_required_header"),
+                    "policy": inp.get("policy") or {},
+                    "request_digest": inp.get("request_digest"),
+                    "idempotency_key": inp.get("idempotency_key"),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            msg = _agent_message(f"Invalid policy-check input: {exc}", {})
+            task = _task_dict(task_id=task_id, state="failed", message=msg)
+            stored.update(task)
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        ok_sem, sem_detail = pc.preflight_semantic_ok(body)
+        if not ok_sem:
+            msg = _agent_message(
+                f"Inspected request not processable: {sem_detail}",
+                {META_STATUS: "payment-failed", META_ERROR: "INSPECTED_INVALID"},
+            )
+            task = _task_dict(task_id=task_id, state="input-required", message=msg)
+            stored.update(task)
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        verified = await pc.verify_payment_only(signature, header)
+        if not verified.get("is_valid"):
+            receipt = _settlement_receipt({"success": False}, network=network)
+            receipt["errorReason"] = str(verified.get("invalid_reason") or "invalid_signature")
+            receipts = list(stored.get("receipts") or []) + [receipt]
+            required_body = _payment_required_body(header)
+            msg = _agent_message(
+                "Payment verification failed.",
+                {
+                    META_STATUS: "payment-failed",
+                    META_ERROR: "INVALID_SIGNATURE",
+                    META_REQUIRED: required_body,
+                    META_RECEIPTS: receipts,
+                },
+            )
+            task = _task_dict(task_id=task_id, state="input-required", message=msg)
+            stored.update(task)
+            stored["receipts"] = receipts
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        proof_fp, _ = pc.payment_proof_fingerprint(signature, header)
+        payer_fp = pc.payer_fingerprint_from_decoded_proof(signature, header)
+        if proof_fp is None or payer_fp is None:
+            msg = _agent_message("Malformed payment proof.", {META_STATUS: "payment-failed"})
+            task = _task_dict(task_id=task_id, state="failed", message=msg)
+            stored.update(task)
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        input_digest = pc.analysis_input_digest(
+            inspected_header_digest=pc.inspected_header_digest(body.payment_required_header),
+            policy=body.policy,
+            request_digest=body.request_digest,
+        )
+        claim_key = pc.policy_check_claim_key(body, payer_fp=payer_fp, proof_fp=proof_fp)
+        policy_pc_body = body
+        policy_pc_claim_key = claim_key
+
+        claim_st, claim_rec = await pc.delivery_try_claim_or_hit_async(claim_key, input_digest)
+        if claim_st == "redis_error":
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "delivery coordination unavailable",
+                {"taskId": task_id},
+            )
+        if claim_st == "conflict":
+            msg = _agent_message(
+                "Idempotency conflict: same key with different analysis inputs.",
+                {META_STATUS: "payment-failed", META_ERROR: "IDEMPOTENCY_CONFLICT"},
+            )
+            task = _task_dict(task_id=task_id, state="failed", message=msg)
+            stored.update(task)
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        if claim_st == "final_hit" and isinstance(claim_rec, dict) and isinstance(claim_rec.get("body"), dict):
+            msg = _agent_message(
+                "Payment completed. Skill result attached as artifact.",
+                {META_STATUS: "payment-completed"},
+            )
+            task = _task_dict(
+                task_id=task_id,
+                state="completed",
+                message=msg,
+                artifacts=[_artifact_from_result(claim_rec["body"])],
+            )
+            stored.update(task)
+            stored["fulfillment_done"] = True
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        if claim_st == "claimed_busy":
+            waited = await pc.delivery_wait_for_final_async(claim_key, input_digest)
+            if isinstance(waited, dict):
+                msg = _agent_message(
+                    "Payment completed. Skill result attached as artifact.",
+                    {META_STATUS: "payment-completed"},
+                )
+                task = _task_dict(
+                    task_id=task_id,
+                    state="completed",
+                    message=msg,
+                    artifacts=[_artifact_from_result(waited)],
+                )
+                stored.update(task)
+                stored["fulfillment_done"] = True
+                if not _persist_task(task_id, stored):
+                    return _jsonrpc_error(
+                        req_id,
+                        JSONRPC_INTERNAL_ERROR,
+                        "task persistence unavailable",
+                        {"taskId": task_id},
+                    )
+                return _jsonrpc_result(req_id, _client_task_view(stored))
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "delivery in progress; retry shortly",
+                {"taskId": task_id},
+            )
+
+        tv0 = time.perf_counter()
+        result = await pc.verify_and_settle_after_claim(
+            signature,
+            header,
+            claim_key=claim_key,
+            input_digest=input_digest,
+        )
+    else:
+        assert binding.verify_and_settle is not None
+        tv0 = time.perf_counter()
+        result = await binding.verify_and_settle(signature, header)
     x402_latency.record_span("a2a", "verify_settle", tv0)
     settlement = result.get("settlement") or {}
     receipt = _settlement_receipt(settlement, network=network)
@@ -1036,6 +1281,10 @@ async def _continue_paid_task(
     receipts = list(stored.get("receipts") or []) + [receipt]
 
     if not result.get("is_valid") or not result.get("payment_settled"):
+        if stored.get("skillId") == "buyer-payment-policy-check" and policy_pc_claim_key:
+            from app import policy_check as pc
+
+            pc.delivery_abort_claim_sync(policy_pc_claim_key)
         required_body = _payment_required_body(header)
         msg = _agent_message(
             "Payment verification or settlement failed.",
@@ -1058,10 +1307,94 @@ async def _continue_paid_task(
             )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
+    if (
+        stored.get("skillId") == "buyer-payment-policy-check"
+        and policy_pc_body is not None
+        and policy_pc_claim_key
+    ):
+        from app import policy_check as pc
+
+        body_pc = policy_pc_body
+        claim_key = policy_pc_claim_key
+        input_digest_done = pc.analysis_input_digest(
+            inspected_header_digest=pc.inspected_header_digest(body_pc.payment_required_header),
+            policy=body_pc.policy,
+            request_digest=body_pc.request_digest,
+        )
+        tx_present_pc = bool((settlement or {}).get("transaction") or (settlement or {}).get("txHash"))
+        if result.get("payment_settled") and not tx_present_pc:
+            pc.delivery_abort_claim_sync(claim_key)
+            msg = _agent_message(
+                "Settlement succeeded without an on-chain transaction id; manual reconciliation required.",
+                {META_STATUS: "payment-completed", META_RECEIPTS: receipts},
+            )
+            task = _task_dict(task_id=task_id, state="input-required", message=msg)
+            stored.update(task)
+            stored["receipts"] = receipts
+            if not _persist_task(task_id, stored):
+                return _jsonrpc_error(
+                    req_id,
+                    JSONRPC_INTERNAL_ERROR,
+                    "task persistence unavailable",
+                    {"taskId": task_id},
+                )
+            return _jsonrpc_result(req_id, _client_task_view(stored))
+
+        proof_fp_done, _ = pc.payment_proof_fingerprint(signature, header)
+        if proof_fp_done is None:
+            proof_fp_done = ""
+
+        deliverable_pc = pc.build_paid_analysis_dict(body_pc, settlement=settlement)
+        written_pc, _ = await pc.delivery_write_final_async(
+            claim_key,
+            input_digest=input_digest_done,
+            body=deliverable_pc,
+            payment_proof_fp=proof_fp_done,
+        )
+        if not written_pc:
+            pc.delivery_abort_claim_sync(claim_key)
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "delivery persist failed after settlement",
+                {"taskId": task_id},
+            )
+
+        if binding.record_revenue:
+            binding.record_revenue(settlement, stored.get("input") or {})
+
+        msg = _agent_message(
+            "Payment completed. Skill result attached as artifact.",
+            {
+                META_STATUS: "payment-completed",
+                META_RECEIPTS: receipts,
+            },
+        )
+        task = _task_dict(
+            task_id=task_id,
+            state="completed",
+            message=msg,
+            artifacts=[_artifact_from_result(deliverable_pc)],
+        )
+        stored.update(task)
+        stored["receipts"] = receipts
+        stored["fulfillment_done"] = True
+        if not _persist_task(task_id, stored):
+            return _jsonrpc_error(
+                req_id,
+                JSONRPC_INTERNAL_ERROR,
+                "task persistence unavailable",
+                {"taskId": task_id},
+            )
+        return _jsonrpc_result(req_id, _client_task_view(stored))
+
     if binding.record_revenue:
         binding.record_revenue(settlement, stored.get("input") or {})
 
     skill_input = stored.get("input") or {}
+    if stored.get("skillId") == "buyer-payment-policy-check":
+        skill_input = dict(skill_input)
+        skill_input["_a2a_settlement"] = settlement
     settled_ok = bool(result.get("payment_settled"))
     tx_present = bool((settlement or {}).get("transaction") or (settlement or {}).get("txHash"))
     if settled_ok and tx_present:
