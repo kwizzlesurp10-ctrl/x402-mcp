@@ -731,9 +731,23 @@ async def well_known_mcp() -> dict:
     return build_mcp_manifest()
 
 
+@app.get("/.well-known/mcp.json")
+async def well_known_mcp_json() -> dict:
+    """Alias for crawlers that require a .json suffix."""
+    return build_mcp_manifest()
+
+
 @app.get("/.well-known/x402")
 async def well_known_x402() -> dict:
     """Machine manifest of the paid surface, built from live config."""
+    from app import agent_surface
+
+    return agent_surface.well_known_x402()
+
+
+@app.get("/.well-known/x402.json")
+async def well_known_x402_json() -> dict:
+    """Alias for crawlers that require a .json suffix."""
     from app import agent_surface
 
     return agent_surface.well_known_x402()
@@ -1140,6 +1154,14 @@ async def probe_url(
         raise HTTPException(
             status_code=502, detail="upstream probe target unreachable"
         ) from exc
+
+
+@app.get("/a2a")
+async def a2a_agent_card() -> dict:
+    """A2A discovery: GET returns the Agent Card so buyers can resolve /a2a without guessing .well-known."""
+    from app import agent_surface
+
+    return agent_surface.agent_card()
 
 
 @app.post("/a2a")
