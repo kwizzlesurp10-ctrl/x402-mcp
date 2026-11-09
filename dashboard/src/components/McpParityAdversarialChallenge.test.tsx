@@ -67,13 +67,13 @@ describe("MCP Documentation & Storefront Adversarial Parity", () => {
       expect(renderedNames.length).toBe(21);
     });
 
-    it("verifies mn_property_diligence has $0.85 USDC price and Base network", () => {
+    it("verifies mn_property_diligence lists $0.01 USDC on Base", () => {
       render(<McpInstructions />);
 
       const diligenceElements = screen.getAllByText("mn_property_diligence");
       expect(diligenceElements.length).toBeGreaterThan(0);
 
-      const priceBadges = screen.getAllByText("$0.85 USDC");
+      const priceBadges = screen.getAllByText("$0.01 USDC");
       expect(priceBadges.length).toBeGreaterThan(0);
 
       const baseBadges = screen.getAllByText("Base eip155:8453");
@@ -81,30 +81,23 @@ describe("MCP Documentation & Storefront Adversarial Parity", () => {
     });
   });
 
-  describe("ActiveStorefront MARC-HD Diligence & Pricing Verification", () => {
-    it("renders MARC-HD Compliance Verification at $0.85 on Base eip155:8453", () => {
-      render(<ActiveStorefront products={[]} revenueRows={[]} activityEvents={[]} />);
+  describe("ActiveStorefront catalog pricing", () => {
+    it("renders MN Rental License Check at $0.01 from demo catalog", () => {
+      render(
+        <ActiveStorefront products={[]} demo cities={demoCities} />,
+      );
 
-      expect(screen.getByText("MARC-HD Compliance Verification")).toBeDefined();
-      expect(screen.getByText("$0.85")).toBeDefined();
-
-      const networkBadges = screen.getAllByText(/Network: Base eip155:8453/i);
-      expect(networkBadges.length).toBeGreaterThan(0);
-
-      // Verify the 4 compliance indicators
-      expect(screen.getByText("✓ Habitability Score (0-100)")).toBeDefined();
-      expect(screen.getByText("✓ License Tier Diligence (T1-T3)")).toBeDefined();
-      expect(screen.getByText("✓ 4-Class Verdict Engine")).toBeDefined();
-      expect(screen.getByText("✓ ArcGIS REST Parity")).toBeDefined();
+      expect(screen.getByText("MN Rental License Check")).toBeDefined();
+      expect(screen.getByText("$0.01")).toBeDefined();
     });
   });
 
-  describe("demo.ts MARC-HD Parity Verification", () => {
-    it("configures Minneapolis as MARC-HD at $0.85 on eip155:8453", () => {
+  describe("demo.ts catalog parity", () => {
+    it("configures Minneapolis at $0.01 on eip155:8453", () => {
       const mnCity = demoCities.find((c) => c.code === "mn");
       expect(mnCity).toBeDefined();
-      expect(mnCity?.service_name).toBe("MARC-HD Compliance Verification");
-      expect(mnCity?.price).toBe("$0.85");
+      expect(mnCity?.service_name).toBe("MN Rental License Check");
+      expect(mnCity?.price).toBe("$0.01");
       expect(mnCity?.network).toBe("eip155:8453");
       expect(mnCity?.canonical_alias).toBe("/mn/property-check");
     });

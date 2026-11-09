@@ -698,6 +698,8 @@ def _build_discovery_extension(
     method: str,
     input_example: dict[str, Any] | None,
     output_example: dict[str, Any] | None,
+    *,
+    input_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Bazaar discovery extension dict ({"bazaar": {info, schema}}).
 
@@ -715,6 +717,7 @@ def _build_discovery_extension(
     method = method.upper()
     extension = declare_discovery_extension(
         input=input_example,
+        input_schema=input_schema,
         body_type="json" if is_body_method(method) else None,
         output=OutputConfig(example=output_example)
         if output_example is not None
@@ -846,6 +849,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
                 params.discovery_method,
                 params.discovery_input_example,
                 params.discovery_output_example,
+                input_schema=params.discovery_input_schema,
             )
 
     # Encode the ready-to-serve 402 challenge header (PAYMENT-REQUIRED) so an

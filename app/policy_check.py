@@ -24,6 +24,7 @@ from x402.http import decode_payment_required_header
 from app import challenge_cache
 from app.commerce_payment import expected_usdc_asset
 from app.config import settings
+from app.discovery_schemas import POLICY_CHECK_BODY_SCHEMA
 from app.models import BuildSellerRequirementsInput
 from app.x402_services import _clamp_description, build_seller_requirements
 
@@ -56,6 +57,7 @@ DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {
     "request_digest": {"canonical_url": "https://example.com/api", "http_method": "GET"},
     "idempotency_key": "optional-client-key",
 }
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = POLICY_CHECK_BODY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "verdict": "pass",
@@ -629,6 +631,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=clamped_description(),
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
         service_name=SERVICE_NAME,
         service_tags=tags,
@@ -645,6 +648,7 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="POST",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
                 service_name=SERVICE_NAME,
                 service_tags=tags,

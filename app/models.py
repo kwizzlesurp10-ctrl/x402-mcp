@@ -127,6 +127,13 @@ class BuildSellerRequirementsInput(BaseModel):
             "JSON body for POST/PUT/PATCH"
         ),
     )
+    discovery_input_schema: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "JSON Schema for discovery input (query params or POST body). "
+            "Required for Bazaar catalog invocability when discoverable."
+        ),
+    )
     discovery_output_example: dict[str, Any] | None = Field(
         default=None,
         description="Small example of the JSON response a paying buyer receives",

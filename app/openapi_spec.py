@@ -241,6 +241,16 @@ _PAYMENT_SIGNATURE_PARAM = {
     "schema": {"type": "string"},
 }
 
+X402_SECURITY_SCHEME = {
+    "type": "apiKey",
+    "in": "header",
+    "name": "PAYMENT-SIGNATURE",
+    "description": (
+        "Signed x402 payment authorization. Omit to receive a 402 and the "
+        "PAYMENT-REQUIRED challenge; sign it and retry with this header."
+    ),
+}
+
 _PAYMENT_REQUIRED_RESPONSE = {
     "description": "Payment required. The PAYMENT-REQUIRED header carries the "
     "x402 challenge: sign it and retry with PAYMENT-SIGNATURE.",
@@ -258,6 +268,7 @@ def _declare_paid(
 ) -> None:
     """Mark one operation payable, callable, and describable, in place."""
     operation["x-payment-info"] = _payment_info(amount)
+    operation["security"] = [{"x402": []}]
     responses = operation.setdefault("responses", {})
     responses["402"] = dict(_PAYMENT_REQUIRED_RESPONSE)
 
@@ -286,6 +297,122 @@ def _declare_paid(
     }
 
 
+def _has_param(parameters: list[dict[str, Any]], name: str) -> bool:
+    return any(p.get("name") == name for p in parameters)
+
+
+def _merge_query_params(
+    operation: dict[str, Any], *params: dict[str, Any]
+) -> None:
+    parameters = operation.setdefault("parameters", [])
+    for param in params:
+        if not _has_param(parameters, param["name"]):
+            parameters.append(dict(param))
+
+
+_ADDRESS_QUERY_PARAM = {
+    "name": "address",
+    "in": "query",
+    "required": True,
+    "description": "Street address in the target city (1-120 characters).",
+    "schema": {"type": "string", "minLength": 1, "maxLength": 120},
+}
+
+_AGENT_QUERY_PARAMS = (
+    {
+        "name": "city_code",
+        "in": "query",
+        "required": True,
+        "description": "City code from GET /us/cities (e.g. mn, sea, nyc).",
+        "schema": {"type": "string", "minLength": 1, "maxLength": 16},
+    },
+    {
+        "name": "address",
+        "in": "query",
+        "required": True,
+        "description": "Street address in that city (1-120 characters).",
+        "schema": {"type": "string", "minLength": 1, "maxLength": 120},
+    },
+)
+
+_TX_DECISION_QUERY_PARAMS = (
+    {
+        "name": "gas",
+        "in": "query",
+        "required": False,
+        "description": "Gas preset eth|usdc|erc20|x402 or integer gas units.",
+        "schema": {"type": "string"},
+    },
+    {
+        "name": "urgency",
+        "in": "query",
+        "required": False,
+        "description": "How soon the transaction must land: now, soon, or flexible.",
+        "schema": {"type": "string", "enum": ["now", "soon", "flexible"]},
+    },
+)
+
+_FINALITY_TX_PARAM = {
+    "name": "tx",
+    "in": "query",
+    "required": True,
+    "description": "Base mainnet transaction hash (0x + 64 hex).",
+    "schema": {"type": "string", "pattern": "^0x[0-9a-fA-F]{64}$"},
+}
+
+
+def _apply_paid_input_schema(path: str, operation: dict[str, Any]) -> None:
+    """Declare business query/body inputs so indexers can construct calls."""
+    if path in ("/mn/property-check",) or (
+        path.startswith("/us/") and path.endswith("/property-check")
+    ):
+        _merge_query_params(operation, _ADDRESS_QUERY_PARAM)
+        return
+    if path == "/agent/property-due-diligence":
+        _merge_query_params(operation, *_AGENT_QUERY_PARAMS)
+        return
+    if path == "/base/tx-decision":
+        _merge_query_params(operation, *_TX_DECISION_QUERY_PARAMS)
+        return
+    if path == "/base/finality-check":
+        _merge_query_params(operation, _FINALITY_TX_PARAM)
+        return
+    if path == "/tasks/us-rental-diligence":
+        from app.diligence_pack import DISCOVERY_INPUT_EXAMPLE, DISCOVERY_INPUT_SCHEMA
+
+        operation["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": DISCOVERY_INPUT_SCHEMA,
+                    "example": DISCOVERY_INPUT_EXAMPLE,
+                }
+            },
+        }
+        return
+    if path == "/x402/policy-check":
+        from app.policy_check import DISCOVERY_INPUT_EXAMPLE, DISCOVERY_INPUT_SCHEMA
+
+        operation["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": DISCOVERY_INPUT_SCHEMA,
+                    "example": DISCOVERY_INPUT_EXAMPLE,
+                }
+            },
+        }
+
+
+def _city_operation_labels(city_code: str) -> tuple[str, str]:
+    from app.city_compliance import registry as city_registry
+
+    spec = city_registry.get_city(city_code).SPEC
+    summary = spec.service_name
+    description = spec.description or summary
+    return summary, description
+
+
 def tighten(schema: dict[str, Any]) -> dict[str, Any]:
     """Turn FastAPI's generated schema into the public discovery document."""
     priced = paid_paths()
@@ -305,6 +432,11 @@ def tighten(schema: dict[str, Any]) -> dict[str, Any]:
                 operation["security"] = []
             else:
                 _declare_paid(operation, amount, examples.get(path))
+                _apply_paid_input_schema(path, operation)
+                if path == "/mn/property-check":
+                    summary, description = _city_operation_labels("mn")
+                    operation["summary"] = summary
+                    operation["description"] = description
         kept[path] = operations
 
     # A concrete purchase URL the templated route cannot express. Re-point the
@@ -326,6 +458,7 @@ def tighten(schema: dict[str, Any]) -> dict[str, Any]:
                 if p.get("name") != "product_id"
             ]
             _declare_paid(resolved, amount, examples.get(path))
+            _apply_paid_input_schema(path, resolved)
             concrete[method] = resolved
         if concrete:
             kept[path] = concrete
@@ -357,12 +490,18 @@ def tighten(schema: dict[str, Any]) -> dict[str, Any]:
                     if p.get("name") != "city_code"
                 ]
                 resolved["operationId"] = f"us_{city_code}_property_check_get"
+                summary, description = _city_operation_labels(city_code)
+                resolved["summary"] = summary
+                resolved["description"] = description
                 _declare_paid(resolved, amount, examples.get(path))
+                _apply_paid_input_schema(path, resolved)
                 concrete_city[method] = resolved
             if concrete_city:
                 kept[path] = concrete_city
 
     schema["paths"] = kept
+    components = schema.setdefault("components", {})
+    components["securitySchemes"] = {"x402": X402_SECURITY_SCHEME}
     schema["info"]["x-guidance"] = GUIDANCE
     # x402scan verifies origin ownership from info.contact.email and shows it to
     # buyers as the way to reach the operator about an outage or a price change.

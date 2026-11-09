@@ -14,10 +14,10 @@ const MCP_TOOLS: McpToolInfo[] = [
   {
     name: "mn_property_diligence",
     category: "Compliance & Diligence",
-    price: "$0.85 USDC",
+    price: "$0.01 USDC",
     network: "Base eip155:8453",
     description:
-      "Minneapolis Autonomous Rental Compliance & Habitability Diligence (MARC-HD). Queries ArcGIS REST FeatureServers, normalizes addresses/PINs, computes composite 0-100 habitability score, tier penalties (T1-T3), and deterministic 4-class compliance verdict.",
+      "Minneapolis rental license compliance check (GET /mn/property-check). Queries City of Minneapolis open-data ArcGIS joins for license status, violation cases, and condemned/boarded properties.",
     highlight: true,
   },
   {

@@ -10,6 +10,7 @@ from typing import Any
 
 from app.city_compliance import registry
 from app.config import settings
+from app.discovery_schemas import CITY_AGENT_QUERY_SCHEMA
 
 PRODUCT_ID = "property-due-diligence-agent"
 SERVICE_NAME = "Property Due Diligence Agent"  # 28 chars
@@ -29,6 +30,7 @@ DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {
     "city_code": "mn",
     "address": "1700 Penn Ave N",
 }
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = CITY_AGENT_QUERY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "product_id": PRODUCT_ID,
@@ -62,6 +64,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
         service_name=SERVICE_NAME,
         service_tags=tags,
@@ -77,6 +80,7 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
                 service_name=SERVICE_NAME,
                 service_tags=tags,

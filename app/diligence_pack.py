@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.city_compliance.registry import get_city, public_codes
 from app.config import settings
+from app.discovery_schemas import DILIGENCE_PACK_BODY_SCHEMA
 
 log = logging.getLogger("x402")
 
@@ -42,6 +43,7 @@ DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {
     ],
     "include_base_pulse_context": False,
 }
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = DILIGENCE_PACK_BODY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "product_id": PRODUCT_ID,
@@ -152,6 +154,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
         service_name=SERVICE_NAME,
         service_tags=tags,
@@ -168,6 +171,7 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="POST",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
                 service_name=SERVICE_NAME,
                 service_tags=tags,

@@ -365,6 +365,7 @@ def register(app: Starlette) -> None:
             "GET",
             finality_check.DISCOVERY_INPUT_EXAMPLE,
             finality_check.DISCOVERY_OUTPUT_EXAMPLE,
+            input_schema=finality_check.DISCOVERY_INPUT_SCHEMA,
         )
 
     tags = [t.strip()[:32] for t in settings.bazaar_service_tags.split(",") if t.strip()][:5]

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmAssessment, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
+import { api, type CityCatalogItem, type DemandReport, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmAssessment, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
 import type { TelemetryResponse } from "./types/api";
 import { ActiveStorefront } from "./components/ActiveStorefront";
 import { McpInstructions } from "./components/McpInstructions";
@@ -17,7 +17,7 @@ import { SellerWizard } from "./components/SellerWizard";
 import { VirtualizedLedger } from "./components/VirtualizedLedger";
 import { WalletPanel } from "./components/WalletPanel";
 import { OperatorHeader } from "./components/OperatorHeader";
-import { demoActivity, demoDoctor, demoOs, demoRevenue, demoSpend, demoStats } from "./fixtures/demo";
+import { demoActivity, demoCities, demoDemand, demoDoctor, demoOs, demoRevenue, demoSpend, demoStats } from "./fixtures/demo";
 import { explain } from "./glossary";
 import { useSSE, type StreamEvent } from "./hooks/useSSE";
 import { downloadText, ledgerToCsv } from "./utils/ledger";
@@ -80,6 +80,8 @@ export default function App() {
   const [ledgerFilterAgent, setLedgerFilterAgent] = useState("");
   const [tourOpen, setTourOpen] = useState(() => !localStorage.getItem("tourSeen"));
   const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
+  const [storefrontCities, setStorefrontCities] = useState<CityCatalogItem[] | null>(null);
+  const [storefrontDemand, setStorefrontDemand] = useState<DemandReport | null>(null);
 
 
 
@@ -283,6 +285,8 @@ export default function App() {
           window: "Next ~10 min favorable",
         },
       });
+      setStorefrontCities(demoCities);
+      setStorefrontDemand(demoDemand);
       setError(null);
       return;
     }
@@ -318,6 +322,10 @@ export default function App() {
     if (tel.ok) setTelemetry(tel.value);
     api.pulse().then(setPulse).catch(() => {});
     api.os().then(setOs).catch(() => {});
+    void Promise.allSettled([api.usCities(), api.demand()]).then(([cRes, demRes]) => {
+      if (cRes.status === "fulfilled") setStorefrontCities(cRes.value.cities);
+      if (demRes.status === "fulfilled") setStorefrontDemand(demRes.value);
+    });
     if (s.ok) {
       const rateRemaining = s.value.agents.length
         ? Math.min(...s.value.agents.map((a) => a.rate_limit_remaining))
@@ -692,7 +700,14 @@ export default function App() {
         <div className="hide-mobile" style={{ display: "contents" }}>
           <OsHealthPanel os={os} />
           <McpInstructions />
-          <ActiveStorefront products={products} revenueRows={revenue} activityEvents={activity} />
+          <ActiveStorefront
+            products={products}
+            revenueRows={revenue}
+            activityEvents={activity}
+            cities={storefrontCities}
+            demand={storefrontDemand}
+            demo={demo}
+          />
         </div>
 
         <SwarmAssessmentPanel assessment={swarmAssessment} density={density} />
