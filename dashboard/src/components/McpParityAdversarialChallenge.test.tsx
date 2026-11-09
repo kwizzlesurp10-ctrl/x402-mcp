@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { McpInstructions } from "./McpInstructions";
 import { ActiveStorefront } from "./ActiveStorefront";
 import { demoCities } from "../fixtures/demo";
@@ -87,8 +87,10 @@ describe("MCP Documentation & Storefront Adversarial Parity", () => {
         <ActiveStorefront products={[]} demo cities={demoCities} />,
       );
 
-      expect(screen.getByText("MN Rental License Check")).toBeDefined();
-      expect(screen.getByText("$0.01")).toBeDefined();
+      const mnHeading = screen.getByRole("heading", { name: "MN Rental License Check" });
+      const mnCard = mnHeading.closest("div")?.parentElement?.parentElement;
+      expect(mnCard).toBeTruthy();
+      expect(within(mnCard as HTMLElement).getByText("$0.01")).toBeDefined();
     });
   });
 

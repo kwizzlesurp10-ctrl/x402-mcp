@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ActiveStorefront } from "./ActiveStorefront";
 import type { SwarmProduct, LedgerRow } from "../api/client";
@@ -46,8 +46,10 @@ describe("ActiveStorefront Component", () => {
       />,
     );
 
-    expect(screen.getByText("MN Rental License Check")).toBeDefined();
-    expect(screen.getByText("$0.01")).toBeDefined();
+    const mnHeading = screen.getByRole("heading", { name: "MN Rental License Check" });
+    const mnCard = mnHeading.closest("div")?.parentElement?.parentElement;
+    expect(mnCard).toBeTruthy();
+    expect(within(mnCard as HTMLElement).getByText("$0.01")).toBeDefined();
   });
 
   it("aggregates demand stats from the catalog", () => {
@@ -74,7 +76,7 @@ describe("ActiveStorefront Component", () => {
     expect(screen.queryByText("MN Rental License Check")).toBeNull();
     expect(screen.getByText("Autonomous Research Alpha")).toBeDefined();
 
-    fireEvent.click(screen.getByText(/ALL/));
-    expect(screen.getByText("MN Rental License Check")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /^ALL\b/ }));
+    expect(screen.getByRole("heading", { name: "MN Rental License Check" })).toBeDefined();
   });
 });
