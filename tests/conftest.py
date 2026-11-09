@@ -167,9 +167,9 @@ def _clear_challenge_cache():
     header (and its stubbed build_seller_requirements output) across tests."""
     from app import challenge_cache
 
-    challenge_cache._mem.clear()
+    challenge_cache.clear()
     yield
-    challenge_cache._mem.clear()
+    challenge_cache.clear()
 
 
 @pytest.fixture(scope="session", autouse=True)

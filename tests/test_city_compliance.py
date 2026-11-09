@@ -39,7 +39,11 @@ def test_placeholder_cities_stay_mounted_but_off_catalog(
     for code in ("mia", "atl"):
         assert code in registry.known_codes()
         assert code not in registry.public_codes()
-        response = client.get(f"/us/{code}/property-check")
+        mod = registry.get_city(code)
+        response = client.get(
+            f"/us/{code}/property-check",
+            params={"address": mod.SPEC.sample_address},
+        )
         assert response.status_code == 402, code
         assert "PAYMENT-REQUIRED" in response.headers
 
@@ -52,18 +56,26 @@ def test_unknown_city_404() -> None:
 
 
 @pytest.mark.parametrize("code", list(registry.known_codes()))
-def test_unpaid_city_always_402_before_address_validation(
+def test_unpaid_city_validate_before_402(
     code: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
+    mod = registry.get_city(code)
     for params in ({}, {"address": "   "}):
         response = client.get(f"/us/{code}/property-check", params=params)
-        assert response.status_code == 402, (code, params)
-        assert "PAYMENT-REQUIRED" in response.headers
-        body = response.json()
-        assert body["error"] == "payment_required"
-        assert body["city"] == code
-        assert body["sample_url"].endswith(f"/us/{code}/property-check/sample")
+        assert response.status_code == 422, (code, params)
+        assert "PAYMENT-REQUIRED" not in response.headers
+
+    response = client.get(
+        f"/us/{code}/property-check",
+        params={"address": mod.SPEC.sample_address},
+    )
+    assert response.status_code == 402, code
+    assert "PAYMENT-REQUIRED" in response.headers
+    body = response.json()
+    assert body["error"] == "payment_required"
+    assert body["city"] == code
+    assert body["sample_url"].endswith(f"/us/{code}/property-check/sample")
 
 
 @pytest.mark.parametrize("code", list(registry.known_codes()))

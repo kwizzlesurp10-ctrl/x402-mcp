@@ -137,6 +137,41 @@ def _us_city_catalog_what(base: str) -> str:
     )
 
 
+def _swarm_purchase_resources(base: str) -> list[dict[str, Any]]:
+    """Listed composite purchase URLs (each carries its own seller 402)."""
+    try:
+        from app.swarm.registry import swarm_registry
+    except Exception:  # pragma: no cover
+        return []
+
+    out: list[dict[str, Any]] = []
+    for product in swarm_registry._products.values():
+        if product.status != "listed":
+            continue
+        seller = product.seller_requirements or {}
+        if not seller.get("payment_required_header"):
+            continue
+        price = seller.get("price")
+        if price is None:
+            price = f"${product.price_usdc:.6f}".rstrip("0").rstrip(".")
+        out.append(
+            {
+                "url": f"{base}/swarm/products/{product.product_id}/purchase",
+                "method": "GET",
+                "price": price,
+                "network": product.network or settings.x402_default_network,
+                "name": product.topic or f"Swarm composite {product.product_id[:8]}",
+                "what": (
+                    "Pay in USDC to receive a cited composite intelligence report. "
+                    f"GET or POST {base}/swarm/products/{product.product_id}/purchase "
+                    "with PAYMENT-SIGNATURE after the 402 challenge."
+                ),
+                "params": {},
+            }
+        )
+    return out
+
+
 def _us_city_paid_resources(base: str) -> list[dict[str, Any]]:
     """US multi-city network resources (includes MN network path + samples)."""
     try:
@@ -190,7 +225,7 @@ def paid_resources() -> list[dict[str, Any]]:
             "method": "GET",
             "price": settings.tx_decision_price,
             "network": settings.x402_default_network,
-            "name": "Base tx decision",
+            "name": "Base tx decision",  # matches tx_decision.SERVICE_NAME / 402 resource
             "what": "Submit this Base tx now or wait, max fee + priority fee "
             "(EIP-1559 gwei), estimated USD cost. Call before every send.",
             "params": {
@@ -303,7 +338,7 @@ def paid_resources() -> list[dict[str, Any]]:
             "price": pdd_agent.PRICE,
             "network": settings.x402_default_network,
             "name": pdd_agent.SERVICE_NAME,
-            "what": pdd_agent.RESOURCE_DESCRIPTION,
+            "what": pdd_agent.resource_description(),
             "params": {
                 "city_code": "City network code (mn, nyc, sea, …)",
                 "address": "street address string, 1-120 chars (required)",
@@ -324,19 +359,23 @@ def well_known_x402() -> dict[str, Any]:
     (which crawlers read first) carries the same prices either way.
     """
     fund = funding()
+    base = _base()
+    catalog = paid_resources()
+    swarm_listed = _swarm_purchase_resources(base)
+    all_paid_details = catalog + swarm_listed
     return {
         "version": 1,
         "x402_version": 2,
         "service": "x402-micropayments-mcp",
-        "base_url": _base(),
+        "base_url": base,
         "networks": [settings.x402_default_network],
         "asset": BASE_USDC,
         "payTo": fund["payTo"],
         "payment_header": "PAYMENT-SIGNATURE",
         "challenge_header": "PAYMENT-REQUIRED",
         "receipt_header": "PAYMENT-RESPONSE",
-        "resources": [r["url"] for r in paid_resources() if r["price"] != "free"],
-        "resource_details": paid_resources(),
+        "resources": [r["url"] for r in all_paid_details if r["price"] != "free"],
+        "resource_details": all_paid_details,
         # Omitted entirely rather than sent empty: an empty proofs array reads
         # as a failed proof, absence reads as "not claimed yet".
         **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
@@ -355,6 +394,15 @@ def well_known_x402() -> dict[str, Any]:
     }
 
 
+def _municipal_jurisdiction_count() -> int:
+    try:
+        from app.city_compliance import registry
+
+        return len(registry.public_codes())
+    except Exception:  # pragma: no cover
+        return 0
+
+
 def llms_txt() -> str:
     base = _base()
     lines = [
@@ -370,7 +418,7 @@ def llms_txt() -> str:
         "",
         "1. **Zero-Risk Schema Verification**: Call any `/sample` endpoint (e.g. `/us/mn/property-check/sample`, `/us/cities`, or `/pulse`) at $0.00 to verify payload schema and parsing logic before spending funds.",
         "2. **High-ROI Economic Value**:",
-        "   - **US Multi-City Rental Diligence Pack ($1.50 USDC)**: Screen up to 5 properties across 18 municipal open data portals in one call. Saves $50-$200 in human diligence costs and eliminates uninsurable tenant/lease compliance risks.",
+        f"   - **US Multi-City Rental Diligence Pack ($1.50 USDC)**: Screen up to 5 properties across {_municipal_jurisdiction_count()} municipal open data portals in one call. Saves $50-$200 in human diligence costs and eliminates uninsurable tenant/lease compliance risks.",
         "   - **Single Property Compliance Check ($0.01 USDC)**: Sub-second live query of municipal ArcGIS/Socrata records for active rental licensing, building code violations, and condemnations.",
         "   - **Base Tx-Decision & Finality ($0.01 USDC)**: Live Base L2 EIP-1559 gas congestion intelligence. Saves 15-30% on transaction gas re-attempts and provides L1-finalized settlement assurances.",
         "3. **Gasless Buyer Settlement**: Buyers sign EIP-3009 `transferWithAuthorization` in USDC only; the relayer/facilitator sponsors all on-chain gas.",
@@ -447,6 +495,32 @@ def llms_txt() -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _attach_a2a_skill_input_schemas(skills: list[dict[str, Any]]) -> None:
+    from app.discovery_schemas import (
+        ADDRESS_QUERY_SCHEMA,
+        CITY_AGENT_QUERY_SCHEMA,
+        DILIGENCE_PACK_BODY_SCHEMA,
+        FINALITY_QUERY_SCHEMA,
+        POLICY_CHECK_BODY_SCHEMA,
+        TX_DECISION_QUERY_SCHEMA,
+    )
+
+    static = {
+        "base-tx-decision": TX_DECISION_QUERY_SCHEMA,
+        "base-finality-check": FINALITY_QUERY_SCHEMA,
+        "property-due-diligence-agent": CITY_AGENT_QUERY_SCHEMA,
+        "us-city-property-check": CITY_AGENT_QUERY_SCHEMA,
+        "us-rental-diligence-pack": DILIGENCE_PACK_BODY_SCHEMA,
+        "buyer-payment-policy-check": POLICY_CHECK_BODY_SCHEMA,
+    }
+    for sk in skills:
+        sid = sk.get("id") or ""
+        if sid in static:
+            sk["inputSchema"] = static[sid]
+        elif sid.startswith("property-check-"):
+            sk["inputSchema"] = ADDRESS_QUERY_SCHEMA
 
 
 def agent_card() -> dict[str, Any]:
@@ -541,7 +615,7 @@ def agent_card() -> dict[str, Any]:
             "id": "property-due-diligence-agent",
             "name": pdd_agent.SERVICE_NAME,
             "description": (
-                f"{pdd_agent.RESOURCE_DESCRIPTION} "
+                f"{pdd_agent.resource_description()} "
                 f"Price: {pdd_agent.PRICE} USDC on {network} via x402. "
                 f"HTTP: GET {pdd_agent.resource_url()}?city_code={{code}}&address={{street}}."
             ),
@@ -773,6 +847,8 @@ def agent_card() -> dict[str, Any]:
                 "outputModes": ["application/json"],
             }
         )
+
+    _attach_a2a_skill_input_schemas(skills)
 
     pay_to = _pay_to()
     fund = funding()

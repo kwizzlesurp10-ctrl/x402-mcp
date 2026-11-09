@@ -32,17 +32,18 @@ def test_an_unpaid_request_gets_the_challenge_before_any_validation(
 ) -> None:
     """Deliberate contract change (2026-08-02): unpaid always means 402.
 
-    A missing or blank `address` used to return 422 to an unpaid caller — and
-    since a discovery crawler probes with no parameters at all, that is what
-    x402scan and CDP saw every time they looked at this endpoint. Neither ever
-    indexed it. Validation now happens on the paid path only.
+    Unpaid callers with a missing or blank address get schema validation (422),
+    not a payment quote they cannot fulfill.
     """
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
 
     for params in ({"address": "   "}, {}):
         response = client.get("/mn/property-check", params=params)
-        assert response.status_code == 402, params
-        assert "PAYMENT-REQUIRED" in response.headers
+        assert response.status_code == 422, params
+        assert "PAYMENT-REQUIRED" not in response.headers
+        assert response.json().get("schema", {}).get("openapi", "").startswith(
+            "/openapi.json"
+        )
 
 
 def test_a_paid_request_with_a_blank_address_is_rejected_before_it_is_charged(

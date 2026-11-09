@@ -26,6 +26,10 @@ from typing import Any, Callable
 
 log = logging.getLogger("x402")
 
+# Bump when Bazaar input/output schema or discovery metadata baked into headers changes.
+# Deploy must flush Redis `challenge:*` keys (or wait for natural fingerprint misses).
+CHALLENGE_CACHE_VERSION = 3
+
 
 def fingerprint(**parts: Any) -> str:
     """Hash EVERYTHING that goes into the header, not just the priced parts.
@@ -45,7 +49,9 @@ def fingerprint(**parts: Any) -> str:
     Pass every builder input here and the cache busts whenever any of them
     changes.
     """
-    blob = json.dumps(parts, sort_keys=True, default=str)
+    merged = dict(parts)
+    merged.setdefault("challenge_cache_version", CHALLENGE_CACHE_VERSION)
+    blob = json.dumps(merged, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 # name -> {"fp": <inputs fingerprint>, "header": <base64 challenge>}

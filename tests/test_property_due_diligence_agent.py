@@ -35,7 +35,10 @@ def test_get_402_without_payment(client: TestClient, monkeypatch: pytest.MonkeyP
         "build_payment_required_header",
         lambda: "hdr",
     )
-    r = client.get("/agent/property-due-diligence")
+    r = client.get(
+        "/agent/property-due-diligence",
+        params={"city_code": "mn", "address": "1700 Penn Ave N"},
+    )
     assert r.status_code == 402
     assert r.headers.get("payment-required") == "hdr"
     body = r.json()

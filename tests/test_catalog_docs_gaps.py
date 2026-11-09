@@ -57,26 +57,32 @@ def test_docs_do_not_treat_live_products_as_open_work() -> None:
 
 def test_diligence_and_city_unpaid_are_402_not_stubs() -> None:
     """Shipped HTTP doors: unpaid probes must not 404/501; 402 when seller configured."""
-    probes = [
-        ("GET", "/tasks/us-rental-diligence", None),
-        (
-            "POST",
-            "/tasks/us-rental-diligence",
-            {"properties": [{"city_code": "mn", "address": "1700 Penn Ave N"}]},
-        ),
+    from tests.discovery_unpaid import probe_paid_route
+
+    malformed = [
         ("GET", "/us/mn/property-check", None),
         ("GET", "/mn/property-check", None),
-        ("GET", "/base/tx-decision", None),
+        ("POST", "/tasks/us-rental-diligence", {}),
     ]
-    for method, path, body in probes:
+    for method, path, body in malformed:
         response = client.request(method, path, json=body)
         assert response.status_code != 404, f"{method} {path} is missing"
-        assert response.status_code != 501, f"{method} {path} advertised unimplemented"
+        assert response.status_code == 422, f"{method} {path} missing required input"
+        assert "PAYMENT-REQUIRED" not in response.headers
+
+    well_formed = [
+        "/us/mn/property-check",
+        "/mn/property-check",
+        "/base/tx-decision",
+        "/tasks/us-rental-diligence",
+    ]
+    for path in well_formed:
+        response = probe_paid_route(client, path)
+        assert response.status_code != 404
+        assert response.status_code != 501
         if response.status_code == 503:
             continue
-        assert response.status_code == 402, (
-            f"{method} {path} unpaid → {response.status_code}, expected 402"
-        )
+        assert response.status_code == 402, f"{path} unpaid → {response.status_code}"
     post = client.post(
         "/tasks/us-rental-diligence",
         json={"properties": [{"city_code": "mn", "address": "1700 Penn Ave N"}]},

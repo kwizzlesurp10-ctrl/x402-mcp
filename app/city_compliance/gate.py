@@ -10,6 +10,7 @@ from typing import Any
 
 from app.city_compliance.models import CitySpec
 from app.config import settings
+from app.discovery_schemas import ADDRESS_QUERY_SCHEMA
 
 
 def resource_url(city: CitySpec) -> str:
@@ -42,6 +43,7 @@ def build_payment_required_header(
     price = price_for(city)
     res = resource_url(city)
     tags = list(city.tags)
+    input_schema = ADDRESS_QUERY_SCHEMA
     fp = challenge_cache.fingerprint(
         network=network,
         price=price,
@@ -50,6 +52,7 @@ def build_payment_required_header(
         discoverable=settings.bazaar_discoverable,
         description=city.description,
         input_example=input_example,
+        input_schema=input_schema,
         output_example=output_example,
         service_name=city.service_name,
         service_tags=tags,
@@ -65,6 +68,7 @@ def build_payment_required_header(
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=input_example,
+                discovery_input_schema=input_schema,
                 discovery_output_example=output_example,
                 service_name=city.service_name,
                 service_tags=tags,

@@ -142,6 +142,15 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
 
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        try:
+            raw = await request.json()
+        except Exception:  # noqa: BLE001
+            raw = {}
+        from app.unpaid_validation import unpaid_diligence_body_invalid
+
+        bad = await unpaid_diligence_body_invalid(raw)
+        if bad is not None:
+            return bad
         log.info(
             "diligence-pack 402 (no signature)",
             extra={"status_code": 402},

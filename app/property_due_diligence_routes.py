@@ -57,6 +57,11 @@ async def property_due_diligence(
 
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        from app.unpaid_validation import unpaid_agent_query_invalid
+
+        bad = unpaid_agent_query_invalid(city_code, address)
+        if bad is not None:
+            return bad
         if not demand.is_self_traffic(request.headers):
             demand.record_challenge(
                 agent.PRODUCT_ID, request.headers.get("user-agent")

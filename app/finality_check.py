@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.discovery_schemas import FINALITY_QUERY_SCHEMA
 from app.pulse import _rpc
 
 RESOURCE_DESCRIPTION = (
@@ -35,6 +36,7 @@ RESOURCE_DESCRIPTION = (
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {
     "tx": "0x7fe54ef102682c07d2091d5623cb86df8be1ca929ae4cfb90fbdd6e73eba2c40"
 }
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = FINALITY_QUERY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "tx": "0x7fe54ef102682c07d2091d5623cb86df8be1ca929ae4cfb90fbdd6e73eba2c40",
@@ -137,6 +139,7 @@ async def check_finality(tx_hash: str) -> dict[str, Any]:
 
 
 PRODUCT_ID = "base-finality-check"
+SERVICE_NAME = "Base finality check"
 
 
 def build_payment_required_header() -> str:
@@ -155,6 +158,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
     )
 
@@ -168,7 +172,9 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
+                service_name=SERVICE_NAME,
             )
         )["payment_required_header"]
 
