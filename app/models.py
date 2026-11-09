@@ -134,6 +134,10 @@ class BuildSellerRequirementsInput(BaseModel):
             "Required for Bazaar catalog invocability when discoverable."
         ),
     )
+    discovery_output_schema: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional JSON Schema for Bazaar output; inferred from example when omitted.",
+    )
     discovery_output_example: dict[str, Any] | None = Field(
         default=None,
         description="Small example of the JSON response a paying buyer receives",

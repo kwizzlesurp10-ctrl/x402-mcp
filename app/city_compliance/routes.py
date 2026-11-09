@@ -155,6 +155,11 @@ async def us_city_property_check(
     signature = request.headers.get("PAYMENT-SIGNATURE")
     pid = gate.product_id(spec)
     if not signature:
+        from app.unpaid_validation import unpaid_city_address_invalid
+
+        bad = unpaid_city_address_invalid(address, spec.code)
+        if bad is not None:
+            return bad
         log.info(
             "us/%s/property-check 402 (no signature)",
             spec.code,

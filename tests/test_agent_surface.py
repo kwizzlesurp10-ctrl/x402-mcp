@@ -77,33 +77,30 @@ def test_the_advertised_endpoints_exist() -> None:
         assert response.status_code != 404, f"{path} advertised but missing"
 
 
-def test_a_bare_probe_of_a_paid_endpoint_gets_the_challenge_not_a_422() -> None:
-    """How every crawler and agent meets us: a probe with no parameters/body.
+def test_well_formed_unpaid_probes_get_402_not_422() -> None:
+    """Catalog URLs with required params must 402 when the probe is well-formed."""
+    from tests.discovery_unpaid import probe_paid_route
 
-    `/mn/property-check` used to answer 422 here, because FastAPI's validation
-    of a required `address` ran before any payment logic. "Expected 402, got
-    400/422 from request validation running before the payment challenge" is on
-    x402scan's published list of registration failures — and that endpoint has
-    never been indexed by any catalog, while its 402-clean siblings both were.
-    A paid door that answers anything but 402 is a door nobody can find.
-    """
     body = client.get("/.well-known/x402").json()
     paid = [r for r in body["resource_details"] if r["price"] != "free"]
     assert paid, "no paid resources advertised"
 
+    skip_paths = {"/x402/policy-check"}  # env-gated; may 404 when disabled
     for r in paid:
         path = r["url"].replace(settings.public_base_url.rstrip("/"), "")
+        if path.startswith("/swarm/products/"):
+            continue  # composite URLs are dynamic listings, not OpenAPI-shaped probes
+        if path in skip_paths:
+            continue
         method = r.get("method", "GET")
-        response = client.request(method, path)  # unparameterised probe, exactly like a crawler
+        response = probe_paid_route(client, path, method=method)
         if response.status_code == 503:
-            continue  # seller not configured on this box; nothing to sell
+            continue
         assert response.status_code == 402, (
-            f"{path} answered {response.status_code} to an unparameterised {method} probe; "
-            "a discovery crawler will mark it non-registerable"
+            f"{path} answered {response.status_code} to a well-formed unpaid {method} probe"
         )
         assert "payment-required" in {k.lower() for k in response.headers}, (
-            f"{path} returned 402 with no PAYMENT-REQUIRED header — an agent "
-            "cannot pay a challenge it was never given"
+            f"{path} returned 402 with no PAYMENT-REQUIRED header"
         )
 
 

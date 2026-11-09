@@ -299,6 +299,11 @@ app.add_middleware(
     ],
 )
 
+from app.discovery_cors import DiscoveryCorsMiddleware
+
+# Outermost: public discovery ACAO * before the strict origin allowlist below.
+app.add_middleware(DiscoveryCorsMiddleware)
+
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "[::1]", "::1")
 
 
@@ -801,6 +806,18 @@ async def llms_txt() -> str:
     from app import agent_surface
 
     return agent_surface.llms_txt()
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt() -> str:
+    """Allow crawlers on machine-readable discovery surfaces."""
+    return (
+        "User-agent: *\n"
+        "Allow: /.well-known/\n"
+        "Allow: /openapi.json\n"
+        "Allow: /llms.txt\n"
+        "Allow: /us/cities\n"
+    )
 
 
 from datetime import datetime, timedelta
@@ -1729,6 +1746,11 @@ async def mn_property_check(
         )
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        from app.unpaid_validation import unpaid_address_invalid
+
+        bad = unpaid_address_invalid(address)
+        if bad is not None:
+            return bad
         log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
         if not demand.is_self_traffic(request.headers):
             demand.record_challenge("mn-property-check", request.headers.get("user-agent"))

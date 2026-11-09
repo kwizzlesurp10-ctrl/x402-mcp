@@ -700,6 +700,7 @@ def _build_discovery_extension(
     output_example: dict[str, Any] | None,
     *,
     input_schema: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Bazaar discovery extension dict ({"bazaar": {info, schema}}).
 
@@ -715,11 +716,17 @@ def _build_discovery_extension(
     from x402.extensions.bazaar.types import BAZAAR, is_body_method
 
     method = method.upper()
+    out_schema = output_schema
+    if output_example is not None and out_schema is None:
+        from app.discovery_schemas import schema_from_example
+
+        out_schema = schema_from_example(output_example)
+
     extension = declare_discovery_extension(
         input=input_example,
         input_schema=input_schema,
         body_type="json" if is_body_method(method) else None,
-        output=OutputConfig(example=output_example)
+        output=OutputConfig(example=output_example, schema=out_schema)
         if output_example is not None
         else None,
     )
@@ -850,6 +857,7 @@ def build_seller_requirements(params: BuildSellerRequirementsInput) -> dict[str,
                 params.discovery_input_example,
                 params.discovery_output_example,
                 input_schema=params.discovery_input_schema,
+                output_schema=params.discovery_output_schema,
             )
 
     # Encode the ready-to-serve 402 challenge header (PAYMENT-REQUIRED) so an

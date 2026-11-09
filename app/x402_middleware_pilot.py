@@ -196,6 +196,8 @@ async def pilot_ping() -> dict:
 async def base_finality_check(
     tx: str = Query(
         ...,
+        min_length=66,
+        max_length=66,
         pattern=r"^0x[0-9a-fA-F]{64}$",
         description="Base mainnet transaction hash to check",
     ),
@@ -221,6 +223,16 @@ def instrumented_middleware_class() -> type:
 
     class _InstrumentedPaymentMiddleware(PaymentMiddlewareASGI):
         async def dispatch(self, request, call_next):  # type: ignore[override]
+            if (
+                request.url.path == "/base/finality-check"
+                and request.method == "GET"
+                and not request.headers.get("PAYMENT-SIGNATURE")
+            ):
+                from app.unpaid_validation import unpaid_finality_tx_invalid
+
+                bad = unpaid_finality_tx_invalid(request.query_params.get("tx"))
+                if bad is not None:
+                    return bad
             response = await super().dispatch(request, call_next)
             record_402_challenge(request, response.status_code)
             return response
@@ -361,11 +373,14 @@ def register(app: Starlette) -> None:
 
     finality_extensions = None
     if settings.bazaar_discoverable:
+        from app.discovery_schemas import schema_from_example
+
         finality_extensions = _build_discovery_extension(
             "GET",
             finality_check.DISCOVERY_INPUT_EXAMPLE,
             finality_check.DISCOVERY_OUTPUT_EXAMPLE,
             input_schema=finality_check.DISCOVERY_INPUT_SCHEMA,
+            output_schema=schema_from_example(finality_check.DISCOVERY_OUTPUT_EXAMPLE),
         )
 
     tags = [t.strip()[:32] for t in settings.bazaar_service_tags.split(",") if t.strip()][:5]
@@ -396,7 +411,7 @@ def register(app: Starlette) -> None:
             resource=finality_check.resource_url(),
             description=finality_check.RESOURCE_DESCRIPTION,
             mime_type="application/json",
-            service_name=settings.bazaar_service_name.strip()[:32] or None,
+            service_name=finality_check.SERVICE_NAME[:32],
             tags=tags or None,
             extensions=finality_extensions,
         ),

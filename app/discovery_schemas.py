@@ -112,6 +112,41 @@ POLICY_CHECK_BODY_SCHEMA: dict[str, Any] = {
 }
 
 
+def schema_from_example(value: Any) -> dict[str, Any]:
+    """JSON Schema inferred from a discovery output example (OpenAPI-aligned)."""
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string"}
+    if value is None:
+        return {}
+    if isinstance(value, list):
+        items = schema_from_example(value[0]) if value else {}
+        return {"type": "array", "items": items}
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "properties": {k: schema_from_example(v) for k, v in value.items()},
+        }
+    return {}
+
+
+def bazaar_output_schema_has_properties(bazaar: dict[str, Any]) -> bool:
+    out = (
+        (bazaar.get("schema") or {})
+        .get("properties", {})
+        .get("output", {})
+        .get("properties", {})
+        .get("example", {})
+        .get("properties", {})
+    )
+    return bool(out)
+
+
 def bazaar_input_schema_has_properties(bazaar: dict[str, Any]) -> bool:
     """True when the extension JSON Schema describes non-empty query or body params."""
     inp = (

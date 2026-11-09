@@ -143,6 +143,7 @@ RESOURCE_DESCRIPTION = (
 
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {"gas": "usdc", "urgency": "flexible"}
 DISCOVERY_INPUT_SCHEMA: dict[str, Any] = TX_DECISION_QUERY_SCHEMA
+SERVICE_NAME = "Base tx decision"
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "submit": True,
@@ -195,6 +196,7 @@ def build_payment_required_header() -> str:
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
                 discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
+                service_name=SERVICE_NAME,
             )
         )["payment_required_header"]
 

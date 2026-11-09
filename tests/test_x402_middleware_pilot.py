@@ -67,13 +67,11 @@ def test_finality_check_402_carries_bazaar_discovery_extension() -> None:
     assert "bazaar" in decoded.get("extensions", {})
 
 
-def test_malformed_tx_is_still_gated_before_route_validation_runs() -> None:
-    """Payment gating happens at the ASGI layer, before FastAPI's own query
-    validation -- an unpaid request with a bad `tx` still gets the 402
-    challenge, not a 422. The 422-without-charge property is enforced later,
-    inside call_next, once a payment has actually been verified."""
+def test_malformed_tx_returns_422_without_payment_quote() -> None:
+    """Unpaid malformed `tx` values get schema validation, not a 402 quote."""
     response = client.get("/base/finality-check", params={"tx": "not-a-hash"})
-    assert response.status_code == 402
+    assert response.status_code == 422
+    assert "PAYMENT-REQUIRED" not in response.headers
 
 
 def test_mn_property_check_still_uses_its_own_hand_rolled_path() -> None:

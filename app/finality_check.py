@@ -139,6 +139,7 @@ async def check_finality(tx_hash: str) -> dict[str, Any]:
 
 
 PRODUCT_ID = "base-finality-check"
+SERVICE_NAME = "Base finality check"
 
 
 def build_payment_required_header() -> str:
@@ -173,6 +174,7 @@ def build_payment_required_header() -> str:
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
                 discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
+                service_name=SERVICE_NAME,
             )
         )["payment_required_header"]
 

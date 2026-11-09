@@ -12,6 +12,7 @@ from app.city_compliance import registry as city_registry
 from app.config import settings
 from app.discovery_schemas import bazaar_input_schema_has_properties
 from app.main import app
+from tests.discovery_unpaid import probe_paid_route
 
 client = TestClient(app)
 
@@ -28,11 +29,7 @@ def _fresh_challenge_cache(monkeypatch):
 
 
 def _bazaar_from_402(path: str, *, method: str = "GET") -> dict:
-    headers = {"x-demand-ignore": "1"}
-    if method == "POST":
-        response = client.post(path, headers=headers, json={})
-    else:
-        response = client.get(path, headers=headers)
+    response = probe_paid_route(client, path, method=method)
     assert response.status_code == 402, f"{path} expected 402, got {response.status_code}"
     header = response.headers.get("PAYMENT-REQUIRED")
     assert header, f"{path} missing PAYMENT-REQUIRED"

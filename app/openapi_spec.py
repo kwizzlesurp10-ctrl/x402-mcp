@@ -57,6 +57,7 @@ PUBLIC_FREE_PATHS: tuple[str, ...] = (
     "/mn/property-check/sample",
     "/us/cities",
     "/us/{city_code}/property-check/sample",
+    "/robots.txt",
 )
 
 # What a crawler must never learn from us. Not used for filtering (the
@@ -301,13 +302,22 @@ def _has_param(parameters: list[dict[str, Any]], name: str) -> bool:
     return any(p.get("name") == name for p in parameters)
 
 
+def _upsert_parameter(parameters: list[dict[str, Any]], param: dict[str, Any]) -> None:
+    name = param.get("name")
+    loc = param.get("in", "query")
+    for idx, existing in enumerate(parameters):
+        if existing.get("name") == name and existing.get("in", "query") == loc:
+            parameters[idx] = dict(param)
+            return
+    parameters.append(dict(param))
+
+
 def _merge_query_params(
     operation: dict[str, Any], *params: dict[str, Any]
 ) -> None:
     parameters = operation.setdefault("parameters", [])
     for param in params:
-        if not _has_param(parameters, param["name"]):
-            parameters.append(dict(param))
+        _upsert_parameter(parameters, param)
 
 
 _ADDRESS_QUERY_PARAM = {
@@ -361,23 +371,26 @@ _FINALITY_TX_PARAM = {
 }
 
 
-def _apply_paid_input_schema(path: str, operation: dict[str, Any]) -> None:
+def _apply_paid_input_schema(
+    path: str, method: str, operation: dict[str, Any]
+) -> None:
     """Declare business query/body inputs so indexers can construct calls."""
     if path in ("/mn/property-check",) or (
         path.startswith("/us/") and path.endswith("/property-check")
     ):
-        _merge_query_params(operation, _ADDRESS_QUERY_PARAM)
+        if method == "get":
+            _merge_query_params(operation, _ADDRESS_QUERY_PARAM)
         return
-    if path == "/agent/property-due-diligence":
+    if path == "/agent/property-due-diligence" and method == "get":
         _merge_query_params(operation, *_AGENT_QUERY_PARAMS)
         return
-    if path == "/base/tx-decision":
+    if path == "/base/tx-decision" and method == "get":
         _merge_query_params(operation, *_TX_DECISION_QUERY_PARAMS)
         return
-    if path == "/base/finality-check":
+    if path == "/base/finality-check" and method == "get":
         _merge_query_params(operation, _FINALITY_TX_PARAM)
         return
-    if path == "/tasks/us-rental-diligence":
+    if path == "/tasks/us-rental-diligence" and method == "post":
         from app.diligence_pack import DISCOVERY_INPUT_EXAMPLE, DISCOVERY_INPUT_SCHEMA
 
         operation["requestBody"] = {
@@ -390,7 +403,7 @@ def _apply_paid_input_schema(path: str, operation: dict[str, Any]) -> None:
             },
         }
         return
-    if path == "/x402/policy-check":
+    if path == "/x402/policy-check" and method == "post":
         from app.policy_check import DISCOVERY_INPUT_EXAMPLE, DISCOVERY_INPUT_SCHEMA
 
         operation["requestBody"] = {
@@ -432,7 +445,7 @@ def tighten(schema: dict[str, Any]) -> dict[str, Any]:
                 operation["security"] = []
             else:
                 _declare_paid(operation, amount, examples.get(path))
-                _apply_paid_input_schema(path, operation)
+                _apply_paid_input_schema(path, method, operation)
                 if path == "/mn/property-check":
                     summary, description = _city_operation_labels("mn")
                     operation["summary"] = summary
@@ -458,7 +471,7 @@ def tighten(schema: dict[str, Any]) -> dict[str, Any]:
                 if p.get("name") != "product_id"
             ]
             _declare_paid(resolved, amount, examples.get(path))
-            _apply_paid_input_schema(path, resolved)
+            _apply_paid_input_schema(path, method, resolved)
             concrete[method] = resolved
         if concrete:
             kept[path] = concrete
@@ -494,7 +507,7 @@ def tighten(schema: dict[str, Any]) -> dict[str, Any]:
                 resolved["summary"] = summary
                 resolved["description"] = description
                 _declare_paid(resolved, amount, examples.get(path))
-                _apply_paid_input_schema(path, resolved)
+                _apply_paid_input_schema(path, method, resolved)
                 concrete_city[method] = resolved
             if concrete_city:
                 kept[path] = concrete_city
