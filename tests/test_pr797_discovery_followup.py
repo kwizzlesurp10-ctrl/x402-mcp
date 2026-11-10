@@ -53,41 +53,45 @@ def test_openapi_diligence_post_request_body_only_on_post() -> None:
     assert "properties" in schema["properties"]
 
 
-def test_unpaid_missing_address_returns_422_not_402() -> None:
+def test_unpaid_missing_address_returns_402_with_challenge() -> None:
     r = client.get(
         "/mn/property-check",
         headers={"x-demand-ignore": "1"},
     )
-    assert r.status_code == 422
-    assert r.json().get("schema", {}).get("openapi", "").startswith("/openapi.json")
+    assert r.status_code == 402
+    assert r.headers.get("PAYMENT-REQUIRED")
+    assert r.json().get("input_hint")
 
 
-def test_unpaid_city_missing_address_422() -> None:
+def test_unpaid_city_missing_address_402() -> None:
     code = registry.public_codes()[0]
     r = client.get(
         f"/us/{code}/property-check",
         headers={"x-demand-ignore": "1"},
     )
-    assert r.status_code == 422
+    assert r.status_code == 402
+    assert r.headers.get("PAYMENT-REQUIRED")
 
 
-def test_unpaid_diligence_empty_body_422() -> None:
+def test_unpaid_diligence_empty_body_402() -> None:
     r = client.post(
         "/tasks/us-rental-diligence",
         headers={"x-demand-ignore": "1", "Content-Type": "application/json"},
         json={},
     )
-    assert r.status_code == 422
+    assert r.status_code == 402
+    assert r.headers.get("PAYMENT-REQUIRED")
 
 
-def test_unpaid_finality_missing_tx_422() -> None:
+def test_unpaid_finality_missing_tx_402() -> None:
     if not settings.x402_pay_to_address:
         pytest.skip("seller not configured")
     r = client.get(
         "/base/finality-check",
         headers={"x-demand-ignore": "1"},
     )
-    assert r.status_code == 422
+    assert r.status_code == 402
+    assert r.headers.get("PAYMENT-REQUIRED")
 
 
 def test_well_formed_unpaid_city_still_402() -> None:

@@ -9,9 +9,32 @@ from app import mn_compliance
 
 VALID_TX = "0x" + "a" * 64
 
+PROBE_HEADERS = {"x-demand-ignore": "1"}
+
+
+def probe_unpaid_no_input(client: TestClient, path: str, *, method: str = "GET"):
+    """Unpaid probe with no query/body — must still receive a 402 challenge."""
+    if path == "/mn/property-check":
+        return client.get(path, headers=PROBE_HEADERS)
+    if path.startswith("/us/") and path.endswith("/property-check"):
+        return client.get(path, headers=PROBE_HEADERS)
+    if path == "/base/finality-check":
+        return client.get(path, headers=PROBE_HEADERS)
+    if path == "/base/tx-decision":
+        return client.get(path, headers=PROBE_HEADERS)
+    if path == "/agent/property-due-diligence":
+        return client.get(path, headers=PROBE_HEADERS)
+    if path == "/tasks/us-rental-diligence":
+        return client.post(path, headers=PROBE_HEADERS, json={})
+    if path == "/x402/policy-check" and method == "POST":
+        return client.post(path, headers=PROBE_HEADERS, json={})
+    if method == "POST":
+        return client.post(path, headers=PROBE_HEADERS)
+    return client.get(path, headers=PROBE_HEADERS)
+
 
 def probe_paid_route(client: TestClient, path: str, *, method: str = "GET"):
-    headers = {"x-demand-ignore": "1"}
+    headers = PROBE_HEADERS
     if path == "/mn/property-check":
         return client.get(
             path, params={"address": mn_compliance.SAMPLE_ADDRESS}, headers=headers

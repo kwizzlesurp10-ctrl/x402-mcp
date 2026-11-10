@@ -30,20 +30,16 @@ def test_seller_unconfigured_returns_503(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_an_unpaid_request_gets_the_challenge_before_any_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Deliberate contract change (2026-08-02): unpaid always means 402.
-
-    Unpaid callers with a missing or blank address get schema validation (422),
-    not a payment quote they cannot fulfill.
-    """
+    """Unpaid always means 402 — discovery crawlers probe with no parameters."""
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
 
     for params in ({"address": "   "}, {}):
         response = client.get("/mn/property-check", params=params)
-        assert response.status_code == 422, params
-        assert "PAYMENT-REQUIRED" not in response.headers
-        assert response.json().get("schema", {}).get("openapi", "").startswith(
-            "/openapi.json"
-        )
+        assert response.status_code == 402, params
+        assert response.headers.get("PAYMENT-REQUIRED")
+        body = response.json()
+        assert body["error"] == "payment_required"
+        assert body.get("input_hint")
 
 
 def test_a_paid_request_with_a_blank_address_is_rejected_before_it_is_charged(

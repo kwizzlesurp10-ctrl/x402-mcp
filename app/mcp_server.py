@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
 from app import x402_services
@@ -640,6 +640,7 @@ async def get_pro_upgrade_requirements(
         "Legacy: pass PAYMENT-SIGNATURE + PAYMENT-REQUIRED after commerce.pro_requirements."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def activate_pro_tier(
     payment_signature: Desc[
@@ -664,7 +665,7 @@ async def activate_pro_tier(
         Field(description="Agent identity to grant Pro quota. Must match the requirements call."),
     ] = None,
     ctx: Context | None = None,
-) -> str:
+) -> str | CallToolResult:
     from app import mcp_x402_payment
 
     return await mcp_x402_payment.handle_commerce_mcp_tool(
@@ -727,6 +728,7 @@ async def get_tool_credits_requirements(
         "commerce.credits_requirements."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def purchase_tool_credits(
     payment_signature: Desc[
@@ -746,7 +748,7 @@ async def purchase_tool_credits(
         Field(description="Agent identity to credit."),
     ] = None,
     ctx: Context | None = None,
-) -> str:
+) -> str | CallToolResult:
     from app import mcp_x402_payment
     from app.commerce_payment import credits_to_grant
 
@@ -1428,3 +1430,19 @@ if _city_check_tool is not None:
         arg_model=_city_check_tool.fn_metadata.arg_model
     )
     _city_check_tool.context_kwarg = find_context_parameter(_city_check_tool.fn)
+
+
+def _allow_call_tool_result(tool_name: str) -> None:
+    """Commerce tools return PaymentRequired CallToolResult when unpaid."""
+    tool = mcp._tool_manager._tools.get(tool_name)
+    if tool is None:
+        return
+    from mcp.server.fastmcp.utilities.context_injection import find_context_parameter
+    from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+
+    tool.fn_metadata = FuncMetadata(arg_model=tool.fn_metadata.arg_model)
+    tool.context_kwarg = find_context_parameter(tool.fn)
+
+
+for _commerce_mcp_tool in ("commerce.activate_pro", "commerce.purchase_credits"):
+    _allow_call_tool_result(_commerce_mcp_tool)

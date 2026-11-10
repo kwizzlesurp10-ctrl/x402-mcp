@@ -1746,29 +1746,30 @@ async def mn_property_check(
         )
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
-        from app.unpaid_validation import unpaid_address_invalid
+        from app.unpaid_validation import input_hint_address
 
-        bad = unpaid_address_invalid(address)
-        if bad is not None:
-            return bad
+        base = settings.public_base_url.rstrip("/")
+        content: dict[str, object] = {
+            "error": "payment_required",
+            "resource": mn_compliance.resource_url(),
+            "price": settings.mn_property_check_price,
+            "network": settings.x402_default_network,
+            "description": mn_compliance.RESOURCE_DESCRIPTION,
+            "sample_url": f"{base}/mn/property-check/sample",
+            "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
+            "requirements are in the PAYMENT-REQUIRED response header. "
+            "Free fixed-address sample (no payment): GET /mn/property-check/sample.",
+        }
+        hint = input_hint_address(address)
+        if hint:
+            content.update(hint)
         log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
         if not demand.is_self_traffic(request.headers):
             demand.record_challenge("mn-property-check", request.headers.get("user-agent"))
-        base = settings.public_base_url.rstrip("/")
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_required",
-                "resource": mn_compliance.resource_url(),
-                "price": settings.mn_property_check_price,
-                "network": settings.x402_default_network,
-                "description": mn_compliance.RESOURCE_DESCRIPTION,
-                "sample_url": f"{base}/mn/property-check/sample",
-                "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
-                "requirements are in the PAYMENT-REQUIRED response header. "
-                "Free fixed-address sample (no payment): GET /mn/property-check/sample.",
-            },
+            content=content,
         )
 
     # Paid caller: validate before spending their money, never after.

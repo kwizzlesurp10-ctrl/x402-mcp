@@ -223,16 +223,6 @@ def instrumented_middleware_class() -> type:
 
     class _InstrumentedPaymentMiddleware(PaymentMiddlewareASGI):
         async def dispatch(self, request, call_next):  # type: ignore[override]
-            if (
-                request.url.path == "/base/finality-check"
-                and request.method == "GET"
-                and not request.headers.get("PAYMENT-SIGNATURE")
-            ):
-                from app.unpaid_validation import unpaid_finality_tx_invalid
-
-                bad = unpaid_finality_tx_invalid(request.query_params.get("tx"))
-                if bad is not None:
-                    return bad
             response = await super().dispatch(request, call_next)
             record_402_challenge(request, response.status_code)
             return response

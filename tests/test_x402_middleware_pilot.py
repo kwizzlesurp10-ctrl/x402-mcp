@@ -67,11 +67,11 @@ def test_finality_check_402_carries_bazaar_discovery_extension() -> None:
     assert "bazaar" in decoded.get("extensions", {})
 
 
-def test_malformed_tx_returns_422_without_payment_quote() -> None:
-    """Unpaid malformed `tx` values get schema validation, not a 402 quote."""
+def test_malformed_tx_unpaid_still_returns_402_with_hint() -> None:
+    """Discovery crawlers must receive 402 even when `tx` is malformed."""
     response = client.get("/base/finality-check", params={"tx": "not-a-hash"})
-    assert response.status_code == 422
-    assert "PAYMENT-REQUIRED" not in response.headers
+    assert response.status_code == 402
+    assert response.headers.get("PAYMENT-REQUIRED")
 
 
 def test_mn_property_check_still_uses_its_own_hand_rolled_path() -> None:

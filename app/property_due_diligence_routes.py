@@ -57,16 +57,14 @@ async def property_due_diligence(
 
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
-        from app.unpaid_validation import unpaid_agent_query_invalid
+        from app.unpaid_validation import input_hint_agent_query
 
-        bad = unpaid_agent_query_invalid(city_code, address)
-        if bad is not None:
-            return bad
         if not demand.is_self_traffic(request.headers):
             demand.record_challenge(
                 agent.PRODUCT_ID, request.headers.get("user-agent")
             )
-        return _402(payment_required)
+        hint = input_hint_agent_query(city_code, address)
+        return _402(payment_required, extra=hint)
 
     code = (city_code or "").strip().lower()
     addr = (address or "").strip()
@@ -172,7 +170,7 @@ async def property_due_diligence(
     return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
 
 
-def _402(payment_required: str) -> JSONResponse:
+def _402(payment_required: str, *, extra: dict[str, Any] | None = None) -> JSONResponse:
     content: dict[str, Any] = {
         "error": "payment_required",
         "resource": agent.resource_url(),
@@ -188,6 +186,8 @@ def _402(payment_required: str) -> JSONResponse:
             "POST /tasks/us-rental-diligence ($1.50)."
         ),
     }
+    if extra:
+        content.update(extra)
     return JSONResponse(
         status_code=402,
         headers={"PAYMENT-REQUIRED": payment_required},

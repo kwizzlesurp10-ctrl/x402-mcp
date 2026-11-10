@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from mcp.types import CallToolResult
 
 from app import mcp_server, mcp_x402_payment, x402_services
 from app.commerce import InMemoryQuotaStore
@@ -66,6 +67,28 @@ async def test_unpaid_activate_pro_returns_payment_required(pay_to: str) -> None
     assert result.structuredContent is not None
     assert "accepts" in result.structuredContent
     assert result.structuredContent["accepts"][0]["payTo"] == pay_to
+
+
+@pytest.mark.asyncio
+async def test_unpaid_activate_pro_via_call_tool(pay_to: str) -> None:
+    result = await mcp_server.mcp.call_tool(
+        "commerce.activate_pro",
+        {"agent_id": "mcp-buyer-call"},
+    )
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent.get("x402Version") == 2
+
+
+@pytest.mark.asyncio
+async def test_unpaid_purchase_credits_via_call_tool(pay_to: str) -> None:
+    result = await mcp_server.mcp.call_tool(
+        "commerce.purchase_credits",
+        {"agent_id": "mcp-credits-call", "credits": 50},
+    )
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent.get("x402Version") == 2
 
 
 @pytest.mark.asyncio
