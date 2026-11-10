@@ -639,9 +639,9 @@ _MISSION_CONTROL_HEADERS = {
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)
 async def root(request: Request) -> HTMLResponse:
-    """Serve the React Mission Control Dashboard."""
+    """Public A2A marketplace. The operator SPA stays on /dashboard."""
     return HTMLResponse(
-        _mission_control_html(),
+        _marketplace_html(),
         headers=_MISSION_CONTROL_HEADERS,
     )
 
@@ -672,7 +672,16 @@ async def favicon() -> Response:
 # (Docker multi-stage or local `pnpm build` + copy). Falls back to the legacy
 # single-file terminal if the SPA bundle is missing (e.g. partial checkouts).
 _MC_DIST = Path(__file__).resolve().parent / "static" / "mission_control"
+_MARKETPLACE_HTML = Path(__file__).resolve().parent / "static" / "a2a_marketplace" / "index.html"
 _BASE_APP_ID_META = '<meta name="base:app_id" content="6a7018e2a8c4f2b6db3b3e71" />'
+
+
+def _marketplace_html() -> str:
+    """Static marketplace for GET /. The Docker SPA copy only replaces mission_control/."""
+    html = _MARKETPLACE_HTML.read_text(encoding="utf-8")
+    if "base:app_id" not in html:
+        html = html.replace("<head>", f"<head>\n{_BASE_APP_ID_META}", 1)
+    return html
 
 
 # The operator token is NEVER rendered into a public page. The legacy terminal
