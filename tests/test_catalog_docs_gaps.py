@@ -67,8 +67,8 @@ def test_diligence_and_city_unpaid_are_402_not_stubs() -> None:
     for method, path, body in malformed:
         response = client.request(method, path, json=body)
         assert response.status_code != 404, f"{method} {path} is missing"
-        assert response.status_code == 422, f"{method} {path} missing required input"
-        assert "PAYMENT-REQUIRED" not in response.headers
+        assert response.status_code == 402, f"{method} {path} must challenge unpaid crawlers"
+        assert response.headers.get("PAYMENT-REQUIRED"), f"{method} {path}"
 
     well_formed = [
         "/us/mn/property-check",

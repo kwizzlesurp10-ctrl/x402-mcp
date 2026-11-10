@@ -56,15 +56,16 @@ def test_unknown_city_404() -> None:
 
 
 @pytest.mark.parametrize("code", list(registry.known_codes()))
-def test_unpaid_city_validate_before_402(
+def test_unpaid_city_missing_address_still_402(
     code: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
     mod = registry.get_city(code)
     for params in ({}, {"address": "   "}):
         response = client.get(f"/us/{code}/property-check", params=params)
-        assert response.status_code == 422, (code, params)
-        assert "PAYMENT-REQUIRED" not in response.headers
+        assert response.status_code == 402, (code, params)
+        assert response.headers.get("PAYMENT-REQUIRED"), (code, params)
+        assert response.json().get("input_hint"), (code, params)
 
     response = client.get(
         f"/us/{code}/property-check",

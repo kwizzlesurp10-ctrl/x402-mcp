@@ -54,7 +54,12 @@ def _challenge_or_503() -> tuple[str | None, JSONResponse | None]:
         )
 
 
-def _402_body(payment_required: str, *, note: str | None = None) -> JSONResponse:
+def _402_body(
+    payment_required: str,
+    *,
+    note: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> JSONResponse:
     content: dict[str, Any] = {
         "error": "payment_required",
         "resource": diligence_pack.resource_url(),
@@ -100,6 +105,8 @@ def _402_body(payment_required: str, *, note: str | None = None) -> JSONResponse
     }
     if note:
         content["note"] = note
+    if extra:
+        content.update(extra)
     return JSONResponse(
         status_code=402,
         headers={"PAYMENT-REQUIRED": payment_required},
@@ -142,15 +149,13 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
 
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        from app.unpaid_validation import input_hint_diligence_body
+
         try:
             raw = await request.json()
         except Exception:  # noqa: BLE001
             raw = {}
-        from app.unpaid_validation import unpaid_diligence_body_invalid
-
-        bad = await unpaid_diligence_body_invalid(raw)
-        if bad is not None:
-            return bad
+        hint = input_hint_diligence_body(raw)
         log.info(
             "diligence-pack 402 (no signature)",
             extra={"status_code": 402},
@@ -159,7 +164,7 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
             demand.record_challenge(
                 diligence_pack.PRODUCT_ID, request.headers.get("user-agent")
             )
-        return _402_body(payment_required)
+        return _402_body(payment_required, extra=hint)
 
     # Paid path: parse/validate body BEFORE settle so we never charge bad input.
     try:

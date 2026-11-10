@@ -155,11 +155,28 @@ async def us_city_property_check(
     signature = request.headers.get("PAYMENT-SIGNATURE")
     pid = gate.product_id(spec)
     if not signature:
-        from app.unpaid_validation import unpaid_city_address_invalid
+        from app.unpaid_validation import input_hint_city_address
 
-        bad = unpaid_city_address_invalid(address, spec.code)
-        if bad is not None:
-            return bad
+        content: dict[str, object] = {
+            "error": "payment_required",
+            "resource": gate.resource_url(spec),
+            "price": gate.price_for(spec),
+            "network": settings.x402_default_network,
+            "city": spec.code,
+            "description": spec.description,
+            "sample_url": gate.sample_url(spec),
+            "catalog_url": f"{settings.public_base_url.rstrip('/')}/us/cities",
+            "how_to_pay": (
+                "Retry with PAYMENT-SIGNATURE header (x402 v2); requirements "
+                "are in the PAYMENT-REQUIRED response header. Free fixed-address "
+                f"sample (no payment): GET {gate.sample_url(spec)}. "
+                "MCP golden path: list_us_cities → get_us_city_property_sample → "
+                "check_us_city_property (or pay_and_fetch on this resource URL)."
+            ),
+        }
+        hint = input_hint_city_address(address, spec.code)
+        if hint:
+            content.update(hint)
         log.info(
             "us/%s/property-check 402 (no signature)",
             spec.code,
@@ -170,23 +187,7 @@ async def us_city_property_check(
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_required",
-                "resource": gate.resource_url(spec),
-                "price": gate.price_for(spec),
-                "network": settings.x402_default_network,
-                "city": spec.code,
-                "description": spec.description,
-                "sample_url": gate.sample_url(spec),
-                "catalog_url": f"{settings.public_base_url.rstrip('/')}/us/cities",
-                "how_to_pay": (
-                    "Retry with PAYMENT-SIGNATURE header (x402 v2); requirements "
-                    "are in the PAYMENT-REQUIRED response header. Free fixed-address "
-                    f"sample (no payment): GET {gate.sample_url(spec)}. "
-                    "MCP golden path: list_us_cities → get_us_city_property_sample → "
-                    "check_us_city_property (or pay_and_fetch on this resource URL)."
-                ),
-            },
+            content=content,
         )
 
     if address is None or not address.strip() or len(address) > 120:
