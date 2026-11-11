@@ -1,5 +1,7 @@
 # x402-mcp — A User's Guide
 
+<a href="https://24klabs.ai/listing/us-city-open-data-compliance-network"><img src="https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402" alt="US City Open-Data Compliance Network on the 24K Labs curated list"></a>
+
 **x402-mcp** is one Python service that lets an AI agent pay for HTTP APIs, and lets you charge
 for your own — over the same protocol, settling real USDC on Base. It is a FastAPI app and an
 MCP server sharing one codebase, one config, and one ledger.

@@ -14,6 +14,7 @@ of their words there.
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 from typing import Any
 
 from app.config import settings
@@ -38,6 +39,40 @@ A2A_CARD_PROTOCOL_VERSION = "0.3.0"
 AP2_EXTENSION_URI = "https://github.com/google-agentic-commerce/ap2/v1"
 REPO_URL = "https://github.com/kwizzlesurp10-ctrl/x402-mcp"
 BOUNTIES_DOC_URL = f"{REPO_URL}/blob/master/docs/BOUNTIES.md"
+LABS_24K_LISTING_URL = (
+    "https://24klabs.ai/listing/us-city-open-data-compliance-network"
+)
+
+
+def _x402_manifest_resource_encoded() -> str:
+    return quote(f"{_base()}/.well-known/x402", safe="")
+
+
+def curated_directory_listings() -> list[dict[str, str]]:
+    """Third-party curated directories that index this storefront (24K Labs, …)."""
+    resource = _x402_manifest_resource_encoded()
+    return [
+        {
+            "name": "24K Labs",
+            "url": LABS_24K_LISTING_URL,
+            "badge": f"https://24klabs.ai/badge.svg?resource={resource}",
+            "card": f"https://24klabs.ai/card.svg?resource={resource}",
+        }
+    ]
+
+
+def trust_ratings() -> list[dict[str, str]]:
+    """Third-party x402 trust / grade reports for this manifest resource."""
+    resource = _x402_manifest_resource_encoded()
+    return [
+        {
+            "name": "fuchss",
+            "report": f"https://x402.fuchss.app/endpoint?resource={resource}",
+            "badge": f"https://x402.fuchss.app/badge.svg?resource={resource}",
+        }
+    ]
+
+
 FUNDING_LEGAL = (
     "Payment for delivered products, documentation/audit artifacts, or a "
     "voluntary tip. Not a token, not equity, not a raise."
@@ -104,6 +139,8 @@ def funding() -> dict[str, Any]:
             "llmsTxt": f"{base}/llms.txt",
             "openapi": f"{base}/openapi.json",
             "funding": f"{base}/.well-known/funding.json",
+            "listings": curated_directory_listings(),
+            "trust": trust_ratings(),
         },
     }
 
@@ -391,6 +428,8 @@ def well_known_x402() -> dict[str, Any]:
         "funding": f"{_base()}/.well-known/funding.json",
         "payToExplorer": fund["explorer"],
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
     }
 
 
@@ -473,6 +512,27 @@ def llms_txt() -> str:
         f"- Funding (payTo): {base}/.well-known/funding.json",
         f"- OpenAPI: {base}/openapi.json",
         f"- Health: {base}/health · Checks: {base}/doctor · Ops: {base}/dashboard",
+        "",
+        "## Curated directory listings",
+        "",
+    ]
+    for entry in curated_directory_listings():
+        lines += [
+            f"- **{entry['name']}**: {entry['url']}",
+            f"  - badge: {entry['badge']}",
+            f"  - card: {entry['card']}",
+        ]
+    lines += [
+        "",
+        "## x402 trust ratings",
+        "",
+    ]
+    for entry in trust_ratings():
+        lines += [
+            f"- **{entry['name']}**: {entry['report']}",
+            f"  - badge: {entry['badge']}",
+        ]
+    lines += [
         "",
         "## Fund this operator (USDC on Base)",
         "",
@@ -973,7 +1033,11 @@ def agent_card() -> dict[str, Any]:
             "funding": f"{base}/.well-known/funding.json",
             "agents": f"{base}/.well-known/agents.json",
             "aiPlugin": f"{base}/.well-known/ai-plugin.json",
+            "listings": curated_directory_listings(),
+            "trust": trust_ratings(),
         },
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
@@ -1327,6 +1391,8 @@ def agents_json() -> dict[str, Any]:
         "ai_plugin": f"{base}/.well-known/ai-plugin.json",
         "x402_manifest": f"{base}/.well-known/x402",
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
         **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
     }
 
@@ -1489,6 +1555,8 @@ def mcp_server_card() -> dict[str, Any]:
         "funding": f"{base}/.well-known/funding.json",
         "agent_card": f"{base}/.well-known/agent-card.json",
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
     }
 
 
@@ -1637,8 +1705,12 @@ def agentic_market_json() -> dict[str, Any]:
             "mcp_server_card": f"{base}/.well-known/mcp/server-card.json",
             "ai_plugin": f"{base}/.well-known/ai-plugin.json",
             "funding": f"{base}/.well-known/funding.json",
+            "listings": curated_directory_listings(),
+            "trust": trust_ratings(),
         },
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
         **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
     }
 
