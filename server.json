@@ -26,5 +26,20 @@
     "tokenContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "payTo": "0x0d25A44f74868eCE53B305C97139CF4B62963410",
     "priceUnits": "10000"
-  }
+  },
+  "listings": [
+    {
+      "name": "24K Labs",
+      "url": "https://24klabs.ai/listing/us-city-open-data-compliance-network",
+      "badge": "https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402",
+      "card": "https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"
+    }
+  ],
+  "trust": [
+    {
+      "name": "fuchss",
+      "report": "https://x402.fuchss.app/endpoint?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402",
+      "badge": "https://x402.fuchss.app/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"
+    }
+  ]
 }

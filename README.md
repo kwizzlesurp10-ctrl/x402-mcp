@@ -1,14 +1,18 @@
 # x402 Micropayments MCP
 
 [![MCP Streamable HTTP](https://img.shields.io/badge/MCP-Streamable%20HTTP-black.svg)](https://x402-mcp.onrender.com/.well-known/mcp/server-card.json)
-[![US City Open-Data Compliance Network on the 24K Labs curated list](https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402)](https://24klabs.ai/listing/us-city-open-data-compliance-network)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Base Mainnet](https://img.shields.io/badge/Network-Base%20Mainnet%20(8453)-0052FF.svg)](https://base.org)
 [![A2A Protocol](https://img.shields.io/badge/Identity-A2A%20v1.0%20Agent%20Card-green.svg)](https://x402-mcp.onrender.com/.well-known/agent-card.json)
+[![US City Open-Data Compliance Network on the 24K Labs curated list](https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402)](https://24klabs.ai/listing/us-city-open-data-compliance-network)
+
+<a href="https://x402.fuchss.app/endpoint?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"><img src="https://x402.fuchss.app/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402" alt="x402 trust grade — fuchss (click for report)"></a>
+
+## Listed on
+
+<a href="https://24klabs.ai/listing/us-city-open-data-compliance-network"><img src="https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402" alt="US City Open-Data Compliance Network on the 24K Labs curated list"></a>
 
 Production MCP server for the [x402](https://x402.org) HTTP micropayment protocol — **live on Base mainnet, selling real data products to AI agents for USDC today**. Agents discover paid services, probe `402 Payment Required` responses, pay with stablecoins, and build/verify seller payment configs; the server runs both sides of that market.
-
-[![US City Open-Data Compliance Network on the 24K Labs curated list](https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402)](https://24klabs.ai/listing/us-city-open-data-compliance-network)
 
 ## Discover (public + A2A)
 

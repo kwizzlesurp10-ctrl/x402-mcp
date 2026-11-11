@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.agent_surface import curated_directory_listings, trust_ratings
 from app.config import settings
 from app.main import app
 
@@ -226,6 +227,57 @@ def test_well_known_x402_includes_payto() -> None:
     assert body["payTo"].lower().startswith("0x")
     assert body["asset"].lower().endswith("2913")
     assert body["funding"].endswith("/.well-known/funding.json")
+
+
+def test_curated_directory_listings_present_on_discovery_surfaces() -> None:
+    expected = curated_directory_listings()
+    trust = trust_ratings()
+    assert expected[0]["name"] == "24K Labs"
+    assert expected[0]["url"].endswith("/us-city-open-data-compliance-network")
+    assert "24klabs.ai/badge.svg" in expected[0]["badge"]
+    assert "24klabs.ai/card.svg" in expected[0]["card"]
+    assert "%2F.well-known%2Fx402" in expected[0]["badge"]
+    assert trust[0]["name"] == "fuchss"
+    assert "x402.fuchss.app/endpoint" in trust[0]["report"]
+    assert "x402.fuchss.app/badge.svg" in trust[0]["badge"]
+
+    x402 = client.get("/.well-known/x402").json()
+    assert x402["listings"] == expected
+    assert x402["trust"] == trust
+
+    card = client.get("/.well-known/agent-card.json").json()
+    assert card["listings"] == expected
+    assert card["links"]["listings"] == expected
+    assert card["trust"] == trust
+    assert card["links"]["trust"] == trust
+
+    agents = client.get("/.well-known/agents.json").json()
+    assert agents["listings"] == expected
+    assert agents["trust"] == trust
+
+    market = client.get("/.well-known/agentic-market.json").json()
+    assert market["listings"] == expected
+    assert market["discovery"]["listings"] == expected
+    assert market["trust"] == trust
+    assert market["discovery"]["trust"] == trust
+
+    mcp_card = client.get("/.well-known/mcp/server-card.json").json()
+    assert mcp_card["listings"] == expected
+    assert mcp_card["trust"] == trust
+
+    funding = client.get("/.well-known/funding.json").json()
+    assert funding["discovery"]["listings"] == expected
+    assert funding["discovery"]["trust"] == trust
+
+    manifest = client.get("/.well-known/mcp").json()
+    assert manifest["listings"] == expected
+    assert manifest["trust"] == trust
+
+    llms = client.get("/llms.txt").text
+    assert "24klabs.ai/listing/us-city-open-data-compliance-network" in llms
+    assert "24klabs.ai/badge.svg" in llms
+    assert "24klabs.ai/card.svg" in llms
+    assert "x402.fuchss.app/endpoint" in llms
 
 
 def test_ai_plugin_json_served_at_well_known() -> None:
