@@ -679,6 +679,31 @@ def _record_product_revenue(
         log.warning("a2a revenue ledger write failed product=%s", product_id, exc_info=True)
 
 
+# The agent card advertises the generic ``us-city-property-check`` skill
+# (input: city_code + address). Route it to the per-city binding so agents
+# that discover the network skill (e.g. "Minneapolis, city_code=mn") can buy
+# it over A2A instead of getting "unknown skillId".
+CITY_NETWORK_SKILL_ID = "us-city-property-check"
+
+
+def _resolve_city_network_alias(
+    skill_id: str,
+    skill_input: dict[str, Any],
+    bindings: dict[str, SkillBinding],
+) -> tuple[str, dict[str, Any], str | None]:
+    if skill_id != CITY_NETWORK_SKILL_ID:
+        return skill_id, skill_input, None
+    code = str(skill_input.get("city_code") or "").strip().lower()
+    target = f"property-check-{code}" if code else ""
+    if not code or target not in bindings:
+        codes = sorted(
+            k.removeprefix("property-check-") for k in bindings if k.startswith("property-check-")
+        )
+        return skill_id, skill_input, f"city_code must be one of {codes}"
+    rest = {k: v for k, v in skill_input.items() if k != "city_code"}
+    return target, rest, None
+
+
 def _resolve_skill_id(message: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     meta = message.get("metadata") or {}
     skill_id = meta.get("skillId") or meta.get("skill_id")
@@ -862,6 +887,9 @@ async def _message_send(
         )
 
     bindings = _skill_bindings()
+    skill_id, skill_input, alias_err = _resolve_city_network_alias(skill_id, skill_input, bindings)
+    if alias_err:
+        return _jsonrpc_error(req_id, JSONRPC_INVALID_PARAMS, alias_err)
     binding = bindings.get(skill_id)
     if binding is None:
         return _jsonrpc_error(
