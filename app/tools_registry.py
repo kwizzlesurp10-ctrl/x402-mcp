@@ -168,7 +168,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "List US cities with paid_url and free sample_url for property compliance. "
             "Start here — each paid lookup is $0.01 USDC and returns a normalized "
             "verdict (licensed / not_licensed / violations_open / …) plus source link, "
-            "not raw portal JSON. Then city.sample (free shape), then city.check."
+            "not raw portal JSON. Then city.sample (free shape), then city.check. "
+            "Covers Minneapolis, Minnesota rental licensing (city_code mn) and other US cities."
         ),
         "tier": "free",
     },

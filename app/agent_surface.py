@@ -583,6 +583,13 @@ def _attach_a2a_skill_input_schemas(skills: list[dict[str, Any]]) -> None:
             sk["inputSchema"] = ADDRESS_QUERY_SCHEMA
 
 
+# Search terms agents actually use for a city that the short city tags miss
+# (state name, county, the "MN compliance" product name).
+_CITY_EXTRA_TAGS: dict[str, tuple[str, ...]] = {
+    "mn": ("minnesota", "hennepin", "mn-compliance", "rental-compliance"),
+}
+
+
 def agent_card() -> dict[str, Any]:
     """A2A Protocol v1.0 Agent Card for ecosystem discovery.
 
@@ -886,23 +893,35 @@ def agent_card() -> dict[str, Any]:
         sample_addr = c["sample_address"]
         paid = c["paid_url"]
         sample = c["sample_url"]
+        extra_tags = list(_CITY_EXTRA_TAGS.get(code, ()))
         tags = list(
             dict.fromkeys(
                 list(c.get("tags") or [])
                 + [code, c["name"].lower().replace(" ", ""), "compliance", "x402"]
+                + extra_tags
             )
         )
+        examples = [
+            f"Check {c['name']} compliance for {sample_addr}",
+            f"GET {paid}?address={sample_addr.replace(' ', '%20')}",
+            f"Free sample: GET {sample}",
+        ]
+        alias = c.get("canonical_alias")
+        if alias:
+            # The canonical alias is the URL indexed in the CDP x402 Bazaar;
+            # surface it so agents arriving from Bazaar and from this card
+            # recognise the same product.
+            examples.append(
+                f"Bazaar-listed canonical URL: GET {base}{alias}?address="
+                f"{sample_addr.replace(' ', '%20')}"
+            )
         skills.append(
             {
                 "id": f"property-check-{code}",
                 "name": c["service_name"],
                 "description": outcome_copy.agent_skill_summary(c),
                 "tags": tags,
-                "examples": [
-                    f"Check {c['name']} compliance for {sample_addr}",
-                    f"GET {paid}?address={sample_addr.replace(' ', '%20')}",
-                    f"Free sample: GET {sample}",
-                ],
+                "examples": examples,
                 "inputModes": ["text/plain", "application/json"],
                 "outputModes": ["application/json"],
             }
@@ -953,6 +972,7 @@ def agent_card() -> dict[str, Any]:
         "us-cities-catalog",
         "us-rental-diligence-pack",
         "property-due-diligence-agent",
+        "us-city-property-check",
         *(f"property-check-{code}" for code in city_price),
         *(
             {"buyer-payment-policy-check"}
@@ -1172,6 +1192,56 @@ def _price_to_atomic_usdc(price: str) -> int:
         return 0
 
 
+def _mn_compliance_agent_entry(base: str, network: str) -> dict[str, Any]:
+    """Minneapolis / Minnesota rental compliance as its own registry entry.
+
+    ``url`` is the canonical ``/mn/property-check`` resource, the one indexed in
+    the CDP x402 Bazaar, so an agent that finds the product here and one that
+    finds it in Bazaar land on the same paid URL.
+    """
+    price = settings.mn_property_check_price
+    return {
+        "id": "mn-rental-compliance",
+        "name": "Minneapolis, MN Rental License & Compliance Check",
+        "description": (
+            "Is this Minneapolis, Minnesota (Hennepin County) address licensed for rental? "
+            "Rental license status/tier/units/expiration, open violation cases, and "
+            "condemned/boarded flags from City of Minneapolis open data, as normalized JSON "
+            "with a source link."
+        ),
+        "data_provenance": "City of Minneapolis Open Data (ArcGIS): rental licenses, violations, condemned/boarded",
+        "free_preview_url": f"{base}/mn/property-check/sample",
+        "url": f"{base}/mn/property-check",
+        "alternate_urls": [f"{base}/us/mn/property-check"],
+        "method": "GET",
+        "pricing": {
+            "amount": price.replace("$", ""),
+            "currency": "USDC",
+            "network": network,
+            "model": "per_request",
+            "atomic_units": _price_to_atomic_usdc(price),
+            "value_summary": f"{price} USDC per Minneapolis address",
+        },
+        "protocols": ["x402-v2", "http-json", "a2a", "mcp"],
+        "a2a": {"url": f"{base}/a2a", "skillId": "property-check-mn"},
+        "mcp": {"url": f"{base}/mcp/mcp", "tool": "city.check", "arguments": {"city_code": "mn"}},
+        "tags": [
+            "minneapolis",
+            "minnesota",
+            "mn",
+            "mn-compliance",
+            "hennepin",
+            "rental-license",
+            "rental-compliance",
+            "housing",
+            "property",
+            "x402",
+            "usdc",
+        ],
+        "params": {"address": "Minneapolis street address (1-120 chars), e.g. 1700 Penn Ave N"},
+    }
+
+
 def agents_json() -> dict[str, Any]:
     """Standard Agents Registry Schema (Agentic.Market / Open Agent Registry)."""
     base = _base()
@@ -1314,7 +1384,13 @@ def agents_json() -> dict[str, Any]:
             "protocols": ["x402-v2", "http-json", "a2a"],
             "tags": ["property", "compliance", "rental", "housing", "violations", "open-data", "x402", "a2a-commerce"],
             "jurisdictions": [c["code"] for c in cities],
+            "url": f"{base}/us/{{city_code}}/property-check",
+            "params": {
+                "city_code": "City code from /us/cities (e.g. mn = Minneapolis, MN)",
+                "address": "Street address in the target city (1-120 chars)",
+            },
         },
+        _mn_compliance_agent_entry(base, network),
         {
             "id": "x402-mailrail-postmaster",
             "name": "MailRail Postmaster & In/Out Dispatcher",
@@ -1639,6 +1715,15 @@ def agentic_market_json() -> dict[str, Any]:
             "sample_url": f"{base}/us/mn/property-check/sample",
             "tags": ["property", "compliance", "rental", "violations", "open-data"],
             "jurisdictions": [c["code"] for c in cities],
+        },
+        {
+            **{
+                k: v
+                for k, v in _mn_compliance_agent_entry(base, network).items()
+                if k in ("id", "name", "description", "url", "method", "pricing", "tags")
+            },
+            "type": "data-api",
+            "sample_url": f"{base}/mn/property-check/sample",
         },
         {
             "id": "x402-mailrail-postmaster",

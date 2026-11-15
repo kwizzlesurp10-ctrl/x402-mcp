@@ -954,7 +954,8 @@ async def get_os_metrics(
     description=(
         "List US cities with paid_url and free sample_url for property compliance. "
         "Start here — each paid lookup is $0.01 USDC and returns a normalized "
-        "verdict plus source link, not raw portal JSON. Then city.sample, then city.check."
+        "verdict plus source link, not raw portal JSON. Then city.sample, then city.check. "
+        "Covers Minneapolis, Minnesota rental licensing (city_code mn) and other US cities."
     ),
     annotations=READONLY,
 )
