@@ -219,14 +219,17 @@ def test_http_mn_sample_upstream_failure_sends_agentmail(
     monkeypatch.setattr(mn_compliance, "check_property", boom)
     client = TestClient(app)
     res = client.get("/mn/property-check/sample")
-    assert res.status_code == 502
-    assert res.json()["error"] == "upstream_open_data_unavailable"
+    assert res.status_code == 200
+    assert res.json()["report"]["compliance_verdict"] == "unknown"
     records = _ledger_records(mail_ledger)
-    assert len(records) == 1
-    assert records[0]["metadata"]["call_kind"] == "error"
-    assert records[0]["metadata"]["city_code"] == "mn"
-    assert records[0]["metadata"]["channel"] == "http"
-    assert "upstream_open_data_unavailable" in records[0]["body"]
+    kinds = {r["metadata"]["call_kind"] for r in records}
+    assert "error" in kinds
+    assert "sample" in kinds
+    assert any(
+        r["metadata"]["city_code"] == "mn"
+        and "upstream_open_data_unavailable" in r["body"]
+        for r in records
+    )
 
 
 def test_http_city_sample_sends_agentmail(
@@ -263,7 +266,17 @@ def test_http_paid_upstream_failure_sends_agentmail(
     test_pay_to = "0xTestPayTo00000000000000000000000000000002"
     monkeypatch.setattr(settings, "x402_pay_to_address", test_pay_to)
 
+    settle_called = False
+
+    async def fake_verify(signature: str, payment_required: str) -> dict:
+        return {
+            "is_valid": True,
+            "invalid_reason": None,
+        }
+
     async def fake_settle(signature: str, payment_required: str) -> dict:
+        nonlocal settle_called
+        settle_called = True
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -272,14 +285,13 @@ def test_http_paid_upstream_failure_sends_agentmail(
                 "transaction": "0xdeadbeef",
                 "payer": "0xpayer123",
             },
-            "invalid_reason": None,
-            "settlement_error": None,
         }
 
     async def boom(address: str) -> dict[str, Any]:
         raise TimeoutError("upstream down")
 
-    monkeypatch.setattr(gate, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(gate, "verify_payment", fake_verify)
+    monkeypatch.setattr(gate, "settle_payment", fake_settle)
     monkeypatch.setattr(registry.get_city("sea"), "check_property", boom)
     client = TestClient(app)
     res = client.get(
@@ -287,16 +299,16 @@ def test_http_paid_upstream_failure_sends_agentmail(
         params={"address": "400 Pine St"},
         headers={"PAYMENT-SIGNATURE": "sig-paid"},
     )
-    assert res.status_code == 502
+    assert res.status_code == 503
     assert res.json()["error"] == "upstream_open_data_unavailable"
-    assert res.headers.get("payment-response")
+    assert res.json().get("payment_settled") is False
+    assert res.headers.get("payment-response") is None
+    assert settle_called is False
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "error"
     assert records[0]["metadata"]["city_code"] == "sea"
     assert records[0]["metadata"]["channel"] == "http"
-    assert "(paid)" in records[0]["subject"]
-    assert "0xdeadbeef" in records[0]["body"]
     assert "upstream_open_data_unavailable" in records[0]["body"]
 
 
@@ -307,7 +319,14 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
 
     monkeypatch.setattr(settings, "x402_pay_to_address", "0x" + "ab" * 20)
 
+    settle_called = False
+
+    async def fake_verify(signature: str, payment_required: str) -> dict:
+        return {"is_valid": True}
+
     async def fake_settle(signature: str, payment_required: str) -> dict:
+        nonlocal settle_called
+        settle_called = True
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -321,7 +340,8 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
     async def boom(city_code: str, address: str) -> dict[str, Any]:
         raise TimeoutError("upstream down")
 
-    monkeypatch.setattr(diligence_agent, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(diligence_agent, "verify_payment", fake_verify)
+    monkeypatch.setattr(diligence_agent, "settle_payment", fake_settle)
     monkeypatch.setattr(diligence_agent, "run_check", boom)
     client = TestClient(app)
     res = client.get(
@@ -329,13 +349,13 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
         params={"city_code": "mn", "address": "1700 Penn Ave N"},
         headers={"PAYMENT-SIGNATURE": "sig-paid"},
     )
-    assert res.status_code == 502
+    assert res.status_code == 503
     assert res.json()["error"] == "upstream_open_data_unavailable"
-    assert res.headers.get("payment-response")
+    assert settle_called is False
+    assert res.headers.get("payment-response") is None
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "error"
     assert records[0]["metadata"]["city_code"] == "mn"
-    assert "(paid)" in records[0]["subject"]
-    assert "0xfeedface" in records[0]["body"]
+    assert "upstream_open_data_unavailable" in records[0]["body"]
     assert "upstream_open_data_unavailable" in records[0]["body"]

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import mn_compliance
+from app.city_compliance import registry
 from app.config import settings
 from app.main import app
 
@@ -51,7 +52,8 @@ def test_a_paid_request_with_a_blank_address_is_rejected_before_it_is_charged(
     async def must_not_settle(signature: str, payment_required: str) -> dict:
         raise AssertionError("settlement attempted for an invalid address")
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", must_not_settle)
+    monkeypatch.setattr(mn_compliance, "verify_payment", must_not_settle)
+    monkeypatch.setattr(mn_compliance, "settle_payment", must_not_settle)
 
     response = client.get(
         "/mn/property-check",
@@ -176,8 +178,15 @@ def test_paid_request_serves_report_with_receipt(
 ) -> None:
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
 
-    async def fake_settle(signature: str, payment_required: str) -> dict:
+    calls: list[str] = []
+
+    async def fake_verify(signature: str, payment_required: str) -> dict:
         assert signature == "sig-abc"
+        calls.append("verify")
+        return {"is_valid": True, "invalid_reason": None}
+
+    async def fake_settle(signature: str, payment_required: str) -> dict:
+        calls.append("settle")
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -187,10 +196,12 @@ def test_paid_request_serves_report_with_receipt(
         }
 
     async def fake_report(address: str) -> dict:
+        calls.append("fetch")
         return {"address_queried": address, "licensed": True}
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
-    monkeypatch.setattr(mn_compliance, "check_property", fake_report)
+    monkeypatch.setattr(mn_compliance, "verify_payment", fake_verify)
+    monkeypatch.setattr(mn_compliance, "settle_payment", fake_settle)
+    monkeypatch.setattr(registry.get_city("mn"), "check_property", fake_report)
 
     response = client.get(
         "/mn/property-check",
@@ -215,7 +226,7 @@ def test_invalid_payment_returns_402(monkeypatch: pytest.MonkeyPatch) -> None:
             "settlement_error": None,
         }
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(mn_compliance, "verify_payment", fake_settle)
     response = client.get(
         "/mn/property-check",
         params={"address": "1700 Penn Ave N"},
@@ -376,6 +387,9 @@ def test_paid_request_records_revenue_ledger_row(
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
     monkeypatch.setattr(ledger_io, "LEDGER", tmp_path)
 
+    async def fake_verify(signature: str, payment_required: str) -> dict:
+        return {"is_valid": True, "invalid_reason": None}
+
     async def fake_settle(signature: str, payment_required: str) -> dict:
         return {
             "is_valid": True,
@@ -388,8 +402,9 @@ def test_paid_request_records_revenue_ledger_row(
     async def fake_report(address: str) -> dict:
         return {"address_queried": address, "licensed": True}
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
-    monkeypatch.setattr(mn_compliance, "check_property", fake_report)
+    monkeypatch.setattr(mn_compliance, "verify_payment", fake_verify)
+    monkeypatch.setattr(mn_compliance, "settle_payment", fake_settle)
+    monkeypatch.setattr(registry.get_city("mn"), "check_property", fake_report)
 
     response = client.get(
         "/mn/property-check",
