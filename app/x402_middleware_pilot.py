@@ -42,6 +42,7 @@ against zero views and no conversion at all.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -157,6 +158,60 @@ def _record_settled_revenue(ctx: Any) -> None:
         log.warning("middleware pilot: revenue ledger write failed", exc_info=True)
 
 
+def record_middleware_delivery(request: Any, response: Any) -> None:
+    """Persist delivery after handler returns (on_after_settle has no response body)."""
+    try:
+        if getattr(response, "status_code", None) != 200:
+            return
+        product_id = PRODUCT_IDS.get(getattr(request.url, "path", ""))
+        if not product_id:
+            return
+        import base64
+        import json as _json
+
+        from app import delivery_store
+
+        payment_hdr = response.headers.get("PAYMENT-RESPONSE", "")
+        if not payment_hdr:
+            return
+        try:
+            settlement = _json.loads(base64.b64decode(payment_hdr))
+        except Exception:
+            settlement = {}
+        tx = settlement.get("transaction") or settlement.get("txHash")
+        if not tx:
+            return
+        body_bytes = getattr(response, "body", b"") or b""
+        try:
+            response_body = _json.loads(body_bytes)
+        except Exception:
+            response_body = body_bytes.decode("utf-8", errors="replace")
+        amount = _settled_amount_usdc(
+            SimpleNamespace(
+                success=True,
+                amount=settlement.get("amount"),
+                network=settlement.get("network"),
+                payer=settlement.get("payer"),
+                transaction=tx,
+            ),
+            SimpleNamespace(network=settlement.get("network"), asset=None),
+            product_id,
+        )
+        if amount is None:
+            return
+        delivery_store.try_record_delivery(
+            tx=str(tx),
+            route=request.url.path,
+            product_id=product_id,
+            amount_usdc=amount,
+            payer=str(settlement.get("payer") or "") or None,
+            request_input=dict(getattr(request, "query_params", {}) or {}),
+            response_body=response_body,
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("middleware pilot: delivery record failed", exc_info=True)
+
+
 def record_402_challenge(request: Any, status_code: int) -> None:
     """Count a 402 served for one of the two gated routes. Never raises.
 
@@ -225,6 +280,7 @@ def instrumented_middleware_class() -> type:
         async def dispatch(self, request, call_next):  # type: ignore[override]
             response = await super().dispatch(request, call_next)
             record_402_challenge(request, response.status_code)
+            record_middleware_delivery(request, response)
             return response
 
     return _InstrumentedPaymentMiddleware

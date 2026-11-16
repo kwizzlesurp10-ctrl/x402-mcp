@@ -314,7 +314,7 @@ class SkillBinding:
     verify_and_settle: Callable[[str, str], Awaitable[dict[str, Any]]] | None
     validate_input: Callable[[dict[str, Any]], str | None]
     execute: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
-    record_revenue: Callable[[dict[str, Any], dict[str, Any]], None] | None = None
+    record_revenue: Callable[..., None] | None = None
     payment_text: str = "Payment is required to run this skill."
     verify_payment: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
     settle_payment: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
@@ -456,9 +456,7 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         verify_and_settle=tx_decision.verify_and_settle,
         validate_input=_tx_validate,
         execute=_tx_execute,
-        record_revenue=lambda st, _r: _record_product_revenue(
-            "base-tx-decision", settings.tx_decision_price, st
-        ),
+        record_revenue=_skill_record_revenue("base-tx-decision", settings.tx_decision_price),
         payment_text="Payment is required for Base transaction decision intelligence.",
     )
 
@@ -482,8 +480,8 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             verify_and_settle=finality_check.verify_and_settle,
             validate_input=_fin_validate,
             execute=_fin_execute,
-            record_revenue=lambda st, _r: _record_product_revenue(
-                "base-finality-check", settings.finality_check_price, st
+            record_revenue=_skill_record_revenue(
+                "base-finality-check", settings.finality_check_price
             ),
             payment_text="Payment is required for Base transaction finality classification.",
         )
@@ -524,8 +522,8 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         verify_and_settle=diligence_pack.verify_and_settle,
         validate_input=_diligence_validate,
         execute=_diligence_execute,
-        record_revenue=lambda st, _r: _record_product_revenue(
-            diligence_pack.PRODUCT_ID, diligence_pack.price_string(), st
+        record_revenue=_skill_record_revenue(
+            diligence_pack.PRODUCT_ID, diligence_pack.price_string()
         ),
         payment_text="Payment is required for the US multi-city rental diligence pack.",
     )
@@ -568,8 +566,8 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             verify_and_settle=policy_check.verify_and_settle,
             validate_input=_policy_check_validate,
             execute=_policy_check_execute,
-            record_revenue=lambda st, _r: _record_product_revenue(
-                policy_check.PRODUCT_ID, policy_check.price_string(), st
+            record_revenue=_skill_record_revenue(
+                policy_check.PRODUCT_ID, policy_check.price_string()
             ),
             payment_text="Payment is required for offline buyer payment-policy consistency analysis.",
         )
@@ -600,9 +598,7 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         settle_after_fulfillment=True,
         validate_input=_pdd_validate,
         execute=_pdd_execute,
-        record_revenue=lambda st, _r: _record_product_revenue(
-            pdd_agent.PRODUCT_ID, pdd_agent.PRICE, st
-        ),
+        record_revenue=_skill_record_revenue(pdd_agent.PRODUCT_ID, pdd_agent.PRICE),
         payment_text="Payment is required for the property due diligence agent.",
     )
 
@@ -657,33 +653,73 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             settle_after_fulfillment=True,
             validate_input=_city_validate,
             execute=_city_execute,
-            record_revenue=lambda st, _r, p=pid, pr=entry["price"]: _record_product_revenue(
-                p, pr, st
-            ),
+            record_revenue=_skill_record_revenue(pid, entry["price"]),
             payment_text=f"Payment is required for {entry['name']} property compliance check.",
         )
 
     return bindings
 
 
+def _skill_record_revenue(product_id: str, price: str):
+    def _rec(
+        settlement: dict[str, Any],
+        request_input: dict[str, Any],
+        response_body: Any | None = None,
+        *,
+        revenue_only: bool = True,
+    ) -> None:
+        _record_product_revenue(
+            product_id,
+            price,
+            settlement,
+            request_input=request_input,
+            response_body=response_body,
+            revenue_only=revenue_only,
+        )
+
+    return _rec
+
+
 def _record_product_revenue(
     product_id: str,
     price: str,
     settlement: dict[str, Any],
+    *,
+    request_input: dict[str, Any] | None = None,
+    response_body: Any | None = None,
+    revenue_only: bool = True,
 ) -> None:
     try:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
         tx = settlement.get("transaction") or settlement.get("txHash")
-        ledger_writer.record_revenue(
-            agent_id=product_id,
-            amount_usdc=parse_price_usdc(price),
-            network=settings.x402_default_network,
-            product_id=product_id,
-            tx=str(tx) if tx else None,
-            payer=settlement.get("payer"),
-        )
+        amount = parse_price_usdc(price)
+        payer = settlement.get("payer")
+        if revenue_only:
+            ledger_writer.record_revenue(
+                agent_id=product_id,
+                amount_usdc=amount,
+                network=settings.x402_default_network,
+                product_id=product_id,
+                tx=str(tx) if tx else None,
+                payer=payer,
+                request_input=request_input,
+                response_body=response_body,
+                delivery_route=f"a2a:{product_id}",
+            )
+        elif response_body is not None:
+            from app import delivery_store
+
+            delivery_store.try_record_delivery(
+                tx=str(tx) if tx else None,
+                route=f"a2a:{product_id}",
+                product_id=product_id,
+                amount_usdc=amount,
+                payer=str(payer) if payer else None,
+                request_input=request_input or {},
+                response_body=response_body,
+            )
     except Exception:  # noqa: BLE001
         log.warning("a2a revenue ledger write failed product=%s", product_id, exc_info=True)
 
@@ -1420,7 +1456,11 @@ async def _continue_paid_task(
             )
 
         if binding.record_revenue:
-            binding.record_revenue(settlement, stored.get("input") or {})
+            binding.record_revenue(
+                settlement,
+                stored.get("input") or {},
+                deliverable_pc,
+            )
 
         msg = _agent_message(
             "Payment completed. Skill result attached as artifact.",
@@ -1537,7 +1577,18 @@ async def _continue_paid_task(
             settle_receipt = _settlement_receipt(settlement, network=network)
             receipts = list(stored.get("receipts") or []) + [settle_receipt]
             if binding.record_revenue:
-                binding.record_revenue(settlement, stored.get("input") or {})
+                binding.record_revenue(
+                    settlement,
+                    stored.get("input") or {},
+                    deliverable,
+                )
+        elif deliverable is not None and binding.record_revenue:
+            binding.record_revenue(
+                settlement,
+                stored.get("input") or {},
+                deliverable,
+                revenue_only=False,
+            )
         msg = _agent_message(
             "Payment completed. Skill result attached as artifact.",
             {

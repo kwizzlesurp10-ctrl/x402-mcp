@@ -243,7 +243,7 @@ async def check_us_city_property(
         verdict=agentmail.verdict_from_report(report),
         paid=True,
     )
-    return {
+    payload = {
         "paid": True,
         "city": spec.code,
         "address": addr,
@@ -253,3 +253,7 @@ async def check_us_city_property(
         "network": settings.x402_default_network,
         "report": report,
     }
+    from app.delivery_store import stash_pending_delivery_body
+
+    stash_pending_delivery_body(payload)
+    return payload
