@@ -158,7 +158,9 @@ def _record_settled_revenue(ctx: Any) -> None:
         log.warning("middleware pilot: revenue ledger write failed", exc_info=True)
 
 
-def record_middleware_delivery(request: Any, response: Any) -> None:
+def record_middleware_delivery(
+    request: Any, response: Any, *, body_bytes: bytes | None = None
+) -> None:
     """Persist delivery after handler returns (on_after_settle has no response body)."""
     try:
         if getattr(response, "status_code", None) != 200:
@@ -181,11 +183,11 @@ def record_middleware_delivery(request: Any, response: Any) -> None:
         tx = settlement.get("transaction") or settlement.get("txHash")
         if not tx:
             return
-        body_bytes = getattr(response, "body", b"") or b""
+        raw = body_bytes if body_bytes is not None else (getattr(response, "body", b"") or b"")
         try:
-            response_body = _json.loads(body_bytes)
+            response_body = _json.loads(raw)
         except Exception:
-            response_body = body_bytes.decode("utf-8", errors="replace")
+            response_body = raw.decode("utf-8", errors="replace")
         amount = _settled_amount_usdc(
             SimpleNamespace(
                 success=True,
@@ -210,6 +212,30 @@ def record_middleware_delivery(request: Any, response: Any) -> None:
         )
     except Exception:  # noqa: BLE001
         log.warning("middleware pilot: delivery record failed", exc_info=True)
+
+
+async def _materialize_response(response: Any) -> tuple[Any, bytes | None]:
+    """Read a streaming Starlette response without consuming it for the client."""
+    if getattr(response, "body_iterator", None) is None:
+        return response, None
+    from starlette.responses import Response as StarletteResponse
+
+    chunks: list[bytes] = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, str):
+            chunk = chunk.encode("utf-8")
+        elif not isinstance(chunk, (bytes, bytearray)):
+            chunk = bytes(chunk)
+        chunks.append(bytes(chunk))
+    body = b"".join(chunks)
+    wrapped = StarletteResponse(
+        content=body,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+        background=response.background,
+    )
+    return wrapped, body
 
 
 def record_402_challenge(request: Any, status_code: int) -> None:
@@ -280,7 +306,10 @@ def instrumented_middleware_class() -> type:
         async def dispatch(self, request, call_next):  # type: ignore[override]
             response = await super().dispatch(request, call_next)
             record_402_challenge(request, response.status_code)
-            record_middleware_delivery(request, response)
+            response, body = await _materialize_response(response)
+            record_middleware_delivery(
+                request, response, body_bytes=body if body is not None else None
+            )
             return response
 
     return _InstrumentedPaymentMiddleware

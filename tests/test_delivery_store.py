@@ -150,6 +150,27 @@ def test_admin_deliveries_rejects_without_auth(client, monkeypatch) -> None:
     assert r.status_code == 401
 
 
+def test_redis_trim_deletes_orphan_tx_keys(redis_delivery, monkeypatch) -> None:
+    monkeypatch.setattr(delivery_store, "MAX_RECORDS", 3)
+    client = redis_delivery._client
+    for i in range(5):
+        delivery_store.try_record_delivery(
+            tx=f"0x{i:04d}",
+            route="r",
+            request_input={"n": i},
+            response_body={"n": i},
+        )
+    assert int(client.zcard(delivery_store.INDEX_KEY)) == 3
+    assert delivery_store.get_delivery("0x0000") is None
+    assert delivery_store.get_delivery("0x0001") is None
+    assert client.get(f"{delivery_store.RECORD_PREFIX}0x0000") is None
+    assert delivery_store.get_delivery("0x0004") is not None
+    listed = delivery_store.list_deliveries(limit=10)["items"]
+    txs = {item["tx"] for item in listed}
+    assert "0x0000" not in txs
+    assert "0x0004" in txs
+
+
 def test_admin_deliveries_list_with_auth(client, monkeypatch, redis_delivery) -> None:
     token = "operator-token-for-delivery-tests-32"
     monkeypatch.setattr(settings, "operator_token", token)
@@ -171,3 +192,60 @@ def test_admin_deliveries_list_with_auth(client, monkeypatch, redis_delivery) ->
     one = client.get("/admin/deliveries/0xlistme", headers={"Authorization": f"Bearer {token}"})
     assert one.status_code == 200
     assert one.json()["response_body"] == {"r": 1}
+
+
+@pytest.mark.anyio
+async def test_materialize_response_buffers_streaming_body() -> None:
+    from starlette.responses import StreamingResponse
+
+    from app import x402_middleware_pilot
+
+    async def stream():
+        yield b'{"ok":'
+        yield b"true}"
+
+    original = StreamingResponse(stream(), media_type="application/json", status_code=200)
+    wrapped, body = await x402_middleware_pilot._materialize_response(original)
+    assert body == b'{"ok":true}'
+    assert wrapped.body == b'{"ok":true}'
+
+
+@pytest.mark.anyio
+async def test_middleware_delivery_records_materialized_body(monkeypatch) -> None:
+    import base64
+    import json
+    from unittest.mock import MagicMock
+
+    from starlette.responses import StreamingResponse
+
+    from app import x402_middleware_pilot
+
+    settlement = {"transaction": "0xstream", "amount": "10000", "network": "eip155:8453"}
+    payment_hdr = base64.b64encode(json.dumps(settlement).encode()).decode()
+
+    async def stream():
+        yield b'{"pattern":'
+        yield b'"pilot"}'
+
+    response = StreamingResponse(stream(), status_code=200)
+    response.headers["PAYMENT-RESPONSE"] = payment_hdr
+
+    request = MagicMock()
+    request.url.path = "/pilot/ping"
+    request.query_params = {}
+
+    recorded: dict[str, object] = {}
+
+    def fake_try(**kwargs):
+        recorded.update(kwargs)
+        return "ledger:delivery:tx:0xstream"
+
+    import app.delivery_store as ds
+
+    monkeypatch.setattr(ds, "try_record_delivery", fake_try)
+    monkeypatch.setattr(settings, "middleware_pilot_price", "$0.001")
+
+    _wrapped, body = await x402_middleware_pilot._materialize_response(response)
+    x402_middleware_pilot.record_middleware_delivery(request, _wrapped, body_bytes=body)
+    assert recorded.get("response_body") == {"pattern": "pilot"}
+    assert recorded.get("tx") == "0xstream"

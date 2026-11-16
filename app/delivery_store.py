@@ -185,8 +185,19 @@ def try_record_delivery(
         pipe = client.pipeline()
         pipe.set(key, json.dumps(record, ensure_ascii=False))
         pipe.zadd(INDEX_KEY, {tx_norm: score_ms})
-        pipe.zremrangebyrank(INDEX_KEY, 0, -(MAX_RECORDS + 1))
         pipe.execute()
+
+        count = int(client.zcard(INDEX_KEY))
+        if count > MAX_RECORDS:
+            trim_count = count - MAX_RECORDS
+            dropped = client.zrange(INDEX_KEY, 0, trim_count - 1)
+            if dropped:
+                trim_pipe = client.pipeline()
+                for dropped_tx in dropped:
+                    trim_pipe.delete(f"{RECORD_PREFIX}{_normalize_tx(str(dropped_tx))}")
+                trim_pipe.zremrangebyrank(INDEX_KEY, 0, trim_count - 1)
+                trim_pipe.execute()
+
         return delivery_ref_for_tx(tx_norm)
     except Exception:
         log.warning("delivery record write failed tx=%s route=%s", tx, route, exc_info=True)
