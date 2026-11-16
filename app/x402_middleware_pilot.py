@@ -63,6 +63,34 @@ PRODUCT_IDS = {
     "/pilot/ping": "pilot-ping",
 }
 
+# Never hold more than this in memory when capturing a paid pilot response body.
+MAX_MATERIALIZE_BYTES = 64 * 1024
+
+
+def _response_media_type(response: Any) -> str:
+    media = getattr(response, "media_type", None) or ""
+    headers = getattr(response, "headers", None) or {}
+    if not media:
+        media = headers.get("content-type", "")
+    return str(media).split(";", 1)[0].strip().lower()
+
+
+def _is_event_stream(response: Any) -> bool:
+    return _response_media_type(response) == "text/event-stream"
+
+
+def _should_capture_delivery_body(request: Any, response: Any) -> bool:
+    """Only paid pilot successes with a settlement receipt need body capture."""
+    if getattr(response, "status_code", None) != 200:
+        return False
+    if request.url.path not in PRODUCT_IDS:
+        return False
+    if not response.headers.get("PAYMENT-RESPONSE"):
+        return False
+    if _is_event_stream(response):
+        return False
+    return True
+
 
 def _configured_price(product_id: str) -> str | None:
     """The listed price for a product, used only as a last-resort amount."""
@@ -214,28 +242,76 @@ def record_middleware_delivery(
         log.warning("middleware pilot: delivery record failed", exc_info=True)
 
 
-async def _materialize_response(response: Any) -> tuple[Any, bytes | None]:
-    """Read a streaming Starlette response without consuming it for the client."""
-    if getattr(response, "body_iterator", None) is None:
+def _chunk_as_bytes(chunk: Any) -> bytes:
+    if isinstance(chunk, str):
+        return chunk.encode("utf-8")
+    if isinstance(chunk, (bytes, bytearray)):
+        return bytes(chunk)
+    return bytes(chunk)
+
+
+async def _materialize_response(
+    response: Any,
+    *,
+    max_bytes: int = MAX_MATERIALIZE_BYTES,
+) -> tuple[Any, bytes | None]:
+    """Buffer a small streaming pilot response; tee to the client if over the cap."""
+    iterator = getattr(response, "body_iterator", None)
+    if iterator is None:
         return response, None
-    from starlette.responses import Response as StarletteResponse
+
+    from starlette.responses import Response as StarletteResponse, StreamingResponse
 
     chunks: list[bytes] = []
-    async for chunk in response.body_iterator:
-        if isinstance(chunk, str):
-            chunk = chunk.encode("utf-8")
-        elif not isinstance(chunk, (bytes, bytearray)):
-            chunk = bytes(chunk)
-        chunks.append(bytes(chunk))
-    body = b"".join(chunks)
-    wrapped = StarletteResponse(
-        content=body,
+    total = 0
+    over_cap = False
+
+    async def _drain() -> list[bytes]:
+        nonlocal total, over_cap
+        rest: list[bytes] = []
+        async for chunk in iterator:
+            data = _chunk_as_bytes(chunk)
+            if not over_cap:
+                chunks.append(data)
+                total += len(data)
+                if total > max_bytes:
+                    over_cap = True
+            else:
+                rest.append(data)
+        return rest
+
+    trailing = await _drain()
+    if not over_cap:
+        body = b"".join(chunks)
+        wrapped = StarletteResponse(
+            content=body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+            background=response.background,
+        )
+        return wrapped, body
+
+    log.warning(
+        "middleware pilot: response exceeded %d bytes; delivery body truncated",
+        max_bytes,
+    )
+    captured = b"".join(chunks)[:max_bytes]
+
+    async def _tee() -> Any:
+        for part in chunks:
+            yield part
+        for part in trailing:
+            yield part
+
+    wrapped = StreamingResponse(
+        _tee(),
         status_code=response.status_code,
         headers=dict(response.headers),
         media_type=response.media_type,
         background=response.background,
     )
-    return wrapped, body
+    return wrapped, captured
 
 
 def record_402_challenge(request: Any, status_code: int) -> None:
@@ -306,10 +382,9 @@ def instrumented_middleware_class() -> type:
         async def dispatch(self, request, call_next):  # type: ignore[override]
             response = await super().dispatch(request, call_next)
             record_402_challenge(request, response.status_code)
-            response, body = await _materialize_response(response)
-            record_middleware_delivery(
-                request, response, body_bytes=body if body is not None else None
-            )
+            if _should_capture_delivery_body(request, response):
+                response, body = await _materialize_response(response)
+                record_middleware_delivery(request, response, body_bytes=body)
             return response
 
     return _InstrumentedPaymentMiddleware

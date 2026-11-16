@@ -194,6 +194,49 @@ def test_admin_deliveries_list_with_auth(client, monkeypatch, redis_delivery) ->
     assert one.json()["response_body"] == {"r": 1}
 
 
+def test_should_not_capture_sse_or_non_pilot() -> None:
+    from unittest.mock import MagicMock
+
+    from starlette.responses import JSONResponse, StreamingResponse
+
+    from app import x402_middleware_pilot
+
+    sse_req = MagicMock()
+    sse_req.url.path = "/events"
+    sse = StreamingResponse(iter([]), media_type="text/event-stream", status_code=200)
+    sse.headers["PAYMENT-RESPONSE"] = "ignored"
+    assert x402_middleware_pilot._should_capture_delivery_body(sse_req, sse) is False
+
+    pilot_unpaid = MagicMock()
+    pilot_unpaid.url.path = "/pilot/ping"
+    assert (
+        x402_middleware_pilot._should_capture_delivery_body(
+            pilot_unpaid, JSONResponse({"x": 1}, status_code=402)
+        )
+        is False
+    )
+
+    health = MagicMock()
+    health.url.path = "/health"
+    paid = JSONResponse({"ok": True}, status_code=200)
+    paid.headers["PAYMENT-RESPONSE"] = "hdr"
+    assert x402_middleware_pilot._should_capture_delivery_body(health, paid) is False
+
+
+def test_should_capture_paid_pilot_success() -> None:
+    from unittest.mock import MagicMock
+
+    from starlette.responses import JSONResponse
+
+    from app import x402_middleware_pilot
+
+    req = MagicMock()
+    req.url.path = "/pilot/ping"
+    resp = JSONResponse({"ok": True}, status_code=200)
+    resp.headers["PAYMENT-RESPONSE"] = "hdr"
+    assert x402_middleware_pilot._should_capture_delivery_body(req, resp) is True
+
+
 @pytest.mark.anyio
 async def test_materialize_response_buffers_streaming_body() -> None:
     from starlette.responses import StreamingResponse
