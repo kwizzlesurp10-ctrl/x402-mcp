@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
 import time
 from typing import Any
@@ -12,9 +10,8 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import demand, property_due_diligence_agent as agent
-from app.city_compliance import agentmail, registry
+from app.city_compliance import agentmail, paid_delivery, registry
 from app.config import settings
-from app.swarm.publisher import parse_price_usdc
 
 log = logging.getLogger("x402")
 
@@ -83,91 +80,80 @@ async def property_due_diligence(
             content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
         )
 
-    result = await agent.verify_and_settle(signature, payment_required)
-    if not result.get("is_valid") or not result.get("payment_settled"):
-        return JSONResponse(
-            status_code=402,
-            headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_invalid",
-                "invalid_reason": result.get("invalid_reason"),
-                "settlement_error": result.get("settlement_error"),
-            },
-        )
+    city_mod = registry.get_city(code)
+    spec = city_mod.SPEC
 
-    settlement = result.get("settlement") or {}
-    try:
-        report = await agent.run_check(city_code=code, address=addr)
-    except Exception:  # noqa: BLE001
-        log.warning("property-due-diligence join failed after settle", exc_info=True)
-        tx = settlement.get("transaction") or settlement.get("txHash")
-        try:
-            spec = registry.get_city(code).SPEC
-            city_name, state = spec.name, spec.state
-        except KeyError:
-            city_name, state = None, None
+    async def _fetch_report(_mod: Any, _address: str) -> dict[str, Any]:
+        return await agent.run_check(city_code=code, address=_address)
+
+    class _Runner:
+        async def check_property(self, address: str) -> dict[str, Any]:
+            return await _fetch_report(city_mod, address)
+
+    runner = _Runner()
+
+    def _notify_error(*, paid: bool, detail: str) -> None:
         agentmail.notify_city_call(
             "error",
             city_code=code,
-            city_name=city_name,
-            state=state,
+            city_name=spec.name,
+            state=spec.state,
             channel="http",
             address=addr,
             price=agent.PRICE,
-            paid=True,
-            tx_hash=str(tx) if tx else None,
-            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-            detail="upstream_open_data_unavailable",
-        )
-        receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
-        return JSONResponse(
-            status_code=502,
-            headers={"PAYMENT-RESPONSE": receipt},
-            content={
-                "error": "upstream_open_data_unavailable",
-                "detail": "payment settled; open-data join failed; contact seller",
-                "city": code,
-            },
+            paid=paid,
+            detail=detail,
         )
 
-    tx = settlement.get("transaction") or settlement.get("txHash")
-    try:
+    def _notify_success(*, report: dict, tx: str | None, payer: str | None) -> None:
+        latency = round((time.monotonic() - t0) * 1000)
+        log.info(
+            "property-due-diligence settled",
+            extra={"city": code, "status_code": 200, "latency_ms": latency},
+        )
+        agentmail.notify_city_call(
+            "paid_settle",
+            city_code=code,
+            city_name=spec.name,
+            state=spec.state,
+            channel="http",
+            address=addr,
+            price=agent.PRICE,
+            verdict=agentmail.verdict_from_report(report),
+            paid=True,
+            tx_hash=tx,
+            payer=payer,
+            detail="property-due-diligence agent",
+        )
+
+    def _record_revenue(*, tx: str | None, payer: object) -> None:
         from app.swarm import ledger_writer
+        from app.swarm.publisher import parse_price_usdc
 
         ledger_writer.record_revenue(
             agent_id=agent.PRODUCT_ID,
             amount_usdc=parse_price_usdc(agent.PRICE),
             network=settings.x402_default_network,
             product_id=agent.PRODUCT_ID,
-            tx=str(tx) if tx else None,
-            payer=settlement.get("payer"),
+            tx=tx,
+            payer=payer,
         )
-    except Exception:  # noqa: BLE001
-        log.warning("property-due-diligence revenue ledger write failed", exc_info=True)
 
-    latency = round((time.monotonic() - t0) * 1000)
-    log.info(
-        "property-due-diligence settled",
-        extra={"city": code, "status_code": 200, "latency_ms": latency},
-    )
-    city_mod = registry.get_city(code)
-    spec = city_mod.SPEC
-    agentmail.notify_city_call(
-        "paid_settle",
-        city_code=code,
-        city_name=spec.name,
-        state=spec.state,
-        channel="http",
+    return await paid_delivery.deliver_paid_city_report(
+        signature=signature,
+        payment_required=payment_required,
+        mod=runner,
+        spec=spec,
         address=addr,
+        product_id=agent.PRODUCT_ID,
         price=agent.PRICE,
-        verdict=agentmail.verdict_from_report(report),
-        paid=True,
-        tx_hash=str(tx) if tx else None,
-        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-        detail="property-due-diligence agent",
+        verify_payment=agent.verify_payment,
+        settle_payment=agent.settle_payment,
+        notify_error=_notify_error,
+        notify_success=_notify_success,
+        record_revenue=_record_revenue,
+        log_prefix="property-due-diligence",
     )
-    receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
-    return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
 
 
 def _402(payment_required: str, *, extra: dict[str, Any] | None = None) -> JSONResponse:

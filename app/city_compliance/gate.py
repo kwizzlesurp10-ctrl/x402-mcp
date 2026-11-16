@@ -78,6 +78,30 @@ def build_payment_required_header(
     return challenge_cache.get_or_build(product_id(city), fp, _build)
 
 
+async def verify_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.verify_payment_payload(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+async def settle_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:
     from app.models import VerifyPaymentInput
     from app.x402_services import _verify_and_settle_payment

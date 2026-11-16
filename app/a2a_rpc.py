@@ -316,6 +316,9 @@ class SkillBinding:
     execute: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
     record_revenue: Callable[[dict[str, Any], dict[str, Any]], None] | None = None
     payment_text: str = "Payment is required to run this skill."
+    verify_payment: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
+    settle_payment: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
+    settle_after_fulfillment: bool = False
 
 
 def _payment_required_body(header: str) -> dict[str, Any]:
@@ -592,6 +595,9 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         price_usdc=pdd_agent.PRICE,
         build_payment_header=pdd_agent.build_payment_required_header,
         verify_and_settle=pdd_agent.verify_and_settle,
+        verify_payment=pdd_agent.verify_payment,
+        settle_payment=pdd_agent.settle_payment,
+        settle_after_fulfillment=True,
         validate_input=_pdd_validate,
         execute=_pdd_execute,
         record_revenue=lambda st, _r: _record_product_revenue(
@@ -646,6 +652,9 @@ def _skill_bindings() -> dict[str, SkillBinding]:
                 )
             ),
             verify_and_settle=city_gate.verify_and_settle,
+            verify_payment=city_gate.verify_payment,
+            settle_payment=city_gate.settle_payment,
+            settle_after_fulfillment=True,
             validate_input=_city_validate,
             execute=_city_execute,
             record_revenue=lambda st, _r, p=pid, pr=entry["price"]: _record_product_revenue(
@@ -1297,18 +1306,40 @@ async def _continue_paid_task(
             input_digest=input_digest,
         )
     else:
-        assert binding.verify_and_settle is not None
+        deferred_settle = (
+            binding.settle_after_fulfillment
+            and binding.verify_payment is not None
+            and binding.settle_payment is not None
+        )
         tv0 = time.perf_counter()
-        result = await binding.verify_and_settle(signature, header)
+        if deferred_settle:
+            assert binding.verify_payment is not None
+            result = await binding.verify_payment(signature, header)
+            result = {
+                **result,
+                "payment_settled": False,
+                "settlement": None,
+                "settlement_error": None,
+            }
+            stored["settle_after_fulfillment"] = True
+        else:
+            assert binding.verify_and_settle is not None
+            result = await binding.verify_and_settle(signature, header)
     x402_latency.record_span("a2a", "verify_settle", tv0)
     settlement = result.get("settlement") or {}
     receipt = _settlement_receipt(settlement, network=network)
     if not result.get("is_valid"):
         receipt["success"] = False
         receipt["errorReason"] = result.get("invalid_reason") or "invalid_signature"
+    elif stored.get("settle_after_fulfillment"):
+        receipt["success"] = True
+        receipt["deferredSettlement"] = True
     receipts = list(stored.get("receipts") or []) + [receipt]
 
-    if not result.get("is_valid") or not result.get("payment_settled"):
+    payment_ok = result.get("is_valid") and (
+        result.get("payment_settled") or stored.get("settle_after_fulfillment")
+    )
+    if not payment_ok:
         if stored.get("skillId") == "buyer-payment-policy-check" and policy_pc_claim_key:
             from app import policy_check as pc
 
@@ -1416,7 +1447,7 @@ async def _continue_paid_task(
             )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
-    if binding.record_revenue:
+    if binding.record_revenue and not stored.get("settle_after_fulfillment"):
         binding.record_revenue(settlement, stored.get("input") or {})
 
     skill_input = stored.get("input") or {}
@@ -1475,6 +1506,38 @@ async def _continue_paid_task(
         te0 = time.perf_counter()
         deliverable = await binding.execute(skill_input)
         x402_latency.record_span("a2a", "fulfillment_execute", te0)
+        if (
+            stored.get("settle_after_fulfillment")
+            and binding.settle_payment is not None
+        ):
+            settle_result = await binding.settle_payment(signature, header)
+            if not settle_result.get("payment_settled"):
+                msg = _agent_message(
+                    "Open-data fetch succeeded but settlement failed; payment not charged.",
+                    {
+                        META_STATUS: "payment-failed",
+                        META_ERROR: "SETTLEMENT_FAILED",
+                        META_RECEIPTS: receipts,
+                    },
+                )
+                task = _task_dict(task_id=task_id, state="input-required", message=msg)
+                stored.update(task)
+                stored["receipts"] = receipts
+                if not _persist_task(task_id, stored):
+                    out = _jsonrpc_error(
+                        req_id,
+                        JSONRPC_INTERNAL_ERROR,
+                        "task persistence unavailable",
+                        {"taskId": task_id},
+                    )
+                else:
+                    out = _jsonrpc_result(req_id, _client_task_view(stored))
+                return out
+            settlement = settle_result.get("settlement") or {}
+            settle_receipt = _settlement_receipt(settlement, network=network)
+            receipts = list(stored.get("receipts") or []) + [settle_receipt]
+            if binding.record_revenue:
+                binding.record_revenue(settlement, stored.get("input") or {})
         msg = _agent_message(
             "Payment completed. Skill result attached as artifact.",
             {
@@ -1501,15 +1564,28 @@ async def _continue_paid_task(
         else:
             out = _jsonrpc_result(req_id, _client_task_view(stored))
     except Exception:  # noqa: BLE001
-        log.warning("a2a skill execution failed after settle", exc_info=True)
+        log.warning("a2a skill execution failed", exc_info=True)
+        status = (
+            "Upstream data unavailable; payment was not charged."
+            if stored.get("settle_after_fulfillment")
+            else "Payment settled but skill execution failed."
+        )
         msg = _agent_message(
-            "Payment settled but skill execution failed.",
+            status,
             {
-                META_STATUS: "payment-completed",
+                META_STATUS: (
+                    "payment-failed"
+                    if stored.get("settle_after_fulfillment")
+                    else "payment-completed"
+                ),
                 META_RECEIPTS: receipts,
             },
         )
-        task = _task_dict(task_id=task_id, state="failed", message=msg)
+        task = _task_dict(
+            task_id=task_id,
+            state="failed" if stored.get("settle_after_fulfillment") else "failed",
+            message=msg,
+        )
         stored.update(task)
         stored["receipts"] = receipts
         if not _persist_task(task_id, stored):
