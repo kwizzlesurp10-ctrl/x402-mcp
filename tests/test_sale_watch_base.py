@@ -25,7 +25,7 @@ def test_rpc_endpoint_urls_prefers_base_rpc_url(monkeypatch: pytest.MonkeyPatch)
     urls = rpc_endpoint_urls()
     assert urls[0] == "https://custom-rpc.example"
     assert "https://legacy.example" in urls
-    assert "https://mainnet.base.org" in urls
+    assert "https://base-rpc.publicnode.com" in urls
 
 
 def test_pay_to_transfer_topic() -> None:
