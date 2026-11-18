@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import demand
 from app.city_compliance import agentmail, degraded, gate, paid_delivery, publish, registry
@@ -17,6 +17,12 @@ from app.config import settings
 log = logging.getLogger("x402.city_compliance")
 
 router = APIRouter(tags=["us-city-compliance"])
+
+
+@router.get("/cities")
+async def cities_catalog_alias() -> RedirectResponse:
+    """Buyer-facing alias for the free US city catalog."""
+    return RedirectResponse(url="/us/cities", status_code=307)
 
 
 @router.get("/us/cities")
