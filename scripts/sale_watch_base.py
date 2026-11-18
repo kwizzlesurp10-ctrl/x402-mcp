@@ -14,11 +14,13 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable
 
+# Prefer endpoints that tolerate eth_getLogs on scheduled runners; mainnet.base.org
+# rate-limits aggressively from datacenter IPs.
 DEFAULT_RPCS: tuple[str, ...] = (
-    "https://mainnet.base.org",
-    "https://base.llamarpc.com",
     "https://base-rpc.publicnode.com",
     "https://1rpc.io/base",
+    "https://base.llamarpc.com",
+    "https://mainnet.base.org",
 )
 
 MAX_ATTEMPTS_PER_URL = 5

@@ -4,14 +4,14 @@ name: sale watch
 # manufacture: a payment into the storefront's receive wallet from a wallet that
 # is NOT ours. That is a stranger's agent actually buying.
 #
-# Every self-settle (cataloging, re-index) comes from the operator buyer wallet
-# below, so anything else is a real external sale. When one appears, the job
-# opens a GitHub issue — that notifies you and leaves a durable, dedup-able
-# record. The run stays green; the ISSUE is the alert, not a failed run.
+# Chain scans only cover the last ~2 hours of blocks; RPC 429s and delayed
+# self-hosted runs can leave blind spots. The storefront ledger (authoritative
+# for settled sales on this box) is merged in every run so dedupe recovers
+# anything that fell out of the block window. When one appears, the job opens a
+# GitHub issue — the run stays green; the ISSUE is the alert, not a failed run.
 #
-# Caveat: if a second operator box (the Linux instance) ever buys from this
-# storefront with its own wallet, add that address to OUR_WALLETS or it will
-# read as a stranger. Today only one buyer wallet exists.
+# Caveat: if a second operator box ever buys from this storefront with its own
+# wallet, add that address to OUR_WALLETS or it will read as a stranger.
 
 on:
   schedule:
@@ -30,72 +30,19 @@ jobs:
       BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
       USDC: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
       PAY_TO: '0x0d25A44f74868eCE53B305C97139CF4B62963410'
-      # Comma-separated, lowercase. Every wallet WE settle from. Anything else
-      # paying PAY_TO is a stranger.
-      OUR_WALLETS: '0x67ffc9b439ae24b0f7c7ca837c4adfafa06f9d38'
+      # Keep in sync with OPERATOR_WALLETS on Render (public, not secrets).
+      OUR_WALLETS: >-
+        0x67ffc9b439ae24b0f7c7ca837c4adfafa06f9d38,
+        0xc22c17fca624db679b2471f2bb099e1e29a46209,
+        0xce2b941f877cc96b26fdd4a7eb2c1ef4b7369a51
+      STOREFRONT_URL: 'https://x402-mcp.onrender.com'
+      MAX_SALE_ALERTS_PER_RUN: '15'
+      LEDGER_LOOKBACK_HOURS: '12'
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       PYTHONPATH: scripts
     steps:
       - uses: actions/checkout@v5
 
-      - name: Scan Base for stranger payments and alert
-        run: |
-          python3 - <<'PY'
-          import os
-          import sys
-
-          from alerts import Alerter, event_key
-          from sale_watch_base import RpcInfrastructureError, fetch_transfer_logs, latest_block_number, rpc_call
-
-          USDC = os.environ["USDC"]
-          PAY_TO = os.environ["PAY_TO"].lower()
-          OURS = {w.strip().lower() for w in os.environ["OUR_WALLETS"].split(",") if w.strip()}
-          REPO = os.environ["GH_REPO"]
-
-          try:
-              latest = latest_block_number(rpc_call)
-              # ~2s blocks; cron every 30 min. Scan the last ~2 hours (3600 blocks)
-              # every run so a delayed/skipped run cannot miss a sale. The event key
-              # in the alert title keeps the overlap harmless.
-              start = max(0, latest - 3600)
-              logs = fetch_transfer_logs(
-                  rpc_call,
-                  usdc=USDC,
-                  pay_to=PAY_TO,
-                  start_block=start,
-                  end_block=latest,
-              )
-          except RpcInfrastructureError as exc:
-              print(f"::warning::Base RPC rate-limited or unavailable; skipping scan this run: {exc}")
-              sys.exit(0)
-
-          strangers = []
-          for lg in logs:
-              frm = "0x" + lg["topics"][1][-40:]
-              if frm.lower() in OURS:
-                  continue
-              amt = int(lg["data"], 16) / 1e6
-              strangers.append((frm, amt, lg["transactionHash"], int(lg["blockNumber"], 16)))
-
-          print(f"scanned {latest-start} blocks; {len(logs)} payments in, {len(strangers)} from strangers")
-
-          alerter = Alerter(REPO, "sale")
-
-          for frm, amt, tx, blk in strangers:
-              alerter.alert(
-                  event_key("sale", tx),
-                  f"\U0001F4B0 External sale: ${amt:.4f} USDC from {frm[:10]}…",
-                  f"A wallet that is not ours paid the storefront.\n\n"
-                  f"- **Amount:** ${amt:.6f} USDC\n"
-                  f"- **From:** `{frm}`\n"
-                  f"- **To (pay_to):** `{PAY_TO}`\n"
-                  f"- **Tx:** https://basescan.org/tx/{tx}\n"
-                  f"- **Block:** {blk}\n\n"
-                  f"This is a real external purchase — the first-ever was 0xadacdfdd on "
-                  f"2026-07-22 (old $0.25 Pulse). Cross-check /ledger/revenue and /demand "
-                  f"to see which product and client class. Close this issue once acknowledged.",
-              )
-
-          print(alerter.summary())
-          PY
+      - name: Scan chain + ledger for stranger payments and alert
+        run: python3 scripts/sale_watch_run.py
