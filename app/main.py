@@ -345,12 +345,14 @@ from app.policy_check_routes import router as policy_check_router  # noqa: E402
 from app.property_due_diligence_routes import (  # noqa: E402
     router as property_due_diligence_router,
 )
+from app.delivery_admin import router as delivery_admin_router  # noqa: E402
 
 x402_middleware_pilot.register(app)
 app.include_router(city_compliance_router)
 app.include_router(diligence_router)
 app.include_router(policy_check_router)
 app.include_router(property_due_diligence_router)
+app.include_router(delivery_admin_router)
 
 
 def _public_openapi() -> dict:
@@ -1827,7 +1829,13 @@ async def mn_property_check(
             detail="canonical /mn/property-check",
         )
 
-    def _record_revenue(*, tx: str | None, payer: object) -> None:
+    def _record_revenue(
+        *,
+        tx: str | None,
+        payer: object,
+        request_input: object | None = None,
+        response_body: object | None = None,
+    ) -> None:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
@@ -1838,6 +1846,8 @@ async def mn_property_check(
             product_id="mn-property-check",
             tx=tx,
             payer=payer,
+            request_input=request_input,
+            response_body=response_body,
         )
 
     return await paid_delivery.deliver_paid_city_report(
@@ -1964,6 +1974,8 @@ async def base_tx_decision(
             product_id="base-tx-decision",
             tx=str(tx) if tx else None,
             payer=settlement.get("payer"),
+            request_input={"gas": gas, "urgency": urgency},
+            response_body=decision,
         )
     except Exception:  # ledger write must never break paid delivery
         log.warning("base/tx-decision revenue ledger write failed", exc_info=True)
@@ -2125,22 +2137,6 @@ async def demo_paid_resource(request: Request) -> JSONResponse:
     settlement = result.get("settlement") or {}
     paid_ok = result.get("payment_settled") is True
 
-    if paid_ok:
-        try:
-            from app.swarm import ledger_writer
-            from app.swarm.publisher import parse_price_usdc
-
-            ledger_writer.record_revenue(
-                agent_id="seller-demo",
-                amount_usdc=parse_price_usdc(built["price"]),
-                network=built["network"],
-                product_id="seller-demo",
-                tx=settlement.get("transaction") or settlement.get("txHash"),
-                payer=settlement.get("payer"),
-            )
-        except Exception:
-            log.warning("demo/paid revenue ledger write failed", exc_info=True)
-
     headers: dict[str, str] = {}
     if paid_ok and settlement:
         try:
@@ -2154,23 +2150,39 @@ async def demo_paid_resource(request: Request) -> JSONResponse:
         except Exception:
             pass
 
-    return JSONResponse(
-        status_code=200 if paid_ok else 402,
-        content={
-            "ok": paid_ok,
-            "message": "Payment settled — seller demo payload unlocked"
-            if paid_ok
-            else "Verified but settlement failed",
-            "secret": "x402-seller-demo-ok" if paid_ok else None,
-            "seller_pay_to": built["pay_to"],
-            "price": built["price"],
-            "network": built["network"],
-            "payment_settled": paid_ok,
-            "settlement": settlement,
-            "settlement_error": result.get("settlement_error"),
-        },
-        headers=headers,
-    )
+    demo_content = {
+        "ok": paid_ok,
+        "message": "Payment settled — seller demo payload unlocked"
+        if paid_ok
+        else "Verified but settlement failed",
+        "secret": "x402-seller-demo-ok" if paid_ok else None,
+        "seller_pay_to": built["pay_to"],
+        "price": built["price"],
+        "network": built["network"],
+        "payment_settled": paid_ok,
+        "settlement": settlement,
+        "settlement_error": result.get("settlement_error"),
+    }
+    if paid_ok:
+        try:
+            from app.swarm import ledger_writer
+            from app.swarm.publisher import parse_price_usdc
+
+            ledger_writer.record_revenue(
+                agent_id="seller-demo",
+                amount_usdc=parse_price_usdc(built["price"]),
+                network=built["network"],
+                product_id="seller-demo",
+                tx=settlement.get("transaction") or settlement.get("txHash"),
+                payer=settlement.get("payer"),
+                request_input={},
+                response_body=demo_content,
+                delivery_route="/demo/paid",
+            )
+        except Exception:
+            log.warning("demo/paid revenue/delivery ledger write failed", exc_info=True)
+
+    return JSONResponse(status_code=200 if paid_ok else 402, content=demo_content, headers=headers)
 
 
 @app.get("/demo/paid/info")

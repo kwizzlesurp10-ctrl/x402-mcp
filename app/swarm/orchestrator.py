@@ -288,6 +288,13 @@ async def settle_composite_sale(
         tx=str(tx) if tx else None,
         settled=True,
         payer=settlement.get("payer") if isinstance(settlement, dict) else None,
+        request_input={
+            "product_id": product.product_id,
+            "topic": product.topic,
+            "sources": product.sources,
+        },
+        response_body=product.report,
+        delivery_route=f"swarm:{product.product_id}",
     )
     # Attribute realized revenue back to the sources that fed the composite.
     sources = product.sources or []

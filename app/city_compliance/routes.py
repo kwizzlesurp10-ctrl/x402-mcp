@@ -227,7 +227,13 @@ async def us_city_property_check(
             payer=payer,
         )
 
-    def _record_revenue(*, tx: str | None, payer: object) -> None:
+    def _record_revenue(
+        *,
+        tx: str | None,
+        payer: object,
+        request_input: object | None = None,
+        response_body: object | None = None,
+    ) -> None:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
@@ -238,6 +244,8 @@ async def us_city_property_check(
             product_id=pid,
             tx=tx,
             payer=payer,
+            request_input=request_input,
+            response_body=response_body,
         )
 
     return await paid_delivery.deliver_paid_city_report(

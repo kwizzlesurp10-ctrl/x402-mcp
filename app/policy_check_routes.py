@@ -281,6 +281,8 @@ async def policy_check_post(request: Request) -> JSONResponse:
             product_id=policy_check.PRODUCT_ID,
             tx=str(tx) if tx else None,
             payer=str(payer) if payer else None,
+            request_input=body.model_dump(mode="json"),
+            response_body=out,
         )
     except Exception:  # noqa: BLE001
         log.warning("policy-check revenue ledger write failed", exc_info=True)

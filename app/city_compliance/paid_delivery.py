@@ -30,7 +30,7 @@ async def deliver_paid_city_report(
     settle_payment: SettleFn,
     notify_error: Callable[..., None],
     notify_success: Callable[..., None],
-    record_revenue: Callable[..., None],
+    record_revenue: Callable[..., None],  # tx, payer, optional request_input/response_body
     log_prefix: str,
 ) -> JSONResponse:
     """Paid city property-check: never settle before upstream data succeeds."""
@@ -89,6 +89,8 @@ async def deliver_paid_city_report(
         record_revenue(
             tx=str(tx) if tx else None,
             payer=settlement.get("payer"),
+            request_input={"address": address.strip(), "city": spec.code},
+            response_body=report,
         )
     except Exception:
         log.warning("%s revenue ledger write failed", log_prefix, exc_info=True)

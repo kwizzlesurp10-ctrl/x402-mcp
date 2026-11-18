@@ -42,6 +42,7 @@ against zero views and no conversion at all.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -61,6 +62,34 @@ PRODUCT_IDS = {
     "/base/finality-check": "base-finality-check",
     "/pilot/ping": "pilot-ping",
 }
+
+# Never hold more than this in memory when capturing a paid pilot response body.
+MAX_MATERIALIZE_BYTES = 64 * 1024
+
+
+def _response_media_type(response: Any) -> str:
+    media = getattr(response, "media_type", None) or ""
+    headers = getattr(response, "headers", None) or {}
+    if not media:
+        media = headers.get("content-type", "")
+    return str(media).split(";", 1)[0].strip().lower()
+
+
+def _is_event_stream(response: Any) -> bool:
+    return _response_media_type(response) == "text/event-stream"
+
+
+def _should_capture_delivery_body(request: Any, response: Any) -> bool:
+    """Only paid pilot successes with a settlement receipt need body capture."""
+    if getattr(response, "status_code", None) != 200:
+        return False
+    if request.url.path not in PRODUCT_IDS:
+        return False
+    if not response.headers.get("PAYMENT-RESPONSE"):
+        return False
+    if _is_event_stream(response):
+        return False
+    return True
 
 
 def _configured_price(product_id: str) -> str | None:
@@ -157,6 +186,134 @@ def _record_settled_revenue(ctx: Any) -> None:
         log.warning("middleware pilot: revenue ledger write failed", exc_info=True)
 
 
+def record_middleware_delivery(
+    request: Any, response: Any, *, body_bytes: bytes | None = None
+) -> None:
+    """Persist delivery after handler returns (on_after_settle has no response body)."""
+    try:
+        if getattr(response, "status_code", None) != 200:
+            return
+        product_id = PRODUCT_IDS.get(getattr(request.url, "path", ""))
+        if not product_id:
+            return
+        import base64
+        import json as _json
+
+        from app import delivery_store
+
+        payment_hdr = response.headers.get("PAYMENT-RESPONSE", "")
+        if not payment_hdr:
+            return
+        try:
+            settlement = _json.loads(base64.b64decode(payment_hdr))
+        except Exception:
+            settlement = {}
+        tx = settlement.get("transaction") or settlement.get("txHash")
+        if not tx:
+            return
+        raw = body_bytes if body_bytes is not None else (getattr(response, "body", b"") or b"")
+        try:
+            response_body = _json.loads(raw)
+        except Exception:
+            response_body = raw.decode("utf-8", errors="replace")
+        amount = _settled_amount_usdc(
+            SimpleNamespace(
+                success=True,
+                amount=settlement.get("amount"),
+                network=settlement.get("network"),
+                payer=settlement.get("payer"),
+                transaction=tx,
+            ),
+            SimpleNamespace(network=settlement.get("network"), asset=None),
+            product_id,
+        )
+        if amount is None:
+            return
+        delivery_store.try_record_delivery(
+            tx=str(tx),
+            route=request.url.path,
+            product_id=product_id,
+            amount_usdc=amount,
+            payer=str(settlement.get("payer") or "") or None,
+            request_input=dict(getattr(request, "query_params", {}) or {}),
+            response_body=response_body,
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("middleware pilot: delivery record failed", exc_info=True)
+
+
+def _chunk_as_bytes(chunk: Any) -> bytes:
+    if isinstance(chunk, str):
+        return chunk.encode("utf-8")
+    if isinstance(chunk, (bytes, bytearray)):
+        return bytes(chunk)
+    return bytes(chunk)
+
+
+async def _materialize_response(
+    response: Any,
+    *,
+    max_bytes: int = MAX_MATERIALIZE_BYTES,
+) -> tuple[Any, bytes | None]:
+    """Buffer a small streaming pilot response; tee to the client if over the cap."""
+    iterator = getattr(response, "body_iterator", None)
+    if iterator is None:
+        return response, None
+
+    from starlette.responses import Response as StarletteResponse, StreamingResponse
+
+    chunks: list[bytes] = []
+    total = 0
+    over_cap = False
+
+    async def _drain() -> list[bytes]:
+        nonlocal total, over_cap
+        rest: list[bytes] = []
+        async for chunk in iterator:
+            data = _chunk_as_bytes(chunk)
+            if not over_cap:
+                chunks.append(data)
+                total += len(data)
+                if total > max_bytes:
+                    over_cap = True
+            else:
+                rest.append(data)
+        return rest
+
+    trailing = await _drain()
+    if not over_cap:
+        body = b"".join(chunks)
+        wrapped = StarletteResponse(
+            content=body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+            background=response.background,
+        )
+        return wrapped, body
+
+    log.warning(
+        "middleware pilot: response exceeded %d bytes; delivery body truncated",
+        max_bytes,
+    )
+    captured = b"".join(chunks)[:max_bytes]
+
+    async def _tee() -> Any:
+        for part in chunks:
+            yield part
+        for part in trailing:
+            yield part
+
+    wrapped = StreamingResponse(
+        _tee(),
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+        background=response.background,
+    )
+    return wrapped, captured
+
+
 def record_402_challenge(request: Any, status_code: int) -> None:
     """Count a 402 served for one of the two gated routes. Never raises.
 
@@ -225,6 +382,9 @@ def instrumented_middleware_class() -> type:
         async def dispatch(self, request, call_next):  # type: ignore[override]
             response = await super().dispatch(request, call_next)
             record_402_challenge(request, response.status_code)
+            if _should_capture_delivery_body(request, response):
+                response, body = await _materialize_response(response)
+                record_middleware_delivery(request, response, body_bytes=body)
             return response
 
     return _InstrumentedPaymentMiddleware
