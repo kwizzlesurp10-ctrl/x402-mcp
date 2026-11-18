@@ -23,8 +23,13 @@ permissions:
   issues: write
 
 jobs:
+  pick-runner:
+    uses: ./.github/workflows/runner-pick.yml
+    secrets: inherit
+
   watch:
-    runs-on: [self-hosted, linux, x64]
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     timeout-minutes: 6
     env:
       BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}

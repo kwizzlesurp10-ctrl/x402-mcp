@@ -1,0 +1,84 @@
+# Reusable job: prefer repo self-hosted runners when at least one is connected;
+# otherwise emit ubuntu-latest so alert workflows still run.
+#
+# Call as the first job, then:
+#   runs-on: ${{ fromJSON(needs.<pick-job-id>.outputs.runner) }}
+name: Pick runner
+
+on:
+  workflow_call:
+    inputs:
+      self_hosted_labels:
+        description: JSON array of runs-on labels when self-hosted is available
+        type: string
+        default: '["self-hosted","linux","x64"]'
+      hosted_label:
+        description: runs-on label when no self-hosted runner is online
+        type: string
+        default: ubuntu-latest
+      require_self_hosted:
+        description: When true, never fall back (output self_hosted_labels even if offline)
+        type: boolean
+        default: false
+    outputs:
+      runner:
+        description: JSON array suitable for runs-on via fromJSON()
+        value: ${{ jobs.pick.outputs.runner }}
+      used_fallback:
+        description: "true when the hosted label was chosen because no runner was online"
+        value: ${{ jobs.pick.outputs.used_fallback }}
+    secrets:
+      RUNNER_STATUS_TOKEN:
+        description: Optional PAT to list self-hosted runners (repo Administration read)
+        required: false
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+      used_fallback: ${{ steps.pick.outputs.used_fallback }}
+    steps:
+      - name: Choose runner
+        id: pick
+        env:
+          SELF_HOSTED: ${{ inputs.self_hosted_labels }}
+          HOSTED: ${{ inputs.hosted_label }}
+          REQUIRE_SELF: ${{ inputs.require_self_hosted }}
+          RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          used_fallback=false
+          runner="$SELF_HOSTED"
+
+          if [ "$REQUIRE_SELF" = "true" ]; then
+            echo "require_self_hosted=true — always using self-hosted labels"
+          else
+            token="${RUNNER_STATUS_TOKEN:-${{ github.token }}}"
+            api="https://api.github.com/repos/${{ github.repository }}/actions/runners?per_page=100"
+            body="$(mktemp)"
+            code="$(curl -sS -o "$body" -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$api" || echo "000")"
+
+            if [ "$code" != "200" ]; then
+              echo "::warning::GET /actions/runners returned HTTP ${code}; using ${HOSTED} (add secret RUNNER_STATUS_TOKEN with repo Administration read if this persists)."
+              runner=$(jq -n --arg x "$HOSTED" '[$x]')
+              used_fallback=true
+            else
+              online="$(jq '[.runners[] | select(.status == "online" or .status == "busy") | select([.labels[].name] | index("self-hosted"))] | length' < "$body")"
+              echo "self-hosted runners online or busy: ${online}"
+              if [ "${online:-0}" -lt 1 ]; then
+                runner=$(jq -n --arg x "$HOSTED" '[$x]')
+                used_fallback=true
+              fi
+            fi
+            rm -f "$body"
+          fi
+
+          echo "runner=${runner}" >> "$GITHUB_OUTPUT"
+          echo "used_fallback=${used_fallback}" >> "$GITHUB_OUTPUT"
+          echo "selected runs-on: ${runner} (used_fallback=${used_fallback})"
