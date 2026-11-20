@@ -1,7 +1,7 @@
 {
-  "$schema": "https://modelcontextprotocol.io/schemas/2026-07-28/server.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.kwizzlesurp10-ctrl/x402-mcp",
-  "description": "Live Base Mainnet USDC ($0.01) x402 micropayment gateway for 14 municipal housing & property compliance endpoints.",
+  "description": "Base mainnet x402 ($0.01 USDC) MCP gateway for 14+ US city housing & property compliance checks.",
   "version": "1.2.0",
   "repository": {
     "url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp",
