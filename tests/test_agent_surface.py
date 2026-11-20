@@ -422,3 +422,13 @@ def test_llms_txt_points_at_direct_mcp_not_smithery() -> None:
     assert "smithery.ai" not in text
     assert "run.tools" not in text
     assert "/mcp" in text.splitlines()[2]
+
+
+def test_well_known_x402_trust_txt() -> None:
+    response = client.get("/.well-known/x402-trust.txt")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert (
+        response.text.strip()
+        == "x402-trust-verification=v1:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED_SXABnyL3_8nO1W_OsGPFjvKwfqyT3rOKfV93d5NS_uTyl8k9H9Xlfz7i3mnfYKyXZbuNMMtdMc-36uT4Y8YA"
+    )

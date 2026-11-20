@@ -811,6 +811,15 @@ async def well_known_ai_plugin_json() -> dict:
     return agent_surface.ai_plugin_json()
 
 
+@app.get("/.well-known/x402-trust.txt", response_class=PlainTextResponse)
+async def well_known_x402_trust_txt() -> str:
+    """Domain ownership proof for x402-trust.com provider verification."""
+    return (
+        "x402-trust-verification=v1:"
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED_SXABnyL3_8nO1W_OsGPFjvKwfqyT3rOKfV93d5NS_uTyl8k9H9Xlfz7i3mnfYKyXZbuNMMtdMc-36uT4Y8YA\n"
+    )
+
+
 @app.get("/llms.txt", response_class=PlainTextResponse)
 async def llms_txt() -> str:
     """Agent-facing docs: endpoints, prices, and the failure modes that matter."""
