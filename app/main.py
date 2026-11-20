@@ -2284,11 +2284,10 @@ class McpBarePathAliasMiddleware:
     """Serve MCP Streamable HTTP at /mcp as well as the canonical /mcp/mcp.
 
     The transport is mounted at /mcp with FastMCP's own route at /mcp, so the
-    endpoint is /mcp/mcp. A client or gateway configured with the conventional
-    https://host/mcp got 307 -> /mcp/ -> 404 "Not Found" (Starlette's
-    trailing-slash redirect into a mount with no root route). Rewrite /mcp and
-    /mcp/ to /mcp/mcp for MCP traffic. A plain browser GET (no SSE Accept) is left
-    alone.
+    endpoint is /mcp/mcp. Rewrite /mcp and /mcp/ to /mcp/mcp for MCP traffic
+    (POST/DELETE or SSE GET with Accept: text/event-stream). For a plain browser
+    or crawler GET (no SSE Accept), return the JSON MCP manifest (200 OK)
+    instead of Starlette's 307 -> /mcp/ -> 404 "Not Found".
     """
 
     _ALIASES = ("/mcp", "/mcp/")
@@ -2306,6 +2305,10 @@ class McpBarePathAliasMiddleware:
                     break
             if method != "GET" or b"text/event-stream" in accept:
                 scope = {**scope, "path": "/mcp/mcp", "raw_path": b"/mcp/mcp"}
+            else:
+                response = JSONResponse(build_mcp_manifest())
+                await response(scope, receive, send)
+                return
         await self.app(scope, receive, send)
 
 

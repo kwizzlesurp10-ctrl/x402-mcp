@@ -84,5 +84,8 @@ def test_unknown_origin_still_rejected(client) -> None:
 
 
 def test_plain_browser_get_on_bare_mcp_is_not_rewritten(client) -> None:
-    r = client.get("/mcp", headers={"Accept": "text/html"}, follow_redirects=False)
-    assert r.status_code != 200 or "text/event-stream" not in r.headers.get("content-type", "")
+    for path in ("/mcp", "/mcp/"):
+        r = client.get(path, headers={"Accept": "text/html"}, follow_redirects=False)
+        assert r.status_code == 200
+        assert "application/json" in r.headers.get("content-type", "")
+        assert "text/event-stream" not in r.headers.get("content-type", "")
