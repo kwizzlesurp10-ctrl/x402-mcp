@@ -19,8 +19,13 @@ permissions:
   pull-requests: read
 
 jobs:
+  pick-runner:
+    uses: ./.github/workflows/runner-pick.yml
+    secrets: inherit
+
   classify:
-    runs-on: [self-hosted, linux, x64]
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     outputs:
       mutation: ${{ steps.guard.outputs.mutation }}
       summary: ${{ steps.guard.outputs.summary }}
@@ -66,9 +71,9 @@ jobs:
           PY
 
   notify:
-    needs: classify
+    needs: [pick-runner, classify]
     if: needs.classify.outputs.mutation == 'true'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,24 +147,24 @@ jobs:
           PY
 
   add-only-ok:
-    needs: classify
+    needs: [pick-runner, classify]
     if: needs.classify.outputs.mutation != 'true'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     steps:
       - run: echo "add-only ok — no existing files mutated"
 
   operator-approve:
-    needs: classify
+    needs: [pick-runner, classify]
     if: needs.classify.outputs.mutation == 'true'
     environment: operator-approve
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     steps:
       - run: echo "operator clicked Approve on environment operator-approve"
 
   change-control:
-    needs: [classify, add-only-ok, operator-approve]
+    needs: [pick-runner, classify, add-only-ok, operator-approve]
     if: always() && needs.classify.result == 'success'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     steps:
       - name: Require add-only path or operator click
         run: |

@@ -1,5 +1,10 @@
 name: ci
 
+# Stays on self-hosted only: every push/PR would burn ~10–15 hosted minutes per
+# run (pytest + two pnpm installs + vitest + desktop build). When the runner is
+# offline, CI queues until it returns — use workflow_dispatch on the watch
+# workflows (they fall back to ubuntu-latest) for alerts.
+
 on:
   push:
   pull_request:
