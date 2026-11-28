@@ -987,7 +987,10 @@ async def get_us_city_property_sample(
     city_code: Desc[
         str,
         Field(
-            description="City code from city.list. Examples: 'mn', 'sea', 'nyc', 'chi'."
+            description=(
+                "City code from city.list (or 'test' for sandbox). "
+                "Examples: 'mn', 'sea', 'nyc', 'chi', 'test'."
+            )
         ),
     ],
     agent_id: Desc[
@@ -1164,7 +1167,7 @@ async def mailrail_status(
                 "admin_recipient": settings.mailrail_admin_recipient,
                 "has_api_key": bool(settings.mailrail_api_key),
                 "has_webhook": bool(settings.mailrail_webhook_url),
-                "has_smtp": bool(settings.mailrail_smtp_url),
+                "has_smtp": False,
             }
         ),
     )

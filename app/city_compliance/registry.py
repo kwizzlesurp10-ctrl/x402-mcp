@@ -25,6 +25,7 @@ from app.city_compliance.cities import (
     sd,
     sea,
     sf,
+    test_city,
 )
 from app.city_compliance.models import CitySpec
 
@@ -49,6 +50,7 @@ _MODULES: tuple[ModuleType, ...] = (
     mia,  # Miami, FL
     atl,  # Atlanta, GA
     sd,  # San Diego, CA
+    test_city,  # Test Sandbox City (synthetic fixture)
 )
 
 CITIES: dict[str, ModuleType] = {m.SPEC.code: m for m in _MODULES}

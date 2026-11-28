@@ -27,15 +27,24 @@ def test_postmaster_is_the_only_default_mailrail_agent() -> None:
     assert refused["error"]["code"] == "forbidden"
 
 
-def test_agent_card_is_not_public_and_names_notify_email() -> None:
+def test_agent_card_is_not_public_and_omits_operator_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "contact_email", "ops-secret@x402.test")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "admin-secret@x402.test")
     card = agent_card()
+    blob = json.dumps(card)
     assert card["id"] == AGENT_ID
     assert card["public"] is False
     assert card["sole_responsibility"] == "mailrail"
-    assert card["notify"]["email"] in {settings.contact_email, "kwizzlesurp10@gmail.com"}
+    assert "email" not in card["notify"]
+    assert "ops-secret@x402.test" not in blob
+    assert "admin-secret@x402.test" not in blob
 
 
-def test_public_agent_card_route() -> None:
+def test_public_agent_card_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "contact_email", "ops-secret@x402.test")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "admin-secret@x402.test")
     client = TestClient(app)
     res = client.get("/agent/mailrail")
     assert res.status_code == 200
@@ -43,6 +52,8 @@ def test_public_agent_card_route() -> None:
     assert body["id"] == AGENT_ID
     assert "inbound" in body["endpoints"]
     assert "OPERATOR_TOKEN" in str(body["auth"])
+    assert "ops-secret@x402.test" not in res.text
+    assert "admin-secret@x402.test" not in res.text
 
 
 def test_wrong_agent_id_is_403(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,3 +132,41 @@ def test_notify_operator_github_when_token_set(monkeypatch: pytest.MonkeyPatch) 
     out = ma.notify_operator("MailRail test", "body", event_id="n1", already_emailed=True)
     assert out["channels"]["github"]["ok"] is True
     assert out["channels"]["github"]["number"] == 1
+
+
+@pytest.mark.parametrize("status_code", [403, 422])
+def test_notify_operator_retries_github_without_labels(
+    status_code: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.mailrail_agent as ma
+
+    monkeypatch.setattr(settings, "github_token", "ghs_test")
+    monkeypatch.setattr(settings, "github_repo", "kwizzlesurp10-ctrl/x402-mcp")
+    posts: list[dict] = []
+
+    class _Resp:
+        def __init__(self, code: int) -> None:
+            self.status_code = code
+            self.text = "label denied"
+
+        def json(self) -> dict:
+            return {
+                "html_url": "https://github.com/kwizzlesurp10-ctrl/x402-mcp/issues/9",
+                "number": 9,
+            }
+
+    def fake_post(url, **kwargs):
+        assert "issues" in url
+        payload = kwargs["json"]
+        posts.append(payload)
+        if "labels" in payload:
+            return _Resp(status_code)
+        return _Resp(201)
+
+    monkeypatch.setattr(ma.httpx, "post", fake_post)
+    out = ma.notify_operator("MailRail test", "body", event_id="n-retry", already_emailed=True)
+    assert out["channels"]["github"]["ok"] is True
+    assert out["channels"]["github"]["number"] == 9
+    assert len(posts) == 2
+    assert posts[0]["labels"] == ["mailrail"]
+    assert "labels" not in posts[1]

@@ -41,6 +41,17 @@ async def test_get_us_city_property_sample_unknown_city() -> None:
     data = await city_mcp.get_us_city_property_sample("not-a-city")
     assert data["error"] == "unknown_city"
     assert "mn" in data["known"]
+    assert "test" in data["known"]
+
+
+@pytest.mark.asyncio
+async def test_get_us_city_property_sample_test_sandbox_city() -> None:
+    data = await city_mcp.get_us_city_property_sample("test")
+    assert data["sample"] is True
+    assert data["city"] == "test"
+    assert data["report"]["compliance_verdict"] == "licensed_clean"
+    assert data["report"]["registered"] is True
+    assert data["sample_address"] == "123 Test St"
 
 
 @pytest.mark.asyncio
