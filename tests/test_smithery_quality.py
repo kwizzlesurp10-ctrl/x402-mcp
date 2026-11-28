@@ -69,9 +69,13 @@ def test_server_card_has_annotations_and_param_descriptions() -> None:
         props = (tool.get("inputSchema") or {}).get("properties") or {}
         for pname, spec in props.items():
             assert spec.get("description"), f"{tool['name']}.{pname}"
-        # city.check / x402.policy_check are unstructured (PaymentRequired CallToolResult
-        # bypasses {result: str} schema).
-        if tool["name"] not in ("city.check", "x402.policy_check"):
+        # Payment tools return CallToolResult — not {result: str} outputSchema.
+        if tool["name"] not in (
+            "city.check",
+            "x402.policy_check",
+            "commerce.activate_pro",
+            "commerce.purchase_credits",
+        ):
             assert "outputSchema" in tool, tool["name"]
     prompt_names = {p["name"] for p in data["prompts"]}
     assert "x402.sell_api" in prompt_names

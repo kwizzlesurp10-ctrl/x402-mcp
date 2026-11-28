@@ -67,13 +67,11 @@ def test_finality_check_402_carries_bazaar_discovery_extension() -> None:
     assert "bazaar" in decoded.get("extensions", {})
 
 
-def test_malformed_tx_is_still_gated_before_route_validation_runs() -> None:
-    """Payment gating happens at the ASGI layer, before FastAPI's own query
-    validation -- an unpaid request with a bad `tx` still gets the 402
-    challenge, not a 422. The 422-without-charge property is enforced later,
-    inside call_next, once a payment has actually been verified."""
+def test_malformed_tx_unpaid_still_returns_402_with_hint() -> None:
+    """Discovery crawlers must receive 402 even when `tx` is malformed."""
     response = client.get("/base/finality-check", params={"tx": "not-a-hash"})
     assert response.status_code == 402
+    assert response.headers.get("PAYMENT-REQUIRED")
 
 
 def test_mn_property_check_still_uses_its_own_hand_rolled_path() -> None:
@@ -399,6 +397,68 @@ def test_unrelated_402s_are_not_attributed_to_these_routes() -> None:
 
     assert "base-finality-check" not in demand.challenges()
     assert "pilot-ping" not in demand.challenges()
+
+
+@pytest.mark.anyio
+async def test_events_sse_not_materialized(monkeypatch) -> None:
+    """GET /events must stream; pilot middleware must not drain body_iterator."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from app.main import tool_events
+    from app.ops_events import emit_tool_event
+
+    emit_tool_event("sse-buffer-probe", "agent-sse-probe", {"agent_id": "agent-sse-probe"})
+
+    async def forbid_materialize(*_a, **_k):
+        raise AssertionError("must not buffer /events")
+
+    monkeypatch.setattr(x402_middleware_pilot, "_materialize_response", forbid_materialize)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/events",
+        "headers": [],
+        "query_string": b"",
+    }
+    req = Request(scope)
+    resp = await tool_events(req)
+    assert x402_middleware_pilot._is_event_stream(resp)
+    assert x402_middleware_pilot._should_capture_delivery_body(req, resp) is False
+
+    if x402_middleware_pilot._should_capture_delivery_body(req, resp):
+        await forbid_materialize(resp)
+
+    chunk = await asyncio.wait_for(resp.body_iterator.__anext__(), timeout=2)
+    await resp.body_iterator.aclose()
+    text = chunk.decode() if isinstance(chunk, bytes) else chunk
+    assert "data:" in text or "heartbeat" in text.lower() or text.strip()
+
+
+@pytest.mark.anyio
+async def test_paid_pilot_path_invokes_materialize(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    from starlette.responses import JSONResponse
+
+    calls: list[str] = []
+
+    async def fake_mat(resp, **_k):
+        calls.append("mat")
+        return resp, b'{"ok":true}'
+
+    monkeypatch.setattr(x402_middleware_pilot, "_materialize_response", fake_mat)
+
+    req = MagicMock()
+    req.url.path = "/pilot/ping"
+    resp = JSONResponse({"ok": True}, status_code=200)
+    resp.headers["PAYMENT-RESPONSE"] = "settled"
+
+    if x402_middleware_pilot._should_capture_delivery_body(req, resp):
+        await x402_middleware_pilot._materialize_response(resp)
+    assert calls == ["mat"]
 
 
 def test_the_funnel_joins_end_to_end(ledger) -> None:

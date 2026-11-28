@@ -786,6 +786,9 @@ async def handle_policy_check_mcp_tool(
             product_id=pc.PRODUCT_ID,
             tx=str(tx) if tx else None,
             payer=str(st.get("payer") or "") or None,
+            request_input=body.model_dump(mode="json"),
+            response_body=data,
+            delivery_route="mcp:x402.policy_check",
         )
     except Exception:  # noqa: BLE001
         logger.warning("policy_check MCP revenue ledger write failed", exc_info=True)

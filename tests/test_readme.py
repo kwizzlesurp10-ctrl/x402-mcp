@@ -63,13 +63,21 @@ def test_readme_has_no_smithery_install_paths() -> None:
 
 
 def test_readme_24klabs_badge_present() -> None:
-    """Verify the 24K Labs listing badge is present."""
+    """Verify 24K Labs compact badge, verdict card, and fuchss trust badge."""
     text = README.read_text(encoding="utf-8")
     assert "https://24klabs.ai/listing/us-city-open-data-compliance-network" in text
     assert (
         "https://24klabs.ai/badge.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"
         in text
     )
+    assert (
+        'src="https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402"'
+        in text
+    )
+    assert "## Listed on" in text
+    assert "US City Open-Data Compliance Network on the 24K Labs curated list" in text
+    assert "x402.fuchss.app/badge.svg" in text
+    assert "x402.fuchss.app/endpoint" in text
 
 
 def test_readme_quickstart_direct_connect() -> None:

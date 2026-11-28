@@ -299,6 +299,11 @@ app.add_middleware(
     ],
 )
 
+from app.discovery_cors import DiscoveryCorsMiddleware
+
+# Outermost: public discovery ACAO * before the strict origin allowlist below.
+app.add_middleware(DiscoveryCorsMiddleware)
+
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "[::1]", "::1")
 
 
@@ -340,12 +345,14 @@ from app.policy_check_routes import router as policy_check_router  # noqa: E402
 from app.property_due_diligence_routes import (  # noqa: E402
     router as property_due_diligence_router,
 )
+from app.delivery_admin import router as delivery_admin_router  # noqa: E402
 
 x402_middleware_pilot.register(app)
 app.include_router(city_compliance_router)
 app.include_router(diligence_router)
 app.include_router(policy_check_router)
 app.include_router(property_due_diligence_router)
+app.include_router(delivery_admin_router)
 
 
 def _public_openapi() -> dict:
@@ -634,9 +641,9 @@ _MISSION_CONTROL_HEADERS = {
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)
 async def root(request: Request) -> HTMLResponse:
-    """Serve the React Mission Control Dashboard."""
+    """Public A2A marketplace. The operator SPA stays on /dashboard."""
     return HTMLResponse(
-        _mission_control_html(),
+        _marketplace_html(),
         headers=_MISSION_CONTROL_HEADERS,
     )
 
@@ -667,7 +674,16 @@ async def favicon() -> Response:
 # (Docker multi-stage or local `pnpm build` + copy). Falls back to the legacy
 # single-file terminal if the SPA bundle is missing (e.g. partial checkouts).
 _MC_DIST = Path(__file__).resolve().parent / "static" / "mission_control"
+_MARKETPLACE_HTML = Path(__file__).resolve().parent / "static" / "a2a_marketplace" / "index.html"
 _BASE_APP_ID_META = '<meta name="base:app_id" content="6a7018e2a8c4f2b6db3b3e71" />'
+
+
+def _marketplace_html() -> str:
+    """Static marketplace for GET /. The Docker SPA copy only replaces mission_control/."""
+    html = _MARKETPLACE_HTML.read_text(encoding="utf-8")
+    if "base:app_id" not in html:
+        html = html.replace("<head>", f"<head>\n{_BASE_APP_ID_META}", 1)
+    return html
 
 
 # The operator token is NEVER rendered into a public page. The legacy terminal
@@ -809,12 +825,33 @@ async def well_known_ai_plugin_json() -> dict:
     return agent_surface.ai_plugin_json()
 
 
+@app.get("/.well-known/x402-trust.txt", response_class=PlainTextResponse)
+async def well_known_x402_trust_txt() -> str:
+    """Domain ownership proof for x402-trust.com provider verification."""
+    return (
+        "x402-trust-verification=v1:"
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED_SXABnyL3_8nO1W_OsGPFjvKwfqyT3rOKfV93d5NS_uTyl8k9H9Xlfz7i3mnfYKyXZbuNMMtdMc-36uT4Y8YA\n"
+    )
+
+
 @app.get("/llms.txt", response_class=PlainTextResponse)
 async def llms_txt() -> str:
     """Agent-facing docs: endpoints, prices, and the failure modes that matter."""
     from app import agent_surface
 
     return agent_surface.llms_txt()
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt() -> str:
+    """Allow crawlers on machine-readable discovery surfaces."""
+    return (
+        "User-agent: *\n"
+        "Allow: /.well-known/\n"
+        "Allow: /openapi.json\n"
+        "Allow: /llms.txt\n"
+        "Allow: /us/cities\n"
+    )
 
 
 from datetime import datetime, timedelta
@@ -1157,8 +1194,8 @@ async def probe_url(
 
 
 @app.get("/a2a")
-async def a2a_agent_card() -> dict:
-    """A2A discovery: GET returns the Agent Card so buyers can resolve /a2a without guessing .well-known."""
+async def a2a_get_agent_card() -> dict:
+    """GET /a2a returns the Agent Card so A2A clients can discover without guessing /.well-known/."""
     from app import agent_surface
 
     return agent_surface.agent_card()
@@ -1651,11 +1688,11 @@ async def mn_property_check_sample() -> JSONResponse:
 
     from app.city_compliance import agentmail, registry
 
+    from app.city_compliance import publish
+
     mn_spec = registry.get_city("mn").SPEC
     try:
         raw = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
-        from app.city_compliance import publish
-
         report = publish.prepare_city_report(
             raw,
             spec=mn_spec,
@@ -1672,13 +1709,12 @@ async def mn_property_check_sample() -> JSONResponse:
             address=mn_compliance.SAMPLE_ADDRESS,
             detail="upstream_open_data_unavailable",
         )
-        return JSONResponse(
-            status_code=502,
-            content={
-                "error": "upstream_open_data_unavailable",
-                "city": "mn",
-                "detail": "city open-data source timed out or refused; retry shortly",
-            },
+        from app.city_compliance import degraded
+
+        report = publish.prepare_city_report(
+            degraded.upstream_unavailable_report(mn_spec, mn_compliance.SAMPLE_ADDRESS),
+            spec=mn_spec,
+            address_fallback=mn_compliance.SAMPLE_ADDRESS,
         )
     agentmail.notify_city_call(
         "sample",
@@ -1751,24 +1787,30 @@ async def mn_property_check(
         )
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        from app.unpaid_validation import input_hint_address
+
+        base = settings.public_base_url.rstrip("/")
+        content: dict[str, object] = {
+            "error": "payment_required",
+            "resource": mn_compliance.resource_url(),
+            "price": settings.mn_property_check_price,
+            "network": settings.x402_default_network,
+            "description": mn_compliance.RESOURCE_DESCRIPTION,
+            "sample_url": f"{base}/mn/property-check/sample",
+            "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
+            "requirements are in the PAYMENT-REQUIRED response header. "
+            "Free fixed-address sample (no payment): GET /mn/property-check/sample.",
+        }
+        hint = input_hint_address(address)
+        if hint:
+            content.update(hint)
         log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
         if not demand.is_self_traffic(request.headers):
             demand.record_challenge("mn-property-check", request.headers.get("user-agent"))
-        base = settings.public_base_url.rstrip("/")
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_required",
-                "resource": mn_compliance.resource_url(),
-                "price": settings.mn_property_check_price,
-                "network": settings.x402_default_network,
-                "description": mn_compliance.RESOURCE_DESCRIPTION,
-                "sample_url": f"{base}/mn/property-check/sample",
-                "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
-                "requirements are in the PAYMENT-REQUIRED response header. "
-                "Free fixed-address sample (no payment): GET /mn/property-check/sample.",
-            },
+            content=content,
         )
 
     # Paid caller: validate before spending their money, never after.
@@ -1778,85 +1820,53 @@ async def mn_property_check(
             content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
         )
 
-    result = await mn_compliance.verify_and_settle(signature, payment_required)
-    if not result["is_valid"] or not result["payment_settled"]:
-        log.warning("mn/property-check payment invalid", extra={"address": address, "status_code": 402})
-        return JSONResponse(
-            status_code=402,
-            headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_invalid",
-                "invalid_reason": result.get("invalid_reason"),
-                "settlement_error": result.get("settlement_error"),
-            },
-        )
-
-    from app.city_compliance import agentmail, publish, registry
+    from app.city_compliance import agentmail, paid_delivery, registry
 
     mn_spec = registry.get_city("mn").SPEC
-    try:
-        raw = await mn_compliance.check_property(address)
-        report = publish.prepare_city_report(
-            raw,
-            spec=mn_spec,
-            address_fallback=address.strip(),
-        )
-    except Exception:
-        log.warning("mn/property-check join failed after settle", exc_info=True)
-        settlement = result.get("settlement") or {}
-        tx = settlement.get("transaction") or settlement.get("txHash")
-        mn_spec = registry.get_city("mn").SPEC
+    mn_mod = registry.get_city("mn")
+    addr = address.strip()
+
+    def _notify_error(*, paid: bool, detail: str) -> None:
         agentmail.notify_city_call(
             "error",
             city_code="mn",
             city_name=mn_spec.name,
             state=mn_spec.state,
             channel="http",
-            address=address.strip(),
+            address=addr,
             price=settings.mn_property_check_price,
+            paid=paid,
+            detail=detail,
+        )
+
+    def _notify_success(*, report: dict, tx: str | None, payer: str | None) -> None:
+        latency = round((time.monotonic() - t0) * 1000)
+        log.info(
+            "mn/property-check settled",
+            extra={"address": address, "status_code": 200, "latency_ms": latency},
+        )
+        agentmail.notify_city_call(
+            "paid_settle",
+            city_code="mn",
+            city_name=mn_spec.name,
+            state=mn_spec.state,
+            channel="http",
+            address=addr,
+            price=settings.mn_property_check_price,
+            verdict=agentmail.verdict_from_report(report),
             paid=True,
-            tx_hash=str(tx) if tx else None,
-            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-            detail="upstream_open_data_unavailable",
-        )
-        import base64
-        import json as _json
-
-        receipt = base64.b64encode(_json.dumps(settlement).encode()).decode()
-        return JSONResponse(
-            status_code=502,
-            headers={"PAYMENT-RESPONSE": receipt},
-            content={
-                "error": "upstream_open_data_unavailable",
-                "city": "mn",
-                "detail": (
-                    "Payment settled but Minneapolis open-data join failed; "
-                    "retry this address shortly or contact support with PAYMENT-RESPONSE."
-                ),
-                "payment_settled": True,
-            },
+            tx_hash=tx,
+            payer=payer,
+            detail="canonical /mn/property-check",
         )
 
-    latency = round((time.monotonic() - t0) * 1000)
-    log.info("mn/property-check settled", extra={"address": address, "status_code": 200, "latency_ms": latency})
-
-    settlement = result.get("settlement") or {}
-    tx = settlement.get("transaction") or settlement.get("txHash")
-    agentmail.notify_city_call(
-        "paid_settle",
-        city_code="mn",
-        city_name=mn_spec.name,
-        state=mn_spec.state,
-        channel="http",
-        address=address.strip(),
-        price=settings.mn_property_check_price,
-        verdict=agentmail.verdict_from_report(report),
-        paid=True,
-        tx_hash=str(tx) if tx else None,
-        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-        detail="canonical /mn/property-check",
-    )
-    try:
+    def _record_revenue(
+        *,
+        tx: str | None,
+        payer: object,
+        request_input: object | None = None,
+        response_body: object | None = None,
+    ) -> None:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
@@ -1865,17 +1875,27 @@ async def mn_property_check(
             amount_usdc=parse_price_usdc(settings.mn_property_check_price),
             network=settings.x402_default_network,
             product_id="mn-property-check",
-            tx=str(tx) if tx else None,
-            payer=settlement.get("payer"),
+            tx=tx,
+            payer=payer,
+            request_input=request_input,
+            response_body=response_body,
         )
-    except Exception:  # ledger write must never break paid delivery
-        log.warning("mn/property-check revenue ledger write failed", exc_info=True)
 
-    import base64
-    import json as _json
-
-    receipt = base64.b64encode(_json.dumps(result["settlement"]).encode()).decode()
-    return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
+    return await paid_delivery.deliver_paid_city_report(
+        signature=signature,
+        payment_required=payment_required,
+        mod=mn_mod,
+        spec=mn_spec,
+        address=addr,
+        product_id="mn-property-check",
+        price=settings.mn_property_check_price,
+        verify_payment=mn_compliance.verify_payment,
+        settle_payment=mn_compliance.settle_payment,
+        notify_error=_notify_error,
+        notify_success=_notify_success,
+        record_revenue=_record_revenue,
+        log_prefix="mn/property-check",
+    )
 
 
 @app.get("/base/tx-decision")
@@ -1985,6 +2005,8 @@ async def base_tx_decision(
             product_id="base-tx-decision",
             tx=str(tx) if tx else None,
             payer=settlement.get("payer"),
+            request_input={"gas": gas, "urgency": urgency},
+            response_body=decision,
         )
     except Exception:  # ledger write must never break paid delivery
         log.warning("base/tx-decision revenue ledger write failed", exc_info=True)
@@ -2146,22 +2168,6 @@ async def demo_paid_resource(request: Request) -> JSONResponse:
     settlement = result.get("settlement") or {}
     paid_ok = result.get("payment_settled") is True
 
-    if paid_ok:
-        try:
-            from app.swarm import ledger_writer
-            from app.swarm.publisher import parse_price_usdc
-
-            ledger_writer.record_revenue(
-                agent_id="seller-demo",
-                amount_usdc=parse_price_usdc(built["price"]),
-                network=built["network"],
-                product_id="seller-demo",
-                tx=settlement.get("transaction") or settlement.get("txHash"),
-                payer=settlement.get("payer"),
-            )
-        except Exception:
-            log.warning("demo/paid revenue ledger write failed", exc_info=True)
-
     headers: dict[str, str] = {}
     if paid_ok and settlement:
         try:
@@ -2175,23 +2181,39 @@ async def demo_paid_resource(request: Request) -> JSONResponse:
         except Exception:
             pass
 
-    return JSONResponse(
-        status_code=200 if paid_ok else 402,
-        content={
-            "ok": paid_ok,
-            "message": "Payment settled — seller demo payload unlocked"
-            if paid_ok
-            else "Verified but settlement failed",
-            "secret": "x402-seller-demo-ok" if paid_ok else None,
-            "seller_pay_to": built["pay_to"],
-            "price": built["price"],
-            "network": built["network"],
-            "payment_settled": paid_ok,
-            "settlement": settlement,
-            "settlement_error": result.get("settlement_error"),
-        },
-        headers=headers,
-    )
+    demo_content = {
+        "ok": paid_ok,
+        "message": "Payment settled — seller demo payload unlocked"
+        if paid_ok
+        else "Verified but settlement failed",
+        "secret": "x402-seller-demo-ok" if paid_ok else None,
+        "seller_pay_to": built["pay_to"],
+        "price": built["price"],
+        "network": built["network"],
+        "payment_settled": paid_ok,
+        "settlement": settlement,
+        "settlement_error": result.get("settlement_error"),
+    }
+    if paid_ok:
+        try:
+            from app.swarm import ledger_writer
+            from app.swarm.publisher import parse_price_usdc
+
+            ledger_writer.record_revenue(
+                agent_id="seller-demo",
+                amount_usdc=parse_price_usdc(built["price"]),
+                network=built["network"],
+                product_id="seller-demo",
+                tx=settlement.get("transaction") or settlement.get("txHash"),
+                payer=settlement.get("payer"),
+                request_input={},
+                response_body=demo_content,
+                delivery_route="/demo/paid",
+            )
+        except Exception:
+            log.warning("demo/paid revenue/delivery ledger write failed", exc_info=True)
+
+    return JSONResponse(status_code=200 if paid_ok else 402, content=demo_content, headers=headers)
 
 
 @app.get("/demo/paid/info")
@@ -2284,11 +2306,10 @@ class McpBarePathAliasMiddleware:
     """Serve MCP Streamable HTTP at /mcp as well as the canonical /mcp/mcp.
 
     The transport is mounted at /mcp with FastMCP's own route at /mcp, so the
-    endpoint is /mcp/mcp. A client or gateway configured with the conventional
-    https://host/mcp got 307 -> /mcp/ -> 404 "Not Found" (Starlette's
-    trailing-slash redirect into a mount with no root route). Rewrite /mcp and
-    /mcp/ to /mcp/mcp for MCP traffic. A plain browser GET (no SSE Accept) is left
-    alone.
+    endpoint is /mcp/mcp. Rewrite /mcp and /mcp/ to /mcp/mcp for MCP traffic
+    (POST/DELETE or SSE GET with Accept: text/event-stream). For a plain browser
+    or crawler GET (no SSE Accept), return the JSON MCP manifest (200 OK)
+    instead of Starlette's 307 -> /mcp/ -> 404 "Not Found".
     """
 
     _ALIASES = ("/mcp", "/mcp/")
@@ -2306,6 +2327,10 @@ class McpBarePathAliasMiddleware:
                     break
             if method != "GET" or b"text/event-stream" in accept:
                 scope = {**scope, "path": "/mcp/mcp", "raw_path": b"/mcp/mcp"}
+            else:
+                response = JSONResponse(build_mcp_manifest())
+                await response(scope, receive, send)
+                return
         await self.app(scope, receive, send)
 
 

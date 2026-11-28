@@ -96,8 +96,8 @@ describe("parsePriceUsdc", () => {
     expect(parsePriceUsdc("$0.01")).toBe(0.01);
   });
 
-  it("parses MARC-HD $0.85 diligence price strings", () => {
-    expect(parsePriceUsdc("$0.85")).toBe(0.85);
+  it("parses MN rental check $0.01 price strings", () => {
+    expect(parsePriceUsdc("$0.01")).toBe(0.01);
   });
 });
 

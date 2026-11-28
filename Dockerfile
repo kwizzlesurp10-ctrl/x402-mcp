@@ -19,6 +19,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Includes app/static/a2a_marketplace/ (GET /). The dashboard stage below
+# replaces only app/static/mission_control/ (GET /dashboard).
 COPY app ./app
 COPY run_stdio.py .
 COPY manifests ./manifests

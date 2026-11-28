@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
 import time
 from typing import Any
@@ -12,7 +10,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import demand
-from app.city_compliance import agentmail, gate, publish, registry
+from app.city_compliance import agentmail, degraded, gate, paid_delivery, publish, registry
 from app.city_compliance.models import CitySpec
 from app.config import settings
 
@@ -22,8 +20,8 @@ router = APIRouter(tags=["us-city-compliance"])
 
 
 @router.get("/cities")
-async def cities_catalog_alias() -> RedirectResponse:
-    """Buyer-facing alias for the free US city catalog."""
+async def cities_alias() -> RedirectResponse:
+    """Short catalog path — buyers often guess /cities instead of /us/cities."""
     return RedirectResponse(url="/us/cities", status_code=307)
 
 
@@ -77,13 +75,10 @@ async def us_city_sample(city_code: str) -> JSONResponse:
             address=spec.sample_address,
             detail="upstream_open_data_unavailable",
         )
-        return JSONResponse(
-            status_code=502,
-            content={
-                "error": "upstream_open_data_unavailable",
-                "city": spec.code,
-                "detail": "city open-data source timed out or refused; retry shortly",
-            },
+        report = publish.prepare_city_report(
+            degraded.upstream_unavailable_report(spec, spec.sample_address),
+            spec=spec,
+            address_fallback=spec.sample_address,
         )
     agentmail.notify_city_call(
         "sample",
@@ -161,6 +156,28 @@ async def us_city_property_check(
     signature = request.headers.get("PAYMENT-SIGNATURE")
     pid = gate.product_id(spec)
     if not signature:
+        from app.unpaid_validation import input_hint_city_address
+
+        content: dict[str, object] = {
+            "error": "payment_required",
+            "resource": gate.resource_url(spec),
+            "price": gate.price_for(spec),
+            "network": settings.x402_default_network,
+            "city": spec.code,
+            "description": spec.description,
+            "sample_url": gate.sample_url(spec),
+            "catalog_url": f"{settings.public_base_url.rstrip('/')}/us/cities",
+            "how_to_pay": (
+                "Retry with PAYMENT-SIGNATURE header (x402 v2); requirements "
+                "are in the PAYMENT-REQUIRED response header. Free fixed-address "
+                f"sample (no payment): GET {gate.sample_url(spec)}. "
+                "MCP golden path: list_us_cities → get_us_city_property_sample → "
+                "check_us_city_property (or pay_and_fetch on this resource URL)."
+            ),
+        }
+        hint = input_hint_city_address(address, spec.code)
+        if hint:
+            content.update(hint)
         log.info(
             "us/%s/property-check 402 (no signature)",
             spec.code,
@@ -171,23 +188,7 @@ async def us_city_property_check(
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_required",
-                "resource": gate.resource_url(spec),
-                "price": gate.price_for(spec),
-                "network": settings.x402_default_network,
-                "city": spec.code,
-                "description": spec.description,
-                "sample_url": gate.sample_url(spec),
-                "catalog_url": f"{settings.public_base_url.rstrip('/')}/us/cities",
-                "how_to_pay": (
-                    "Retry with PAYMENT-SIGNATURE header (x402 v2); requirements "
-                    "are in the PAYMENT-REQUIRED response header. Free fixed-address "
-                    f"sample (no payment): GET {gate.sample_url(spec)}. "
-                    "MCP golden path: list_us_cities → get_us_city_property_sample → "
-                    "check_us_city_property (or pay_and_fetch on this resource URL)."
-                ),
-            },
+            content=content,
         )
 
     if address is None or not address.strip() or len(address) > 120:
@@ -196,66 +197,49 @@ async def us_city_property_check(
             content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
         )
 
-    result = await gate.verify_and_settle(signature, payment_required)
-    if not result["is_valid"] or not result["payment_settled"]:
-        log.warning(
-            "us/%s/property-check payment invalid",
-            spec.code,
-            extra={"address": address, "status_code": 402},
-        )
-        return JSONResponse(
-            status_code=402,
-            headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_invalid",
-                "invalid_reason": result.get("invalid_reason"),
-                "settlement_error": result.get("settlement_error"),
-            },
-        )
+    addr = address.strip()
 
-    try:
-        raw = await mod.check_property(address)
-        report = publish.prepare_city_report(
-            raw, spec=spec, address_fallback=address.strip()
-        )
-    except Exception:
-        log.warning("us/%s property join failed after settle", spec.code, exc_info=True)
-        # Payment already settled — never re-challenge; return 502 with receipt.
-        settlement = result.get("settlement") or {}
-        tx = settlement.get("transaction") or settlement.get("txHash")
+    def _notify_error(*, paid: bool, detail: str) -> None:
         agentmail.notify_city_call(
             "error",
             city_code=spec.code,
             city_name=spec.name,
             state=spec.state,
             channel="http",
-            address=address.strip(),
+            address=addr,
             price=gate.price_for(spec),
-            paid=True,
-            tx_hash=str(tx) if tx else None,
-            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-            detail="upstream_open_data_unavailable",
+            paid=paid,
+            detail=detail,
         )
-        receipt = base64.b64encode(json.dumps(settlement).encode()).decode()
-        return JSONResponse(
-            status_code=502,
-            headers={"PAYMENT-RESPONSE": receipt},
-            content={
-                "error": "upstream_open_data_unavailable",
-                "city": spec.code,
-                "detail": "payment settled; city open-data join failed; contact seller",
-            },
-        )
-    latency = round((time.monotonic() - t0) * 1000)
-    log.info(
-        "us/%s/property-check settled",
-        spec.code,
-        extra={"address": address, "status_code": 200, "latency_ms": latency},
-    )
 
-    settlement = result.get("settlement") or {}
-    tx = settlement.get("transaction") or settlement.get("txHash")
-    try:
+    def _notify_success(*, report: dict, tx: str | None, payer: str | None) -> None:
+        latency = round((time.monotonic() - t0) * 1000)
+        log.info(
+            "us/%s/property-check settled",
+            spec.code,
+            extra={"address": address, "status_code": 200, "latency_ms": latency},
+        )
+        agentmail.notify_city_call(
+            "paid_settle",
+            city_code=spec.code,
+            city_name=spec.name,
+            state=spec.state,
+            channel="http",
+            address=addr,
+            price=gate.price_for(spec),
+            verdict=agentmail.verdict_from_report(report),
+            paid=True,
+            tx_hash=tx,
+            payer=payer,
+        )
+
+    def _record_revenue(
+        *,
+        tx: str | None,
+        payer: object,
+        request_input: object | None = None,
+        response_body: object | None = None,
+    ) -> None:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
@@ -264,27 +248,27 @@ async def us_city_property_check(
             amount_usdc=parse_price_usdc(gate.price_for(spec)),
             network=settings.x402_default_network,
             product_id=pid,
-            tx=str(tx) if tx else None,
-            payer=settlement.get("payer"),
+            tx=tx,
+            payer=payer,
+            request_input=request_input,
+            response_body=response_body,
         )
-    except Exception:
-        log.warning("us/%s revenue ledger write failed", spec.code, exc_info=True)
 
-    agentmail.notify_city_call(
-        "paid_settle",
-        city_code=spec.code,
-        city_name=spec.name,
-        state=spec.state,
-        channel="http",
-        address=address.strip(),
+    return await paid_delivery.deliver_paid_city_report(
+        signature=signature,
+        payment_required=payment_required,
+        mod=mod,
+        spec=spec,
+        address=addr,
+        product_id=pid,
         price=gate.price_for(spec),
-        verdict=agentmail.verdict_from_report(report),
-        paid=True,
-        tx_hash=str(tx) if tx else None,
-        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
+        verify_payment=gate.verify_payment,
+        settle_payment=gate.settle_payment,
+        notify_error=_notify_error,
+        notify_success=_notify_success,
+        record_revenue=_record_revenue,
+        log_prefix=f"us/{spec.code}/property-check",
     )
-    receipt = base64.b64encode(json.dumps(result["settlement"]).encode()).decode()
-    return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
 
 
 def _unknown_city(city_code: str) -> JSONResponse:

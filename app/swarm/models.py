@@ -80,6 +80,11 @@ def purchase_discovery_metadata(
         # Empty object: GET purchase takes no query/body — still emit input so
         # Bazaar schemas stay precise (agents see "no required params").
         "discovery_input_example": {},
+        "discovery_input_schema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
         "discovery_output_example": {
             "product_id": product.product_id,
             "topic": product.topic,

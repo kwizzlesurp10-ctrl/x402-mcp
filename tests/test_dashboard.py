@@ -12,12 +12,14 @@ BASE_APP_ID_META = 'name="base:app_id" content="6a7018e2a8c4f2b6db3b3e71"'
 MC_DIST = Path(__file__).resolve().parents[1] / "app" / "static" / "mission_control"
 
 
-def test_root_serves_ownership_meta_and_points_at_dashboard() -> None:
-    """`/` must expose Base ownership meta for scrapers and strict CSP."""
+def test_root_serves_marketplace_and_ownership_meta() -> None:
+    """`/` is the public marketplace and still exposes Base ownership meta."""
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert BASE_APP_ID_META in response.text
+    assert "US City Open-Data Compliance" in response.text
+    assert "x402 // mission control" not in response.text
     assert "content-security-policy" in response.headers
     assert "default-src 'self'" in response.headers["content-security-policy"]
 

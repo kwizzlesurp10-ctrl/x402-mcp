@@ -62,7 +62,6 @@ def agent_card() -> dict[str, Any]:
             "fail_closed": True,
         },
         "notify": {
-            "email": operator_notify_email(),
             "github_repo": getattr(settings, "github_repo", None)
             or "kwizzlesurp10-ctrl/x402-mcp",
         },
@@ -134,34 +133,51 @@ def refuse_if_not_mailrail_agent(agent_id: str | None) -> dict[str, Any] | None:
     }
 
 
+def _post_github_issue(
+    repo: str,
+    token: str,
+    subject: str,
+    body: str,
+    labels: list[str] | None,
+) -> dict[str, Any]:
+    """Create one GitHub issue. ``labels`` is omitted when empty."""
+    url = f"https://api.github.com/repos/{repo}/issues"
+    payload: dict[str, Any] = {"title": subject[:240], "body": body}
+    if labels:
+        payload["labels"] = labels
+    res = httpx.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        json=payload,
+        timeout=10.0,
+    )
+    if res.status_code in (200, 201):
+        data = res.json()
+        return {"ok": True, "html_url": data.get("html_url"), "number": data.get("number")}
+    log.warning("GitHub MailRail notify HTTP %s: %s", res.status_code, res.text[:300])
+    return {"ok": False, "status": res.status_code}
+
+
 def _github_issue(subject: str, body: str) -> dict[str, Any] | None:
     token = getattr(settings, "github_token", None)
     if not token:
         return None
     repo = getattr(settings, "github_repo", None) or "kwizzlesurp10-ctrl/x402-mcp"
-    url = f"https://api.github.com/repos/{repo}/issues"
     try:
-        res = httpx.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            json={
-                "title": subject[:240],
-                "body": body,
-                "labels": ["mailrail"],
-            },
-            timeout=10.0,
-        )
-        if res.status_code in (200, 201):
-            data = res.json()
-            return {"ok": True, "html_url": data.get("html_url"), "number": data.get("number")}
-        log.warning("GitHub MailRail notify HTTP %s: %s", res.status_code, res.text[:300])
-        return {"ok": False, "status": res.status_code}
+        labeled = _post_github_issue(repo, token, subject, body, ["mailrail"])
     except Exception as exc:  # noqa: BLE001 — notify must not break dispatch
         log.warning("GitHub MailRail notify failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+    if labeled.get("ok") or labeled.get("status") not in (403, 422):
+        return labeled
+    try:
+        return _post_github_issue(repo, token, subject, body, None)
+    except Exception as exc:  # noqa: BLE001 — notify must not break dispatch
+        log.warning("GitHub MailRail notify retry failed: %s", exc)
         return {"ok": False, "error": str(exc)}
 
 

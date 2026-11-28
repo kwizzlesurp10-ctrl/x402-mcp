@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.discovery_schemas import ADDRESS_QUERY_SCHEMA
 
 log = logging.getLogger("x402.mn_compliance")
 
@@ -404,6 +405,7 @@ SAMPLE_ADDRESS = "1700 Penn Ave N"
 # receive a report shaped like check_property()'s output. Small but faithful
 # excerpts — the CDP facilitator catalogs these verbatim at settle time.
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {"address": SAMPLE_ADDRESS}
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = ADDRESS_QUERY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "address_queried": "1700 Penn Ave N",
@@ -466,6 +468,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
         service_name=SERVICE_NAME,
         service_tags=SERVICE_TAGS,
@@ -481,6 +484,7 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
                 service_name=SERVICE_NAME,
                 service_tags=SERVICE_TAGS,
@@ -490,6 +494,30 @@ def build_payment_required_header() -> str:
     # Cached per (network, price, resource): the header is static and building
     # it hits the flaky CDP facilitator; serve last-known-good through an outage.
     return challenge_cache.get_or_build("mn-property-check", fp, _build)
+
+
+async def verify_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.verify_payment_payload(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+async def settle_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
 
 
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:

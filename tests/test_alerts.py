@@ -137,8 +137,17 @@ def test_every_watcher_workflow_uses_this_module(workflow: str) -> None:
     """No watcher gets to hand-roll dedup again."""
     from pathlib import Path
 
-    text = Path(__file__).resolve().parents[1].joinpath(
-        ".github/workflows", f"{workflow}.yml"
-    ).read_text(encoding="utf-8")
-    assert "from alerts import" in text or "from scripts.alerts import" in text
-    assert "--search" not in text, "dedup by search is what broke; list by label instead"
+    root = Path(__file__).resolve().parents[1]
+    workflow_text = root.joinpath(".github/workflows", f"{workflow}.yml").read_text(
+        encoding="utf-8"
+    )
+    texts = [workflow_text]
+    if workflow == "sale-watch":
+        runner = root / "scripts" / "sale_watch_run.py"
+        if runner.is_file():
+            texts.append(runner.read_text(encoding="utf-8"))
+    assert any(
+        "from alerts import" in text or "from scripts.alerts import" in text
+        for text in texts
+    )
+    assert "--search" not in workflow_text, "dedup by search is what broke; list by label instead"

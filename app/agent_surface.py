@@ -14,6 +14,7 @@ of their words there.
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 from typing import Any
 
 from app.config import settings
@@ -38,6 +39,40 @@ A2A_CARD_PROTOCOL_VERSION = "0.3.0"
 AP2_EXTENSION_URI = "https://github.com/google-agentic-commerce/ap2/v1"
 REPO_URL = "https://github.com/kwizzlesurp10-ctrl/x402-mcp"
 BOUNTIES_DOC_URL = f"{REPO_URL}/blob/master/docs/BOUNTIES.md"
+LABS_24K_LISTING_URL = (
+    "https://24klabs.ai/listing/us-city-open-data-compliance-network"
+)
+
+
+def _x402_manifest_resource_encoded() -> str:
+    return quote(f"{_base()}/.well-known/x402", safe="")
+
+
+def curated_directory_listings() -> list[dict[str, str]]:
+    """Third-party curated directories that index this storefront (24K Labs, …)."""
+    resource = _x402_manifest_resource_encoded()
+    return [
+        {
+            "name": "24K Labs",
+            "url": LABS_24K_LISTING_URL,
+            "badge": f"https://24klabs.ai/badge.svg?resource={resource}",
+            "card": f"https://24klabs.ai/card.svg?resource={resource}",
+        }
+    ]
+
+
+def trust_ratings() -> list[dict[str, str]]:
+    """Third-party x402 trust / grade reports for this manifest resource."""
+    resource = _x402_manifest_resource_encoded()
+    return [
+        {
+            "name": "fuchss",
+            "report": f"https://x402.fuchss.app/endpoint?resource={resource}",
+            "badge": f"https://x402.fuchss.app/badge.svg?resource={resource}",
+        }
+    ]
+
+
 FUNDING_LEGAL = (
     "Payment for delivered products, documentation/audit artifacts, or a "
     "voluntary tip. Not a token, not equity, not a raise."
@@ -104,6 +139,8 @@ def funding() -> dict[str, Any]:
             "llmsTxt": f"{base}/llms.txt",
             "openapi": f"{base}/openapi.json",
             "funding": f"{base}/.well-known/funding.json",
+            "listings": curated_directory_listings(),
+            "trust": trust_ratings(),
         },
     }
 
@@ -135,6 +172,41 @@ def _us_city_catalog_what(base: str) -> str:
         f"endpoints ({len(codes)} jurisdictions: {listed}): paid URLs, sample URLs, "
         "price, and open-data sources."
     )
+
+
+def _swarm_purchase_resources(base: str) -> list[dict[str, Any]]:
+    """Listed composite purchase URLs (each carries its own seller 402)."""
+    try:
+        from app.swarm.registry import swarm_registry
+    except Exception:  # pragma: no cover
+        return []
+
+    out: list[dict[str, Any]] = []
+    for product in swarm_registry._products.values():
+        if product.status != "listed":
+            continue
+        seller = product.seller_requirements or {}
+        if not seller.get("payment_required_header"):
+            continue
+        price = seller.get("price")
+        if price is None:
+            price = f"${product.price_usdc:.6f}".rstrip("0").rstrip(".")
+        out.append(
+            {
+                "url": f"{base}/swarm/products/{product.product_id}/purchase",
+                "method": "GET",
+                "price": price,
+                "network": product.network or settings.x402_default_network,
+                "name": product.topic or f"Swarm composite {product.product_id[:8]}",
+                "what": (
+                    "Pay in USDC to receive a cited composite intelligence report. "
+                    f"GET or POST {base}/swarm/products/{product.product_id}/purchase "
+                    "with PAYMENT-SIGNATURE after the 402 challenge."
+                ),
+                "params": {},
+            }
+        )
+    return out
 
 
 def _us_city_paid_resources(base: str) -> list[dict[str, Any]]:
@@ -190,7 +262,7 @@ def paid_resources() -> list[dict[str, Any]]:
             "method": "GET",
             "price": settings.tx_decision_price,
             "network": settings.x402_default_network,
-            "name": "Base tx decision",
+            "name": "Base tx decision",  # matches tx_decision.SERVICE_NAME / 402 resource
             "what": "Submit this Base tx now or wait, max fee + priority fee "
             "(EIP-1559 gwei), estimated USD cost. Call before every send.",
             "params": {
@@ -303,7 +375,7 @@ def paid_resources() -> list[dict[str, Any]]:
             "price": pdd_agent.PRICE,
             "network": settings.x402_default_network,
             "name": pdd_agent.SERVICE_NAME,
-            "what": pdd_agent.RESOURCE_DESCRIPTION,
+            "what": pdd_agent.resource_description(),
             "params": {
                 "city_code": "City network code (mn, nyc, sea, …)",
                 "address": "street address string, 1-120 chars (required)",
@@ -324,19 +396,23 @@ def well_known_x402() -> dict[str, Any]:
     (which crawlers read first) carries the same prices either way.
     """
     fund = funding()
+    base = _base()
+    catalog = paid_resources()
+    swarm_listed = _swarm_purchase_resources(base)
+    all_paid_details = catalog + swarm_listed
     return {
         "version": 1,
         "x402_version": 2,
         "service": "x402-micropayments-mcp",
-        "base_url": _base(),
+        "base_url": base,
         "networks": [settings.x402_default_network],
         "asset": BASE_USDC,
         "payTo": fund["payTo"],
         "payment_header": "PAYMENT-SIGNATURE",
         "challenge_header": "PAYMENT-REQUIRED",
         "receipt_header": "PAYMENT-RESPONSE",
-        "resources": [r["url"] for r in paid_resources() if r["price"] != "free"],
-        "resource_details": paid_resources(),
+        "resources": [r["url"] for r in all_paid_details if r["price"] != "free"],
+        "resource_details": all_paid_details,
         # Omitted entirely rather than sent empty: an empty proofs array reads
         # as a failed proof, absence reads as "not claimed yet".
         **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
@@ -352,7 +428,18 @@ def well_known_x402() -> dict[str, Any]:
         "funding": f"{_base()}/.well-known/funding.json",
         "payToExplorer": fund["explorer"],
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
     }
+
+
+def _municipal_jurisdiction_count() -> int:
+    try:
+        from app.city_compliance import registry
+
+        return len(registry.public_codes())
+    except Exception:  # pragma: no cover
+        return 0
 
 
 def llms_txt() -> str:
@@ -370,7 +457,7 @@ def llms_txt() -> str:
         "",
         "1. **Zero-Risk Schema Verification**: Call any `/sample` endpoint (e.g. `/us/mn/property-check/sample`, `/us/cities`, or `/pulse`) at $0.00 to verify payload schema and parsing logic before spending funds.",
         "2. **High-ROI Economic Value**:",
-        "   - **US Multi-City Rental Diligence Pack ($1.50 USDC)**: Screen up to 5 properties across 18 municipal open data portals in one call. Saves $50-$200 in human diligence costs and eliminates uninsurable tenant/lease compliance risks.",
+        f"   - **US Multi-City Rental Diligence Pack ($1.50 USDC)**: Screen up to 5 properties across {_municipal_jurisdiction_count()} municipal open data portals in one call. Saves $50-$200 in human diligence costs and eliminates uninsurable tenant/lease compliance risks.",
         "   - **Single Property Compliance Check ($0.01 USDC)**: Sub-second live query of municipal ArcGIS/Socrata records for active rental licensing, building code violations, and condemnations.",
         "   - **Base Tx-Decision & Finality ($0.01 USDC)**: Live Base L2 EIP-1559 gas congestion intelligence. Saves 15-30% on transaction gas re-attempts and provides L1-finalized settlement assurances.",
         "3. **Gasless Buyer Settlement**: Buyers sign EIP-3009 `transferWithAuthorization` in USDC only; the relayer/facilitator sponsors all on-chain gas.",
@@ -426,6 +513,27 @@ def llms_txt() -> str:
         f"- OpenAPI: {base}/openapi.json",
         f"- Health: {base}/health · Checks: {base}/doctor · Ops: {base}/dashboard",
         "",
+        "## Curated directory listings",
+        "",
+    ]
+    for entry in curated_directory_listings():
+        lines += [
+            f"- **{entry['name']}**: {entry['url']}",
+            f"  - badge: {entry['badge']}",
+            f"  - card: {entry['card']}",
+        ]
+    lines += [
+        "",
+        "## x402 trust ratings",
+        "",
+    ]
+    for entry in trust_ratings():
+        lines += [
+            f"- **{entry['name']}**: {entry['report']}",
+            f"  - badge: {entry['badge']}",
+        ]
+    lines += [
+        "",
         "## Fund this operator (USDC on Base)",
         "",
         f"- Network: `{settings.x402_default_network}` (Base mainnet, chainId 8453)",
@@ -447,6 +555,39 @@ def llms_txt() -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _attach_a2a_skill_input_schemas(skills: list[dict[str, Any]]) -> None:
+    from app.discovery_schemas import (
+        ADDRESS_QUERY_SCHEMA,
+        CITY_AGENT_QUERY_SCHEMA,
+        DILIGENCE_PACK_BODY_SCHEMA,
+        FINALITY_QUERY_SCHEMA,
+        POLICY_CHECK_BODY_SCHEMA,
+        TX_DECISION_QUERY_SCHEMA,
+    )
+
+    static = {
+        "base-tx-decision": TX_DECISION_QUERY_SCHEMA,
+        "base-finality-check": FINALITY_QUERY_SCHEMA,
+        "property-due-diligence-agent": CITY_AGENT_QUERY_SCHEMA,
+        "us-city-property-check": CITY_AGENT_QUERY_SCHEMA,
+        "us-rental-diligence-pack": DILIGENCE_PACK_BODY_SCHEMA,
+        "buyer-payment-policy-check": POLICY_CHECK_BODY_SCHEMA,
+    }
+    for sk in skills:
+        sid = sk.get("id") or ""
+        if sid in static:
+            sk["inputSchema"] = static[sid]
+        elif sid.startswith("property-check-"):
+            sk["inputSchema"] = ADDRESS_QUERY_SCHEMA
+
+
+# Search terms agents actually use for a city that the short city tags miss
+# (state name, county, the "MN compliance" product name).
+_CITY_EXTRA_TAGS: dict[str, tuple[str, ...]] = {
+    "mn": ("minnesota", "hennepin", "mn-compliance", "rental-compliance"),
+}
 
 
 def agent_card() -> dict[str, Any]:
@@ -541,7 +682,7 @@ def agent_card() -> dict[str, Any]:
             "id": "property-due-diligence-agent",
             "name": pdd_agent.SERVICE_NAME,
             "description": (
-                f"{pdd_agent.RESOURCE_DESCRIPTION} "
+                f"{pdd_agent.resource_description()} "
                 f"Price: {pdd_agent.PRICE} USDC on {network} via x402. "
                 f"HTTP: GET {pdd_agent.resource_url()}?city_code={{code}}&address={{street}}."
             ),
@@ -752,27 +893,41 @@ def agent_card() -> dict[str, Any]:
         sample_addr = c["sample_address"]
         paid = c["paid_url"]
         sample = c["sample_url"]
+        extra_tags = list(_CITY_EXTRA_TAGS.get(code, ()))
         tags = list(
             dict.fromkeys(
                 list(c.get("tags") or [])
                 + [code, c["name"].lower().replace(" ", ""), "compliance", "x402"]
+                + extra_tags
             )
         )
+        examples = [
+            f"Check {c['name']} compliance for {sample_addr}",
+            f"GET {paid}?address={sample_addr.replace(' ', '%20')}",
+            f"Free sample: GET {sample}",
+        ]
+        alias = c.get("canonical_alias")
+        if alias:
+            # The canonical alias is the URL indexed in the CDP x402 Bazaar;
+            # surface it so agents arriving from Bazaar and from this card
+            # recognise the same product.
+            examples.append(
+                f"Bazaar-listed canonical URL: GET {base}{alias}?address="
+                f"{sample_addr.replace(' ', '%20')}"
+            )
         skills.append(
             {
                 "id": f"property-check-{code}",
                 "name": c["service_name"],
                 "description": outcome_copy.agent_skill_summary(c),
                 "tags": tags,
-                "examples": [
-                    f"Check {c['name']} compliance for {sample_addr}",
-                    f"GET {paid}?address={sample_addr.replace(' ', '%20')}",
-                    f"Free sample: GET {sample}",
-                ],
+                "examples": examples,
                 "inputModes": ["text/plain", "application/json"],
                 "outputModes": ["application/json"],
             }
         )
+
+    _attach_a2a_skill_input_schemas(skills)
 
     pay_to = _pay_to()
     fund = funding()
@@ -817,6 +972,7 @@ def agent_card() -> dict[str, Any]:
         "us-cities-catalog",
         "us-rental-diligence-pack",
         "property-due-diligence-agent",
+        "us-city-property-check",
         *(f"property-check-{code}" for code in city_price),
         *(
             {"buyer-payment-policy-check"}
@@ -897,7 +1053,11 @@ def agent_card() -> dict[str, Any]:
             "funding": f"{base}/.well-known/funding.json",
             "agents": f"{base}/.well-known/agents.json",
             "aiPlugin": f"{base}/.well-known/ai-plugin.json",
+            "listings": curated_directory_listings(),
+            "trust": trust_ratings(),
         },
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
@@ -1030,6 +1190,56 @@ def _price_to_atomic_usdc(price: str) -> int:
         return int(round(float(raw) * 1_000_000))
     except ValueError:
         return 0
+
+
+def _mn_compliance_agent_entry(base: str, network: str) -> dict[str, Any]:
+    """Minneapolis / Minnesota rental compliance as its own registry entry.
+
+    ``url`` is the canonical ``/mn/property-check`` resource, the one indexed in
+    the CDP x402 Bazaar, so an agent that finds the product here and one that
+    finds it in Bazaar land on the same paid URL.
+    """
+    price = settings.mn_property_check_price
+    return {
+        "id": "mn-rental-compliance",
+        "name": "Minneapolis, MN Rental License & Compliance Check",
+        "description": (
+            "Is this Minneapolis, Minnesota (Hennepin County) address licensed for rental? "
+            "Rental license status/tier/units/expiration, open violation cases, and "
+            "condemned/boarded flags from City of Minneapolis open data, as normalized JSON "
+            "with a source link."
+        ),
+        "data_provenance": "City of Minneapolis Open Data (ArcGIS): rental licenses, violations, condemned/boarded",
+        "free_preview_url": f"{base}/mn/property-check/sample",
+        "url": f"{base}/mn/property-check",
+        "alternate_urls": [f"{base}/us/mn/property-check"],
+        "method": "GET",
+        "pricing": {
+            "amount": price.replace("$", ""),
+            "currency": "USDC",
+            "network": network,
+            "model": "per_request",
+            "atomic_units": _price_to_atomic_usdc(price),
+            "value_summary": f"{price} USDC per Minneapolis address",
+        },
+        "protocols": ["x402-v2", "http-json", "a2a", "mcp"],
+        "a2a": {"url": f"{base}/a2a", "skillId": "property-check-mn"},
+        "mcp": {"url": f"{base}/mcp/mcp", "tool": "city.check", "arguments": {"city_code": "mn"}},
+        "tags": [
+            "minneapolis",
+            "minnesota",
+            "mn",
+            "mn-compliance",
+            "hennepin",
+            "rental-license",
+            "rental-compliance",
+            "housing",
+            "property",
+            "x402",
+            "usdc",
+        ],
+        "params": {"address": "Minneapolis street address (1-120 chars), e.g. 1700 Penn Ave N"},
+    }
 
 
 def agents_json() -> dict[str, Any]:
@@ -1174,7 +1384,13 @@ def agents_json() -> dict[str, Any]:
             "protocols": ["x402-v2", "http-json", "a2a"],
             "tags": ["property", "compliance", "rental", "housing", "violations", "open-data", "x402", "a2a-commerce"],
             "jurisdictions": [c["code"] for c in cities],
+            "url": f"{base}/us/{{city_code}}/property-check",
+            "params": {
+                "city_code": "City code from /us/cities (e.g. mn = Minneapolis, MN)",
+                "address": "Street address in the target city (1-120 chars)",
+            },
         },
+        _mn_compliance_agent_entry(base, network),
         {
             "id": "x402-mailrail-postmaster",
             "name": "MailRail Postmaster & In/Out Dispatcher",
@@ -1251,6 +1467,8 @@ def agents_json() -> dict[str, Any]:
         "ai_plugin": f"{base}/.well-known/ai-plugin.json",
         "x402_manifest": f"{base}/.well-known/x402",
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
         **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
     }
 
@@ -1413,6 +1631,8 @@ def mcp_server_card() -> dict[str, Any]:
         "funding": f"{base}/.well-known/funding.json",
         "agent_card": f"{base}/.well-known/agent-card.json",
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
     }
 
 
@@ -1497,6 +1717,15 @@ def agentic_market_json() -> dict[str, Any]:
             "jurisdictions": [c["code"] for c in cities],
         },
         {
+            **{
+                k: v
+                for k, v in _mn_compliance_agent_entry(base, network).items()
+                if k in ("id", "name", "description", "url", "method", "pricing", "tags")
+            },
+            "type": "data-api",
+            "sample_url": f"{base}/mn/property-check/sample",
+        },
+        {
             "id": "x402-mailrail-postmaster",
             "name": "MailRail Postmaster & In/Out Dispatcher",
             "type": "communication-rail",
@@ -1561,8 +1790,12 @@ def agentic_market_json() -> dict[str, Any]:
             "mcp_server_card": f"{base}/.well-known/mcp/server-card.json",
             "ai_plugin": f"{base}/.well-known/ai-plugin.json",
             "funding": f"{base}/.well-known/funding.json",
+            "listings": curated_directory_listings(),
+            "trust": trust_ratings(),
         },
         "legal": FUNDING_LEGAL,
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
         **({"ownershipProofs": ownership_proofs()} if ownership_proofs() else {}),
     }
 

@@ -37,6 +37,31 @@ def test_every_paid_product_is_declared_payable(spec: dict) -> None:
         assert "402" in operation["responses"]
 
 
+def test_openapi_address_param_required_for_city_routes(spec: dict) -> None:
+    from app.city_compliance import registry as city_registry
+
+    for code in city_registry.public_codes():
+        path = f"/us/{code}/property-check"
+        if path not in spec["paths"]:
+            continue
+        addr = next(
+            p for p in spec["paths"][path]["get"]["parameters"] if p["name"] == "address"
+        )
+        assert addr["required"] is True
+        assert addr["schema"].get("type") == "string"
+        assert "anyOf" not in addr["schema"]
+
+
+def test_openapi_security_schemes_declare_x402_payment_header(spec: dict) -> None:
+    schemes = (spec.get("components") or {}).get("securitySchemes") or {}
+    assert schemes.get("x402", {}).get("name") == "PAYMENT-SIGNATURE"
+    for path in openapi_spec.paid_paths():
+        ops = spec["paths"][path]
+        op = ops.get("get") or ops.get("post")
+        assert op is not None, path
+        assert op.get("security") == [{"x402": []}], path
+
+
 def test_every_paid_endpoint_declares_an_input_an_agent_can_construct(spec: dict) -> None:
     """No declared inputs means "strict non-invocable" to x402scan — listed but
     skipped. The cataloged purchase URL has no query params at all once its
