@@ -33,8 +33,13 @@ permissions:
   contents: read
 
 jobs:
+  pick-runner:
+    uses: ./.github/workflows/runner-pick.yml
+    secrets: inherit
+
   publish:
-    runs-on: [self-hosted, linux, x64]
+    needs: pick-runner
+    runs-on: ${{ fromJSON(needs.pick-runner.outputs.runner) }}
     timeout-minutes: 5
     steps:
       - name: Checkout code
