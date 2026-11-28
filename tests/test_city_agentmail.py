@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -395,7 +396,8 @@ def test_non_mock_city_alerts_batch_to_one_dispatch(
     assert second is not None
     assert second["delivered"] is True
     assert len(calls) == 1
-    assert "api.resend.com" in calls[0][0]
+    parsed = urlparse(calls[0][0])
+    assert parsed.hostname == "api.resend.com"
     posted = calls[0][1]["json"]["text"]
     assert "first" in posted
     assert "second" in posted
