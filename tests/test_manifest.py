@@ -86,3 +86,31 @@ def test_upgrade_endpoint() -> None:
 def test_manifest_payment_rails() -> None:
     manifest = client.get("/.well-known/mcp").json()
     assert manifest["payment_rails"]["x402_coinbase"]["primary"] is True
+
+
+def test_well_known_mcp_json_alias() -> None:
+    dotted = client.get("/.well-known/mcp.json")
+    bare = client.get("/.well-known/mcp")
+    assert dotted.status_code == 200
+    assert dotted.json()["name"] == bare.json()["name"]
+
+
+def test_get_a2a_returns_agent_card() -> None:
+    response = client.get("/a2a")
+    assert response.status_code == 200
+    card = response.json()
+    assert card.get("name")
+    assert "/a2a" in str(card.get("url") or "")
+
+
+def test_cities_alias_redirects_to_us_cities() -> None:
+    response = client.get("/cities", follow_redirects=False)
+    assert response.status_code in (307, 308)
+    assert response.headers["location"].rstrip("/").endswith("/us/cities")
+
+
+def test_well_known_x402_json_alias() -> None:
+    dotted = client.get("/.well-known/x402.json")
+    bare = client.get("/.well-known/x402")
+    assert dotted.status_code == 200
+    assert dotted.json()["service"] == bare.json()["service"]

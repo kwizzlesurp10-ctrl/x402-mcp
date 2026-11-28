@@ -749,13 +749,21 @@ async def well_known_mcp() -> dict:
 
 @app.get("/.well-known/mcp.json")
 async def well_known_mcp_json() -> dict:
-    """Alias for crawlers that require the .json suffix."""
+    """Alias for crawlers that require a .json suffix."""
     return build_mcp_manifest()
 
 
 @app.get("/.well-known/x402")
 async def well_known_x402() -> dict:
     """Machine manifest of the paid surface, built from live config."""
+    from app import agent_surface
+
+    return agent_surface.well_known_x402()
+
+
+@app.get("/.well-known/x402.json")
+async def well_known_x402_json() -> dict:
+    """Alias for crawlers that require a .json suffix."""
     from app import agent_surface
 
     return agent_surface.well_known_x402()
