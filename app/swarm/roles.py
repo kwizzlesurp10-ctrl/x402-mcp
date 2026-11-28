@@ -100,9 +100,9 @@ async def _discover(query: str | None, max_price_usdc: float) -> list[Candidate]
 async def scout(run: SwarmRun, topic: str, max_price_usdc: float) -> list[Candidate]:
     """Discover cheap upstream services; fall back to configured URLs.
 
-    discover_services matches the query as a strict substring, so a multi-word
-    topic often matches nothing — fall back to the broad catalog so warden and
-    the price cap still have candidates to work with.
+    CDP discovery search can return zero rows for an overly specific topic —
+    fall back to shorter terms and then the broad catalog so warden still has
+    candidates to work with.
     """
     candidates: list[Candidate] = []
     try:

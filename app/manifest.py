@@ -1,5 +1,6 @@
 """MCP well-known manifest for Grok/Cursor connector discovery."""
 
+from app.agent_surface import curated_directory_listings, trust_ratings
 from app.config import settings
 from app.payment_rails import build_payment_rails
 from app.tools_registry import TOOL_SPECS
@@ -75,4 +76,6 @@ def build_mcp_manifest() -> dict:
             "mcp_http": "/mcp/mcp",
         },
         "connector_url": f"{settings.public_base_url.rstrip('/')}/mcp/mcp",
+        "listings": curated_directory_listings(),
+        "trust": trust_ratings(),
     }

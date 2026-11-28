@@ -100,6 +100,9 @@ def record_revenue(
     tx: str | None = None,
     settled: bool = True,
     payer: str | None = None,
+    request_input: Any | None = None,
+    response_body: Any | None = None,
+    delivery_route: str | None = None,
 ) -> dict[str, Any]:
     """Record a realized composite sale (sell side / revenue).
 
@@ -109,6 +112,20 @@ def record_revenue(
     listing, which `agent_id` cannot do (it's a seller/product label, not a
     buyer identity).
     """
+    delivery_ref: str | None = None
+    if response_body is not None and tx:
+        from app import delivery_store
+
+        delivery_ref = delivery_store.try_record_delivery(
+            tx=str(tx),
+            route=delivery_route or product_id,
+            product_id=product_id,
+            amount_usdc=amount_usdc,
+            payer=payer,
+            request_input=request_input if request_input is not None else {},
+            response_body=response_body,
+        )
+
     row = {
         "ts": datetime.now(UTC).isoformat(),
         "kind": "revenue",
@@ -122,4 +139,6 @@ def record_revenue(
         "run_id": run_id,
         "payer": payer.lower() if payer else None,
     }
+    if delivery_ref:
+        row["delivery_ref"] = delivery_ref
     return _append("revenue", row)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="FL",
     service_name="Orlando STR License Check",
     tags=("orlando", "str", "rental", "license", "housing"),
-    description=(
-        "Does this Orlando address hold a short-term rental license? Query any "
-        "street address in Orlando, Florida and get license number, status, "
-        "issued/expire dates, and holder name. For host compliance and agent "
-        "workflows. Input: address string. Output: JSON, live City of Orlando "
-        "open data."
-    ),
+    description=outcome_copy.paid_route_description(code="orl", name="Orlando"),
     sample_address="114 N GLENWOOD AVE",
     sample_note=(
         "Free fixed-address sample of Orlando short-term rental licenses. "

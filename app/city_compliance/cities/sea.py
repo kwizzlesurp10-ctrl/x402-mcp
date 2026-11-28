@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="WA",
     service_name="Seattle Rental Registration",
     tags=("seattle", "rental", "registration", "housing", "diligence"),
-    description=(
-        "Seattle rental registration check (RRIO): is this property licensed / "
-        "registered? Property due diligence agent for Seattle housing compliance "
-        "open data. GET ?address= → rental registration status, unit count, "
-        "expiration, contact. Live City of Seattle JSON. Tenant screening, "
-        "landlord DD, real-estate checks."
-    ),
+    description=outcome_copy.paid_route_description(code="sea", name="Seattle"),
     sample_address="1531 BELMONT AVE",
     sample_note=(
         "Free fixed-address sample of Seattle RRIO registration join "

@@ -33,3 +33,22 @@ export function isValidApiBase(url: string): boolean {
     return false;
   }
 }
+
+const OPERATOR_TOKEN_KEY = "x402-admin-operator-token";
+
+export function readStoredOperatorToken(): string {
+  try {
+    return localStorage.getItem(OPERATOR_TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeStoredOperatorToken(token: string): void {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    localStorage.removeItem(OPERATOR_TOKEN_KEY);
+    return;
+  }
+  localStorage.setItem(OPERATOR_TOKEN_KEY, trimmed);
+}

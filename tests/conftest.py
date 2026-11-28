@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 LIVE_TESTS = os.environ.get("X402_LIVE_TESTS") == "1"
-os.environ.setdefault("X402_PAY_TO_ADDRESS", "0x05e1720bB82F86B5bc7940a99FDC702E32256357")
+os.environ.setdefault("X402_PAY_TO_ADDRESS", "0x0d25A44f74868eCE53B305C97139CF4B62963410")
 
 # Wire-format (camelCase) SupportedResponse the x402 SDK expects from
 # GET {facilitator}/supported — mirrors x402.org for Base + Base Sepolia.
@@ -114,7 +114,7 @@ def mock_x402_backend():
     os.environ["X402_FACILITATOR_URL"] = facilitator_url
     os.environ["CDP_DISCOVERY_URL"] = discovery_url
     if not os.environ.get("X402_PAY_TO_ADDRESS"):
-        os.environ["X402_PAY_TO_ADDRESS"] = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+        os.environ["X402_PAY_TO_ADDRESS"] = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 
     from app.config import settings
 
@@ -126,7 +126,7 @@ def mock_x402_backend():
     settings.x402_facilitator_url = facilitator_url
     settings.cdp_discovery_url = discovery_url
     if not settings.x402_pay_to_address:
-        settings.x402_pay_to_address = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+        settings.x402_pay_to_address = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 
     yield {"facilitator_url": facilitator_url, "discovery_url": discovery_url}
 
@@ -167,9 +167,9 @@ def _clear_challenge_cache():
     header (and its stubbed build_seller_requirements output) across tests."""
     from app import challenge_cache
 
-    challenge_cache._mem.clear()
+    challenge_cache.clear()
     yield
-    challenge_cache._mem.clear()
+    challenge_cache.clear()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -188,3 +188,31 @@ def isolated_swarm_registry(tmp_path_factory):
     yield
     swarm_registry.persist_path = old_path
     swarm_registry._products = old_products
+
+
+# Documentation-range-adjacent public IPv4 (example.com's historical A record).
+PUBLIC_TEST_IP = "93.184.215.14"
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    """Hermetic DNS for SSRF-guard tests.
+
+    CI runners can resolve public names to private/benchmark ranges (the box
+    runner maps example.com -> 198.18.0.1), and offline runners can't resolve
+    at all. Call ``fake_dns({"example.com": "93.184.215.14"})`` to pin answers;
+    unknown hosts raise ``socket.gaierror`` so nothing leaks to real DNS.
+    """
+    import socket
+
+    def install(mapping: dict[str, str]) -> None:
+        def _getaddrinfo(host, port, *args, **kwargs):
+            ip = mapping.get(str(host).lower())
+            if ip is None:
+                raise socket.gaierror(socket.EAI_NONAME, f"fake_dns: no record for {host!r}")
+            family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+            return [(family, socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
+
+    return install

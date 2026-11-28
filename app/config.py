@@ -1,6 +1,6 @@
 """Application configuration."""
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,22 @@ class Settings(BaseSettings):
     # Extra Origin header values for MCP DNS-rebinding protection (comma-separated).
     mcp_allowed_origins: str = ""
 
+    # CORS. CORS_ALLOWED_ORIGINS (comma-separated, exact origins) replaces the
+    # built-in dashboard/landing allowlist when set; CORS_EXTRA_ORIGINS appends.
+    # "*" is never accepted here. MCP_CORS_ORIGINS overrides the MCP transport
+    # allowlist (defaults to the main allowlist + MCP_ALLOWED_ORIGINS); set it
+    # to "*" only to deliberately allow every browser origin on /mcp.
+    cors_allowed_origins: str = ""
+    # Reverse proxies allowed to set X-Forwarded-For / X-Forwarded-Proto (and,
+    # with TRUST_FORWARDED_HOST, X-Forwarded-Host). Comma-separated IPs/CIDRs.
+    # Unset = trust none, except on Render (RENDER env set) where the private
+    # RFC1918 ranges are trusted because Render publishes no proxy IP list.
+    # "*" is rejected: it lets any client spoof its IP past the rate limiter.
+    trusted_proxies: str = ""
+    cors_extra_origins: str = ""
+    cors_extra_headers: str = ""
+    mcp_cors_origins: str = ""
+
     free_tier_monthly_quota: int = 500
     free_tier_rate_limit_per_min: int = 10
     pro_tier_monthly_quota: int = 50_000
@@ -25,12 +41,36 @@ class Settings(BaseSettings):
     tool_credit_pack_size: int = 100
     tool_credit_pack_price: str = "$1.00"
 
-    # Optional bearer token to protect /quota endpoint. If unset, endpoint is open.
+    # REQUIRED bearer token for every operator surface (/quota, /stats agent
+    # list, /pulse/publish, /swarm/run, MailRail, ...). When unset those routes
+    # fail closed with 503 and startup logs an error. Set
+    # REQUIRE_OPERATOR_TOKEN=true to refuse to start at all without it.
     operator_token: str | None = None
+    require_operator_token: bool = False
 
     # Redis-ready: set REDIS_URL to migrate from in-memory stores.
     redis_url: str | None = None
-    
+    # When True (default) and REDIS_URL is set, MCP commerce verify+settle requires a
+    # reachable Redis for cross-worker dedup + attempt state. If Redis is down, MCP
+    # commerce fails closed (402) instead of settling without coordination.
+    mcp_commerce_redis_strict: bool = True
+
+    # A2A: when True and REDIS_URL is set with a live connection, persist tasks under
+    # ``a2a:task:*`` with TTL ``a2a_task_ttl_seconds``. When False or Redis is
+    # unavailable, tasks stay in-process only (same as pre-durability behavior).
+    a2a_task_store_redis: bool = True
+    a2a_task_ttl_seconds: int = 604_800  # 7 days
+    # When True (default), Redis errors while durable mode is active do not fall back
+    # to in-module memory for the authoritative store (fail closed vs stale shadow).
+    a2a_task_store_redis_strict: bool = True
+
+    # External A2A agent card fetch cache (stable discovery metadata only).
+    a2a_discovery_cache_ttl_seconds: int = 300
+    a2a_discovery_cache_max_entries: int = 256
+
+    # Re-use a facilitator-backed x402ResourceServer per network for warm HTTP pools.
+    x402_resource_server_ttl_seconds: float = 300.0
+
     # Upstash Advanced Analytics pipeline
     upstash_redis_rest_url: str | None = None
     upstash_redis_rest_token: str | None = None
@@ -42,8 +82,23 @@ class Settings(BaseSettings):
     key_provider: str = "env"
 
     # Seller (cold receive) — on-chain payTo for revenue. Prefer separate from buyer.
-    # Live cashier is 0x05e1720bB82F86B5bc7940a99FDC702E32256357 (DEFAULT_PAY_TO).
+    # Live cashier is 0x0d25A44f74868eCE53B305C97139CF4B62963410 (DEFAULT_PAY_TO).
     x402_pay_to_address: str | None = None
+
+    @model_validator(mode="after")
+    def _public_upgrade_url(self) -> "Settings":
+        """Do not advertise localhost once PUBLIC_BASE_URL is a real origin.
+
+        Render sets PUBLIC_BASE_URL and leaves UPGRADE_URL unset, so the field
+        default leaked http://localhost:8402/upgrade into every tool meta block.
+        """
+        local_upgrade = "http://localhost:8402/upgrade"
+        base = (self.public_base_url or "").strip().rstrip("/")
+        if self.upgrade_url == local_upgrade and base and not base.startswith(
+            ("http://localhost", "http://127.0.0.1")
+        ):
+            self.upgrade_url = f"{base}/upgrade"
+        return self
 
     @field_validator("x402_pay_to_address", mode="before")
     @classmethod
@@ -105,6 +160,9 @@ class Settings(BaseSettings):
     cdp_discovery_url: str = (
         "https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources"
     )
+    cdp_discovery_search_url: str = (
+        "https://api.cdp.coinbase.com/platform/v2/x402/discovery/search"
+    )
 
     # Bazaar discoverability: when a 402 challenge is built with a resource_url,
     # embed the bazaar discovery extension + service metadata so a settled
@@ -118,8 +176,6 @@ class Settings(BaseSettings):
     # Coinbase CDP facilitator (required to verify/settle x402 on Base mainnet;
     # x402.org only settles `exact` on Base Sepolia). Ed25519 API key from the
     # CDP portal — rotate any key that has ever been shared in plaintext.
-    cdp_api_key_id: str | None = None
-    cdp_api_key_secret: str | None = None
     cdp_facilitator_url: str = "https://api.cdp.coinbase.com/platform/v2/x402"
     # Networks routed to the CDP facilitator when CDP creds are set (comma-sep).
     cdp_networks: str = "eip155:8453"
@@ -209,14 +265,35 @@ class Settings(BaseSettings):
     # before.
     finality_check_price: str = "$0.01"
 
+    # Buyer payment-policy consistency inspector (POST /x402/policy-check, MCP, A2A).
+    # Default disabled: enable only after operator review (hypothesis pricing).
+    policy_check_enabled: bool = False
+    policy_check_price: str = "$0.01"
+    policy_check_max_header_bytes: int = 65536
+    policy_check_max_decoded_bytes: int = 262_144
+    policy_check_max_accepts: int = 16
+    # When Redis is configured but unreachable, refuse paid idempotent delivery
+    # instead of single-worker in-memory dedup.
+    policy_check_idempotency_redis_strict: bool = True
+
     # MailRail communication & alert dispatch rail
     mailrail_enabled: bool = False
-    mailrail_provider: str = "mock"  # "mock", "file", "smtp", "resend", "webhook"
+    mailrail_provider: str = "mock"  # "mock", "file", "smtp", "resend", "webhook", "agentmail"
     mailrail_api_key: str | None = None
     mailrail_from_address: str = "agents@x402.org"
     mailrail_admin_recipient: str | None = None
+    # AgentMail inbox id (defaults to MAILRAIL_FROM_ADDRESS when unset).
+    mailrail_inbox_id: str | None = None
+    # Svix signing secret from the AgentMail webhook (whsec_...).
+    mailrail_agentmail_webhook_secret: str | None = None
     mailrail_smtp_url: str | None = None
     mailrail_webhook_url: str | None = None
+    # Extra postmaster ids, comma-separated. x402-mailrail-postmaster is always allowed.
+    # GITHUB_TOKEN and GITHUB_REPO are host secrets for operator notify. Leave them
+    # unset and MailRail does not open GitHub issues. Do not commit them.
+    mailrail_allowed_agent_ids: str = ""
+    github_token: str | None = None
+    github_repo: str | None = None
 
     # Autonomous Cache Warmer & Pulse Auto-Freshness Engine
     cache_warmer_enabled: bool = True

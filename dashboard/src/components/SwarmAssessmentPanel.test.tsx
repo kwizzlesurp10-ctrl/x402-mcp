@@ -12,13 +12,13 @@ const assessment: SwarmAssessment = {
   profit_routes: [
     {
       id: "mn_invest",
-      name: "Invest in /mn/property-check",
+      name: "MARC-HD Compliance Verification",
       priority_score: 8.5,
       raw_score: 8.5,
       blocked_by: [],
       human_gated: false,
-      status_note: "Top focus",
-      next_action: "Ship value",
+      status_note: "MARC-HD compliance diligence is shipped and live at $0.85.",
+      next_action: "Maintain diligence verification engine and monitor usage.",
     },
     {
       id: "content_flywheel",
@@ -33,10 +33,10 @@ const assessment: SwarmAssessment = {
   ],
   recommended_route: {
     id: "mn_invest",
-    name: "Invest in /mn/property-check",
+    name: "MARC-HD Compliance Verification",
     priority_score: 8.5,
-    why: "Top focus",
-    next_action: "Ship value",
+    why: "MARC-HD compliance diligence is shipped and live at $0.85.",
+    next_action: "Maintain diligence verification engine and monitor usage.",
   },
   backlog: [
     { charter: "orchestrator", title: "Orchestrator", status: "partial", human_gated: false, detail: "exists" },
@@ -55,7 +55,7 @@ describe("SwarmAssessmentPanel", () => {
   it("shows top route and actionable backlog in standard density", () => {
     render(<SwarmAssessmentPanel assessment={assessment} density="standard" />);
     expect(screen.getByText("Top route")).toBeDefined();
-    expect(screen.getAllByText("Invest in /mn/property-check").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("MARC-HD Compliance Verification").length).toBeGreaterThan(0);
     expect(screen.getByText("Orchestrator")).toBeDefined();
     expect(screen.queryByText("Outreach")).toBeNull();
     expect(screen.getByText(/Human-gated items \(2\)/)).toBeDefined();
@@ -78,7 +78,7 @@ describe("SwarmAssessmentPanel", () => {
   it("shows compact top route only in guided density", () => {
     render(<SwarmAssessmentPanel assessment={assessment} density="guided" />);
     expect(screen.getByText("Top route")).toBeDefined();
-    expect(screen.getAllByText("Invest in /mn/property-check")).toHaveLength(1);
+    expect(screen.getAllByText("MARC-HD Compliance Verification")).toHaveLength(1);
     expect(screen.queryByText("Orchestrator")).toBeNull();
     expect(screen.queryByText(/Human-gated items/i)).toBeNull();
   });

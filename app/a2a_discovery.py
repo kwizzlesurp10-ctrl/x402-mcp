@@ -2,16 +2,50 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import httpx
-
+from app.config import settings
+from app.http_shared import get_discovery_async_http_client
 from app.ssrf_guard import validate_probe_url
+from app import x402_latency
 
 logger = logging.getLogger("x402_mcp.a2a_discovery")
 
-A2A_X402_URI = "https://github.com/google-a2a/a2a-x402/v0.1"
+_CACHE_LOCK = threading.Lock()
+# target_normalized -> (monotonic_expiry, parsed_card); LRU by access order
+_DISCOVERY_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+
+_MAX_REDIRECTS = 8
+
+
+async def _get_json_follow_ssrf(url: str, client: Any, headers: dict[str, str], timeout_seconds: float) -> Any:
+    """GET with manual redirects; validate each hop before issuing the request."""
+    cur = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        validate_probe_url(cur)
+        resp = await client.get(cur, headers=headers, timeout=timeout_seconds)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("location")
+            if not loc:
+                return resp
+            cur = urljoin(str(resp.url), loc)
+            continue
+        return resp
+    raise RuntimeError("discovery redirect limit exceeded")
+
+
+def _cache_put(key: str, value: tuple[float, dict[str, Any]]) -> None:
+    max_n = max(0, int(getattr(settings, "a2a_discovery_cache_max_entries", 256)))
+    _DISCOVERY_CACHE[key] = value
+    _DISCOVERY_CACHE.move_to_end(key)
+    while max_n > 0 and len(_DISCOVERY_CACHE) > max_n:
+        _DISCOVERY_CACHE.popitem(last=False)
+
+A2A_X402_URI = "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2"
 AP2_URI = "https://github.com/google-agentic-commerce/ap2/v1"
 DISCOVERY_PATHS = [
     "/.well-known/agent-card.json",
@@ -104,6 +138,20 @@ def parse_agent_card(data: dict[str, Any], source_url: str) -> dict[str, Any]:
 
 async def resolve_agent_card(target: str, timeout_seconds: float = 8.0) -> dict[str, Any]:
     """Discover, fetch, and normalize an external A2A Agent Card by domain or URL."""
+    ttl = float(getattr(settings, "a2a_discovery_cache_ttl_seconds", 300))
+    norm_key = (target or "").strip().lower()
+    if ttl > 0 and norm_key:
+        now = time.monotonic()
+        with _CACHE_LOCK:
+            hit = _DISCOVERY_CACHE.get(norm_key)
+            if hit is not None:
+                exp, card = hit
+                if now < exp:
+                    _DISCOVERY_CACHE.move_to_end(norm_key)
+                    out = dict(card)
+                    out["cache"] = {"hit": True, "ttl_remaining_s": round(exp - now, 3)}
+                    return out
+
     try:
         candidate_urls = normalize_target_urls(target)
     except Exception as exc:
@@ -120,25 +168,48 @@ async def resolve_agent_card(target: str, timeout_seconds: float = 8.0) -> dict[
         "Accept": "application/json, text/json",
     }
 
-    async with httpx.AsyncClient(
-        timeout=timeout_seconds, follow_redirects=True, max_redirects=3
-    ) as client:
-        for url in candidate_urls:
-            try:
-                validate_probe_url(url)
-                resp = await client.get(url, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, dict):
-                        return parse_agent_card(data, str(resp.url))
-                last_error = f"HTTP {resp.status_code} from {url}"
-            except Exception as exc:
-                last_error = f"{type(exc).__name__}: {str(exc)}"
-                continue
+    t0 = time.perf_counter()
+    client = get_discovery_async_http_client()
+    for url in candidate_urls:
+        try:
+            resp = await _get_json_follow_ssrf(url, client, headers, timeout_seconds)
+            if resp.status_code == 200:
+                try:
+                    validate_probe_url(str(resp.url))
+                except Exception as exc:
+                    last_error = f"response url ssrf guard: {type(exc).__name__}"
+                    continue
+                data = resp.json()
+                if isinstance(data, dict):
+                    parsed = parse_agent_card(data, str(resp.url))
+                    x402_latency.record_span("a2a_discovery", "http_fetch", t0)
+                    if ttl > 0 and norm_key:
+                        with _CACHE_LOCK:
+                            _cache_put(
+                                norm_key,
+                                (time.monotonic() + ttl, dict(parsed)),
+                            )
+                    parsed["cache"] = {"hit": False, "ttl_s": ttl}
+                    return parsed
+            last_error = f"HTTP {resp.status_code} from {url}"
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {str(exc)}"
+            continue
 
+    x402_latency.record_span("a2a_discovery", "http_fetch", t0)
     return {
         "status": "unresolved",
         "target": target,
         "error": last_error or "Agent Card not found at standard discovery endpoints.",
         "candidates_probed": candidate_urls,
     }
+
+
+def clear_discovery_cache_for_test() -> None:
+    with _CACHE_LOCK:
+        _DISCOVERY_CACHE.clear()
+
+
+def discovery_cache_len_for_test() -> int:
+    with _CACHE_LOCK:
+        return len(_DISCOVERY_CACHE)

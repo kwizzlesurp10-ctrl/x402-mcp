@@ -43,7 +43,30 @@ See `.env.example`. Critical:
 - `EVM_PRIVATE_KEY` — buyer wallet for `pay_and_fetch` (x402 alternate rail)
 - `X402_PAY_TO_ADDRESS` — seller recipient for x402 revenue tools (future/alternate)
 - `X402_FACILITATOR_URL` — testnet: `https://x402.org/facilitator`
-- `REDIS_URL` — optional; swap in Redis quota store when scaling
+- `REDIS_URL` — optional; swap in Redis quota store when scaling. When set, **MCP commerce** (`commerce.activate_pro` / `commerce.purchase_credits`) uses the same Redis for **cross-worker settlement coordination** (`mcp_settle:*` keys: result cache, attempt state, token locks). No extra connection string beyond this env.
+- `MCP_COMMERCE_REDIS_STRICT` — default `true`. When `REDIS_URL` is set, MCP commerce **fails closed** (payment rejected, no on-chain retry in that request) if Redis is unreachable at session start, if lock acquisition hits a Redis I/O error, or if the client is nil after a failed ping. Set `false` only for intentional **single-process / dev** use where cross-worker duplicate settlement is acceptable; it is not silent degradation in production—document the tradeoff before toggling.
+
+### MCP commerce settlement guarantees (Redis + facilitator)
+
+| Guarantee | When |
+|-----------|------|
+| Same payment + same server-issued challenge → at most one successful settle recorded in Redis | `REDIS_URL` set, Redis healthy, `MCP_COMMERCE_REDIS_STRICT=true` |
+| Cached result cannot authorize a different challenge | Result blobs carry `challenge_fp`; reads require a match |
+| Lock safety | Random token; release uses compare-and-delete (wrong token does not delete) |
+| Contention | Loser waits (async poll); timeout → `settlement_contention_timeout`; ambiguous peer state → `settlement_ambiguous_manual_reconciliation` |
+| Verify/settle exception after success unclear | `ambiguous_settlement` attempt record; response `settlement_exception_ambiguous` (no automatic repeat settle in-process) |
+
+**Facilitator-dependent gaps:** If the facilitator accepts a settlement but the process crashes before Redis records success, or Redis is lost mid-flight after `settle_payment` returned, on-chain state may not match server idempotency—**manual reconciliation** (ledger / chain) remains the source of truth for “was USDC actually moved?”. This server does not auto-retry ambiguous outcomes.
+
+**Dev / no Redis:** With `REDIS_URL` unset, idempotency is **in-process only** (single worker); do not rely on it across replicas.
+
+**Dev / strict off:** `MCP_COMMERCE_REDIS_STRICT=false` with `REDIS_URL` set uses Redis when the client connects but does **not** fail closed on unreachable Redis; suitable only when you accept that multi-worker safety is not enforced.
+
+### A2A JSON-RPC (`POST /a2a`)
+
+Task ownership is enforced with a **capability token** returned on each new task as `capabilityToken`. Clients must send it on `tasks/get`, `tasks/cancel`, and when resuming paid flows (`message/send` with payment metadata). See [A2A-TASK-CAPABILITY.md](A2A-TASK-CAPABILITY.md).
+
+Optional header `X-A2A-Client-Id`: when sent on task creation, later calls must use the **same** id with the capability.
 
 ## Redis Migration
 
@@ -59,6 +82,18 @@ Replace `InMemoryQuotaStore` in `app/commerce.py`:
 ```powershell
 pytest -v
 ```
+
+## Latency instrumentation
+
+- **In-process histograms:** `app/x402_latency.py` records **low-cardinality** `(bucket, stage)` timings (e.g. `a2a/challenge_build`, `a2a/verify_settle`, `mcp_commerce/redis_lock_acquire`). Client signing and chain finality are **not** server-observable unless you add correlated client telemetry.
+- **Operator export:** `GET /stats` includes `x402_latency_seconds` (p50/p95/p99 per stage) when called with `Authorization: Bearer <OPERATOR_TOKEN>`.
+
+## A2A performance / durability
+
+- **Durable tasks:** when `REDIS_URL` is set and `A2A_TASK_STORE_REDIS=true` (default), tasks persist under `a2a:task:*` with TTL. Capability is stored as `capability_digest`; fulfillment uses `a2a:fulfill:lock:*` for single-flight execution across workers.
+- **Rate limit:** new **paid** challenge creations are capped at **30 per client IP per minute** (`X-Forwarded-For` first hop when present).
+- **Discovery cache:** `GET /a2a/resolve` caches successful agent-card JSON for `A2A_DISCOVERY_CACHE_TTL_SECONDS` (default 300s); responses include a small `cache` stanza.
+- **Benchmark harness (mock / no mainnet):** `python scripts/benchmark_x402_latency.py` — logs JSON with p50/p95/p99 for the in-process `POST /a2a` paid challenge path (see script for warmup/sample counts).
 
 ## Drive Artifact Location
 

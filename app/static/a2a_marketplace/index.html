@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="base:app_id" content="6a7018e2a8c4f2b6db3b3e71" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>x402PrincipalA2A — US City Compliance & Base Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #11161e;
+    --surface-2: #1a212c;
+    --border: #2a3442;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #00d4aa;
+    --accent-dim: #00a884;
+    --warning: #f0b429;
+    --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-sans); line-height: 1.5; font-size: 15px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .mono { font-family: var(--font-mono); font-size: 0.88em; }
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 1.25rem; }
+  .trust-bar { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; padding: 0.6rem 0; font-size: 0.82rem; }
+  .trust-inner { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+  .trust-metric { display: flex; flex-direction: column; }
+  .trust-metric strong { color: var(--accent); font-weight: 600; }
+  .trust-metric span { color: var(--text-dim); font-size: 0.75rem; }
+  .badge { background: var(--surface-2); border: 1px solid var(--border); padding: 0.2rem 0.55rem; border-radius: 4px; font-size: 0.75rem; color: var(--text-dim); }
+  .badge.live { border-color: var(--accent-dim); color: var(--accent); }
+  .hero { padding: 3.5rem 0 2.5rem; border-bottom: 1px solid var(--border); }
+  .hero h1 { font-size: 2.4rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 0.75rem; max-width: 780px; }
+  .hero p.sub { color: var(--text-dim); font-size: 1.05rem; max-width: 640px; margin-bottom: 1.75rem; }
+  .cta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1.1rem; border-radius: 6px; font-weight: 500; font-size: 0.9rem; border: 1px solid transparent; cursor: pointer; transition: all 0.15s; text-decoration: none; }
+  .btn-primary { background: var(--accent); color: #04120e; }
+  .btn-primary:hover { background: #00e6b8; }
+  .btn-secondary { background: transparent; border-color: var(--border); color: var(--text); }
+  .btn-secondary:hover { border-color: var(--text-dim); }
+  section { padding: 2.75rem 0; border-bottom: 1px solid var(--border); }
+  h2 { font-size: 1.45rem; font-weight: 600; margin-bottom: 0.4rem; letter-spacing: -0.01em; }
+  .section-desc { color: var(--text-dim); margin-bottom: 1.5rem; max-width: 680px; }
+  .filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .filter-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); padding: 0.35rem 0.75rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
+  .filter-btn.active { border-color: var(--accent); color: var(--accent); }
+  .skill-list { display: flex; flex-direction: column; gap: 0.6rem; }
+  .skill-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.1rem; }
+  .skill-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.35rem; }
+  .skill-name { font-weight: 600; }
+  .price-tag { font-family: var(--font-mono); font-size: 0.8rem; background: var(--surface-2); padding: 0.15rem 0.5rem; border-radius: 4px; white-space: nowrap; }
+  .price-tag.free { color: var(--accent); }
+  .price-tag.paid { color: var(--warning); }
+  .skill-desc { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 0.5rem; }
+  .skill-meta { display: flex; gap: 1rem; font-size: 0.78rem; color: var(--text-dim); flex-wrap: wrap; align-items: center; }
+  .expandable { margin-top: 0.6rem; display: none; }
+  .expandable.open { display: block; }
+  .flow-steps { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-dim); margin-top: 0.5rem; flex-wrap: wrap; }
+  .flow-steps span { background: var(--surface-2); padding: 0.2rem 0.45rem; border-radius: 3px; }
+  .city-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.75rem; }
+  .city-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; }
+  .city-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .city-card .price { font-family: var(--font-mono); color: var(--warning); font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .city-links { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; }
+  .why-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .why-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem; }
+  .why-card h3 { font-size: 0.95rem; margin-bottom: 0.35rem; }
+  .why-card p { color: var(--text-dim); font-size: 0.88rem; }
+  .metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+  .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem; }
+  .metric-card .val { font-size: 1.35rem; font-weight: 600; color: var(--accent); font-family: var(--font-mono); }
+  .metric-card .label { color: var(--text-dim); font-size: 0.75rem; }
+  footer { padding: 2rem 0 2.5rem; color: var(--text-dim); font-size: 0.8rem; text-align: center; }
+  footer a { color: var(--text-dim); }
+  @media (max-width: 640px) { .hero h1 { font-size: 1.75rem; } .trust-inner { gap: 0.75rem; } }
+</style>
+</head>
+<body>
+<div class="trust-bar">
+  <div class="container trust-inner">
+    <div style="display:flex; gap:1.25rem; flex-wrap:wrap;">
+      <div class="trust-metric"><strong>$24.5+</strong><span>USDC revenue</span></div>
+      <div class="trust-metric"><strong>756+</strong><span>settled txs</span></div>
+      <div class="trust-metric"><strong>17</strong><span>cities</span></div>
+      <div class="trust-metric"><strong>Base</strong><span>eip155:8453</span></div>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+      <span class="badge live">Non-custodial</span>
+      <span class="badge">Coinbase CDP + x402.org</span>
+      <span class="badge mono">payTo 0x0d25…3410</span>
+    </div>
+  </div>
+</div>
+<div class="container">
+  <header class="hero">
+    <h1>US City Open-Data Compliance & Base Intelligence</h1>
+    <p class="sub">Accountless USDC micropayments for autonomous agents. Real municipal compliance data and Base L2 execution tools. Zero custody. Instant settlement on Base mainnet.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://x402-mcp.onrender.com/us/cities" target="_blank">Probe Free Catalog</a>
+      <a class="btn btn-secondary" href="https://x402-mcp.onrender.com/.well-known/agent-card.json" target="_blank">View Agent Card</a>
+      <a class="btn btn-secondary" href="https://x402-mcp.onrender.com/llms.txt" target="_blank">llms.txt</a>
+    </div>
+  </header>
+  <section id="discovery">
+    <h2>Agent Discovery</h2>
+    <p class="section-desc">Searchable capabilities from the live agent card. Free tools for discovery; paid tools at exact USDC prices on Base.</p>
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="free">Free</button>
+      <button class="filter-btn" data-filter="paid">Paid</button>
+    </div>
+    <div class="skill-list" id="skillList"></div>
+  </section>
+  <section id="cities">
+    <h2>City Compliance Marketplace</h2>
+    <p class="section-desc">Address-level rental license and violation checks across 17 US cities. $0.01 USDC per call. Free samples available.</p>
+    <div class="city-grid" id="cityGrid"></div>
+  </section>
+  <section id="why">
+    <h2>Why Agents Choose This Node</h2>
+    <div class="why-grid">
+      <div class="why-card"><h3>Lowest reliable price</h3><p>Real open-data compliance reports at $0.01 USDC. No signup, no custody, gasless buyer settlement.</p></div>
+      <div class="why-card"><h3>Base L2 intelligence</h3><p>Tx decision and finality checks for Base mainnet. Exact fee estimates and settlement status.</p></div>
+      <div class="why-card"><h3>Proven settlements</h3><p>756+ settled transactions. Coinbase CDP facilitator + x402.org. Append-only ledger.</p></div>
+      <div class="why-card"><h3>Full protocol surface</h3><p>A2A JSON-RPC, MCP Streamable HTTP, OpenAPI. Discoverable via agent card and Agentic.Market.</p></div>
+    </div>
+  </section>
+  <section id="operator">
+    <h2>Operator View</h2>
+    <p class="section-desc">Live-style metrics from the production node. Fixture cleanup and additional city reliability work in progress.</p>
+    <div class="metrics-row">
+      <div class="metric-card"><div class="val">$24.5+</div><div class="label">Revenue (USDC)</div></div>
+      <div class="metric-card"><div class="val">756+</div><div class="label">Settled transactions</div></div>
+      <div class="metric-card"><div class="val">22</div><div class="label">Paid listings</div></div>
+      <div class="metric-card"><div class="val">21+</div><div class="label">MCP tools</div></div>
+    </div>
+    <div class="cta-row">
+      <a class="btn btn-secondary" href="https://x402-mcp.onrender.com/" target="_blank">Live Dashboard</a>
+      <a class="btn btn-secondary" href="https://x402-mcp.onrender.com/.well-known/funding.json" target="_blank">funding.json</a>
+      <a class="btn btn-secondary" href="https://x402-mcp.onrender.com/.well-known/agentic-market.json" target="_blank">Agentic.Market</a>
+    </div>
+  </section>
+  <footer>
+    <p>x402PrincipalA2A · SEVTECH · <a href="https://x402-mcp.onrender.com">x402-mcp.onrender.com</a></p>
+    <p style="margin-top:0.4rem;">Non-custodial · Base mainnet USDC · Payment proof required for paid resources · payTo 0x0d25A44f74868eCE53B305C97139CF4B62963410</p>
+  </footer>
+</div>
+<script>
+const skills = [
+  { id: "agent-card", name: "A2A Agent Card & Capabilities Inspector", desc: "Inspect this host's Agent Card, MCP tools, skills, and payment rails. Free.", price: "Free", type: "free", endpoint: "GET /.well-known/agent-card.json", sample: "https://x402-mcp.onrender.com/.well-known/agent-card.json" },
+  { id: "cities", name: "US City Open-Data Compliance Catalog", desc: "Machine-readable catalog of multi-city property compliance endpoints. Free.", price: "Free", type: "free", endpoint: "GET /us/cities", sample: "https://x402-mcp.onrender.com/us/cities" },
+  { id: "property", name: "Property Due Diligence Agent", desc: "Address-level rental license / violation check across 17 cities. Returns compliance verdict.", price: "$0.01", type: "paid", endpoint: "GET /agent/property-due-diligence?city_code=&address=", sample: "https://x402-mcp.onrender.com/us/mn/property-check/sample" },
+  { id: "tx-decision", name: "Base Transaction Decision", desc: "Recommendation whether to submit a Base transaction now or wait. Returns fee estimates.", price: "$0.01", type: "paid", endpoint: "GET /base/tx-decision", sample: null },
+  { id: "finality", name: "Base Transaction Finality Check", desc: "Classify a Base mainnet tx hash as pending, unsafe, safe, or finalized.", price: "$0.01", type: "paid", endpoint: "GET /base/finality-check", sample: null },
+  { id: "pulse", name: "Pulse / Base Intelligence", desc: "Fresh Base network pulse and composite products.", price: "$0.05", type: "paid", endpoint: "GET /pulse", sample: "https://x402-mcp.onrender.com/pulse" }
+];
+const cities = [
+  { code: "mn", name: "Minneapolis", sample: "https://x402-mcp.onrender.com/us/mn/property-check/sample" },
+  { code: "sea", name: "Seattle", sample: "https://x402-mcp.onrender.com/us/sea/property-check/sample" },
+  { code: "nyc", name: "New York City", sample: "https://x402-mcp.onrender.com/us/nyc/property-check/sample" },
+  { code: "chi", name: "Chicago", sample: "https://x402-mcp.onrender.com/us/chi/property-check/sample" },
+  { code: "den", name: "Denver", sample: "https://x402-mcp.onrender.com/us/den/property-check/sample" },
+  { code: "sf", name: "San Francisco", sample: "https://x402-mcp.onrender.com/us/sf/property-check/sample" },
+  { code: "lax", name: "Los Angeles", sample: "https://x402-mcp.onrender.com/us/lax/property-check/sample" },
+  { code: "bos", name: "Boston", sample: "https://x402-mcp.onrender.com/us/bos/property-check/sample" },
+  { code: "phi", name: "Philadelphia", sample: "https://x402-mcp.onrender.com/us/phi/property-check/sample" },
+  { code: "orl", name: "Orlando", sample: "https://x402-mcp.onrender.com/us/orl/property-check/sample" },
+  { code: "nola", name: "New Orleans", sample: "https://x402-mcp.onrender.com/us/nola/property-check/sample" },
+  { code: "moco", name: "Montgomery County", sample: "https://x402-mcp.onrender.com/us/moco/property-check/sample" },
+  { code: "gain", name: "Gainesville", sample: "https://x402-mcp.onrender.com/us/gain/property-check/sample" },
+  { code: "kc", name: "Kansas City", sample: "https://x402-mcp.onrender.com/us/kc/property-check/sample" },
+  { code: "atx", name: "Austin", sample: "https://x402-mcp.onrender.com/us/atx/property-check/sample" },
+  { code: "bna", name: "Nashville", sample: "https://x402-mcp.onrender.com/us/bna/property-check/sample" },
+  { code: "sd", name: "San Diego", sample: "https://x402-mcp.onrender.com/us/sd/property-check/sample" }
+];
+function renderSkills(filter = "all") {
+  const list = document.getElementById("skillList");
+  list.innerHTML = "";
+  skills.filter(s => filter === "all" || s.type === filter).forEach(s => {
+    const card = document.createElement("div");
+    card.className = "skill-card";
+    card.innerHTML = `
+      <div class="skill-header">
+        <div class="skill-name">${s.name}</div>
+        <div class="price-tag ${s.type}">${s.price}</div>
+      </div>
+      <div class="skill-desc">${s.desc}</div>
+      <div class="skill-meta">
+        <span class="mono">${s.endpoint}</span>
+        ${s.sample ? `<a href="${s.sample}" target="_blank">Sample / Free</a>` : ""}
+        <button class="btn-secondary" style="padding:0.15rem 0.5rem;font-size:0.75rem;border-radius:4px;" onclick="this.closest('.skill-card').querySelector('.expandable').classList.toggle('open')">402 Flow</button>
+      </div>
+      <div class="expandable">
+        <div class="flow-steps">
+          <span>1. Request</span> → <span>2. HTTP 402</span> → <span>3. Payment proof</span> → <span>4. Verified result</span>
+        </div>
+        <p style="margin-top:0.4rem;font-size:0.78rem;color:var(--text-dim);">Exact asset: USDC on eip155:8453. payTo: 0x0d25A44f74868eCE53B305C97139CF4B62963410. Non-custodial. Settlement via CDP facilitator.</p>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+function renderCities() {
+  const grid = document.getElementById("cityGrid");
+  cities.forEach(c => {
+    const card = document.createElement("div");
+    card.className = "city-card";
+    card.innerHTML = `
+      <h3>${c.name}</h3>
+      <div class="price">$0.01 USDC</div>
+      <div class="city-links">
+        <a href="${c.sample}" target="_blank">Free sample</a>
+        <span class="mono">GET /agent/property-due-diligence?city_code=${c.code}&address=</span>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+document.querySelectorAll(".filter-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    renderSkills(btn.dataset.filter);
+  });
+});
+renderSkills();
+renderCities();
+</script>
+</body>
+</html>

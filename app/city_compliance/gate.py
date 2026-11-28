@@ -10,6 +10,7 @@ from typing import Any
 
 from app.city_compliance.models import CitySpec
 from app.config import settings
+from app.discovery_schemas import ADDRESS_QUERY_SCHEMA
 
 
 def resource_url(city: CitySpec) -> str:
@@ -42,6 +43,7 @@ def build_payment_required_header(
     price = price_for(city)
     res = resource_url(city)
     tags = list(city.tags)
+    input_schema = ADDRESS_QUERY_SCHEMA
     fp = challenge_cache.fingerprint(
         network=network,
         price=price,
@@ -50,6 +52,7 @@ def build_payment_required_header(
         discoverable=settings.bazaar_discoverable,
         description=city.description,
         input_example=input_example,
+        input_schema=input_schema,
         output_example=output_example,
         service_name=city.service_name,
         service_tags=tags,
@@ -65,6 +68,7 @@ def build_payment_required_header(
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=input_example,
+                discovery_input_schema=input_schema,
                 discovery_output_example=output_example,
                 service_name=city.service_name,
                 service_tags=tags,
@@ -72,6 +76,30 @@ def build_payment_required_header(
         )["payment_required_header"]
 
     return challenge_cache.get_or_build(product_id(city), fp, _build)
+
+
+async def verify_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.verify_payment_payload(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+async def settle_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
 
 
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:

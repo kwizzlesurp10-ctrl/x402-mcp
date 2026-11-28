@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="CO",
     service_name="Denver STR License Check",
     tags=("denver", "str", "rental-license", "housing", "diligence"),
-    description=(
-        "Denver short term rental license check: is this property licensed for "
-        "STR? Property due diligence agent for Denver Colorado housing "
-        "compliance open data. GET ?address= → short-term rental license number, "
-        "status, parcel, expiration. Live Colorado/Denver JSON. Host compliance, "
-        "HOA/property manager, agent workflows."
-    ),
+    description=outcome_copy.paid_route_description(code="den", name="Denver"),
     sample_address="1945 S GILPIN ST",
     sample_note=(
         "Free fixed-address sample of Denver short-term rental licenses. "

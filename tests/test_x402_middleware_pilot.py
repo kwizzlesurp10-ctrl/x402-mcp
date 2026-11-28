@@ -67,13 +67,11 @@ def test_finality_check_402_carries_bazaar_discovery_extension() -> None:
     assert "bazaar" in decoded.get("extensions", {})
 
 
-def test_malformed_tx_is_still_gated_before_route_validation_runs() -> None:
-    """Payment gating happens at the ASGI layer, before FastAPI's own query
-    validation -- an unpaid request with a bad `tx` still gets the 402
-    challenge, not a 422. The 422-without-charge property is enforced later,
-    inside call_next, once a payment has actually been verified."""
+def test_malformed_tx_unpaid_still_returns_402_with_hint() -> None:
+    """Discovery crawlers must receive 402 even when `tx` is malformed."""
     response = client.get("/base/finality-check", params={"tx": "not-a-hash"})
     assert response.status_code == 402
+    assert response.headers.get("PAYMENT-REQUIRED")
 
 
 def test_mn_property_check_still_uses_its_own_hand_rolled_path() -> None:
@@ -96,6 +94,22 @@ def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
     joined string as PaymentOption.network makes the SDK's initialize() raise
     RouteConfigurationError and 500 /pilot/ping + /base/finality-check."""
     monkeypatch.setattr(settings, "x402_default_network", JOINED_PRODUCTION_NETWORKS)
+    # Hermetic: register() builds its resource server via _facilitator_client(),
+    # which otherwise talks to the live CDP facilitator (when CDP creds are in
+    # the env) or the SDK-default x402.org one -- never the conftest mock. The
+    # live /supported list decides which rails survive (CDP advertises
+    # eip155:42161), so results flipped with runner creds/network. Pin it to
+    # the session mock facilitator, which supports eip155:8453 but neither
+    # Arbitrum nor Solana mainnet.
+    from x402.http import HTTPFacilitatorClient
+
+    from app import x402_services
+
+    monkeypatch.setattr(
+        x402_services,
+        "_facilitator_client",
+        lambda _network=None: HTTPFacilitatorClient({"url": settings.x402_facilitator_url}),
+    )
     pilot_app = FastAPI()
     x402_middleware_pilot.register(pilot_app)
     pilot_client = TestClient(pilot_app)
@@ -109,6 +123,8 @@ def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
     # Joined production string must never appear as a single network id.
     assert JOINED_PRODUCTION_NETWORKS not in ping_nets
     assert "eip155:42161" not in ping_nets
+    # Only rails the (mock) facilitator actually supports are advertised.
+    assert ping_nets == ["eip155:8453"]
 
     finality = pilot_client.get("/base/finality-check", params={"tx": VALID_TX})
     assert finality.status_code == 402, finality.text[:300]
@@ -116,6 +132,7 @@ def test_comma_joined_default_network_serves_atomic_402(monkeypatch) -> None:
     fin_nets = [a["network"] for a in fin_decoded["accepts"]]
     assert all(n.startswith("eip155:") and "," not in n for n in fin_nets)
     assert JOINED_PRODUCTION_NETWORKS not in fin_nets
+    assert fin_nets == ["eip155:8453"]
 
 
 def test_atomic_options_skip_joined_and_unsupported_ids() -> None:
@@ -164,9 +181,13 @@ def test_register_is_a_noop_without_pay_to_address(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("agent_id", ["dashboard-agent"])
-def test_quota_route_untouched(agent_id: str) -> None:
+def test_quota_route_untouched(agent_id: str, monkeypatch) -> None:
     """Spot-check a second unrelated route family stays reachable."""
-    assert client.get(f"/quota/{agent_id}").status_code == 200
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "operator_token", "op-test")
+    resp = client.get(f"/quota/{agent_id}", headers={"Authorization": "Bearer op-test"})
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +397,68 @@ def test_unrelated_402s_are_not_attributed_to_these_routes() -> None:
 
     assert "base-finality-check" not in demand.challenges()
     assert "pilot-ping" not in demand.challenges()
+
+
+@pytest.mark.anyio
+async def test_events_sse_not_materialized(monkeypatch) -> None:
+    """GET /events must stream; pilot middleware must not drain body_iterator."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from app.main import tool_events
+    from app.ops_events import emit_tool_event
+
+    emit_tool_event("sse-buffer-probe", "agent-sse-probe", {"agent_id": "agent-sse-probe"})
+
+    async def forbid_materialize(*_a, **_k):
+        raise AssertionError("must not buffer /events")
+
+    monkeypatch.setattr(x402_middleware_pilot, "_materialize_response", forbid_materialize)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/events",
+        "headers": [],
+        "query_string": b"",
+    }
+    req = Request(scope)
+    resp = await tool_events(req)
+    assert x402_middleware_pilot._is_event_stream(resp)
+    assert x402_middleware_pilot._should_capture_delivery_body(req, resp) is False
+
+    if x402_middleware_pilot._should_capture_delivery_body(req, resp):
+        await forbid_materialize(resp)
+
+    chunk = await asyncio.wait_for(resp.body_iterator.__anext__(), timeout=2)
+    await resp.body_iterator.aclose()
+    text = chunk.decode() if isinstance(chunk, bytes) else chunk
+    assert "data:" in text or "heartbeat" in text.lower() or text.strip()
+
+
+@pytest.mark.anyio
+async def test_paid_pilot_path_invokes_materialize(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    from starlette.responses import JSONResponse
+
+    calls: list[str] = []
+
+    async def fake_mat(resp, **_k):
+        calls.append("mat")
+        return resp, b'{"ok":true}'
+
+    monkeypatch.setattr(x402_middleware_pilot, "_materialize_response", fake_mat)
+
+    req = MagicMock()
+    req.url.path = "/pilot/ping"
+    resp = JSONResponse({"ok": True}, status_code=200)
+    resp.headers["PAYMENT-RESPONSE"] = "settled"
+
+    if x402_middleware_pilot._should_capture_delivery_body(req, resp):
+        await x402_middleware_pilot._materialize_response(resp)
+    assert calls == ["mat"]
 
 
 def test_the_funnel_joins_end_to_end(ledger) -> None:

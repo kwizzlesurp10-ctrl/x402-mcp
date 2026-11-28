@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +24,7 @@ def mail_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger)
     monkeypatch.setattr(settings, "mailrail_admin_recipient", "ops@x402.test")
     _SEEN_KEYS.clear()
+    agentmail.reset_city_batch()
     return ledger
 
 
@@ -56,8 +58,10 @@ def test_two_catalog_calls_both_dispatch(mail_ledger: Path) -> None:
     """Each catalog browse must emit its own AgentMail (no process-lifetime dedup)."""
     res1 = agentmail.notify_city_call("catalog", channel="http", detail="first")
     res2 = agentmail.notify_city_call("catalog", channel="http", detail="second")
-    assert res1 is not None and res1["status"] == "sent"
-    assert res2 is not None and res2["status"] == "sent"
+    assert res1 is not None and res1["status"] == "disabled"
+    assert res1["delivered"] is False
+    assert res2 is not None and res2["status"] == "disabled"
+    assert res2["delivered"] is False
     records = _ledger_records(mail_ledger)
     assert len(records) == 2
     assert records[0]["event_id"] != records[1]["event_id"]
@@ -93,7 +97,8 @@ def test_paid_tx_hash_retries_deduplicate(mail_ledger: Path) -> None:
     }
     res1 = agentmail.notify_city_call(**kwargs)
     res2 = agentmail.notify_city_call(**kwargs)
-    assert res1 is not None and res1["status"] == "sent"
+    assert res1 is not None and res1["status"] == "disabled"
+    assert res1["delivered"] is False
     assert res2 is not None and res2["status"] == "deduplicated"
     assert len(_ledger_records(mail_ledger)) == 1
 
@@ -114,7 +119,8 @@ def test_request_id_retries_deduplicate(mail_ledger: Path) -> None:
         address="1 Centre St",
         request_id="probe-handoff-42",
     )
-    assert res1 is not None and res1["status"] == "sent"
+    assert res1 is not None and res1["status"] == "disabled"
+    assert res1["delivered"] is False
     assert res2 is not None and res2["status"] == "deduplicated"
     assert len(_ledger_records(mail_ledger)) == 1
 
@@ -127,7 +133,8 @@ def test_notify_city_call_records_ledger(mail_ledger: Path) -> None:
         detail="city_count=14",
     )
     assert res is not None
-    assert res["status"] == "sent"
+    assert res["status"] == "disabled"
+    assert res["delivered"] is False
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "catalog"
@@ -159,52 +166,20 @@ async def test_mcp_sample_sends_per_city_agentmail(
 
 
 @pytest.mark.asyncio
-async def test_mcp_check_probe_sends_agentmail(
-    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", None)
-
-    async def fake_probe(params):  # noqa: ANN001
-        return {"status_code": 402, "url": str(params.url)}
-
-    monkeypatch.setattr(city_mcp.x402_services, "get_payment_requirements", fake_probe)
-    await city_mcp.check_us_city_property(
-        "nyc", "1 Centre St", agent_id="probe-agent"
-    )
-    records = _ledger_records(mail_ledger)
-    assert len(records) == 1
-    assert records[0]["metadata"]["call_kind"] == "paid_probe"
-    assert records[0]["metadata"]["city_code"] == "nyc"
-
-
-@pytest.mark.asyncio
 async def test_mcp_check_paid_sends_agentmail(
     mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", "0x" + "ab" * 32)
+    async def fake_check(address: str) -> dict[str, Any]:
+        return {"compliance_verdict": "licensed_clean", "address": address}
 
-    async def fake_pay(params):  # noqa: ANN001
-        return {
-            "status_code": 200,
-            "url": str(params.url),
-            "body": json.dumps({"compliance_verdict": "licensed_clean"}),
-            "payment_settled": True,
-            "payment_settlement": {
-                "success": True,
-                "transaction": "0xpaidtx",
-                "payer": "0xpayer",
-            },
-            "sdk": "mock",
-        }
-
-    monkeypatch.setattr(city_mcp.x402_services, "pay_and_fetch", fake_pay)
+    monkeypatch.setattr(registry.get_city("chi"), "check_property", fake_check)
     await city_mcp.check_us_city_property(
         "chi", "121 N LaSalle St", agent_id="paid-agent"
     )
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "paid_mcp"
-    assert "licensed_clean" in records[0]["body"]
+    assert "Verdict:    licensed" in records[0]["body"]
 
 
 @pytest.mark.asyncio
@@ -251,14 +226,17 @@ def test_http_mn_sample_upstream_failure_sends_agentmail(
     monkeypatch.setattr(mn_compliance, "check_property", boom)
     client = TestClient(app)
     res = client.get("/mn/property-check/sample")
-    assert res.status_code == 502
-    assert res.json()["error"] == "upstream_open_data_unavailable"
+    assert res.status_code == 200
+    assert res.json()["report"]["compliance_verdict"] == "unknown"
     records = _ledger_records(mail_ledger)
-    assert len(records) == 1
-    assert records[0]["metadata"]["call_kind"] == "error"
-    assert records[0]["metadata"]["city_code"] == "mn"
-    assert records[0]["metadata"]["channel"] == "http"
-    assert "upstream_open_data_unavailable" in records[0]["body"]
+    kinds = {r["metadata"]["call_kind"] for r in records}
+    assert "error" in kinds
+    assert "sample" in kinds
+    assert any(
+        r["metadata"]["city_code"] == "mn"
+        and "upstream_open_data_unavailable" in r["body"]
+        for r in records
+    )
 
 
 def test_http_city_sample_sends_agentmail(
@@ -295,7 +273,17 @@ def test_http_paid_upstream_failure_sends_agentmail(
     test_pay_to = "0xTestPayTo00000000000000000000000000000002"
     monkeypatch.setattr(settings, "x402_pay_to_address", test_pay_to)
 
+    settle_called = False
+
+    async def fake_verify(signature: str, payment_required: str) -> dict:
+        return {
+            "is_valid": True,
+            "invalid_reason": None,
+        }
+
     async def fake_settle(signature: str, payment_required: str) -> dict:
+        nonlocal settle_called
+        settle_called = True
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -304,14 +292,13 @@ def test_http_paid_upstream_failure_sends_agentmail(
                 "transaction": "0xdeadbeef",
                 "payer": "0xpayer123",
             },
-            "invalid_reason": None,
-            "settlement_error": None,
         }
 
     async def boom(address: str) -> dict[str, Any]:
         raise TimeoutError("upstream down")
 
-    monkeypatch.setattr(gate, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(gate, "verify_payment", fake_verify)
+    monkeypatch.setattr(gate, "settle_payment", fake_settle)
     monkeypatch.setattr(registry.get_city("sea"), "check_property", boom)
     client = TestClient(app)
     res = client.get(
@@ -319,16 +306,16 @@ def test_http_paid_upstream_failure_sends_agentmail(
         params={"address": "400 Pine St"},
         headers={"PAYMENT-SIGNATURE": "sig-paid"},
     )
-    assert res.status_code == 502
+    assert res.status_code == 503
     assert res.json()["error"] == "upstream_open_data_unavailable"
-    assert res.headers.get("payment-response")
+    assert res.json().get("payment_settled") is False
+    assert res.headers.get("payment-response") is None
+    assert settle_called is False
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "error"
     assert records[0]["metadata"]["city_code"] == "sea"
     assert records[0]["metadata"]["channel"] == "http"
-    assert "(paid)" in records[0]["subject"]
-    assert "0xdeadbeef" in records[0]["body"]
     assert "upstream_open_data_unavailable" in records[0]["body"]
 
 
@@ -339,7 +326,14 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
 
     monkeypatch.setattr(settings, "x402_pay_to_address", "0x" + "ab" * 20)
 
+    settle_called = False
+
+    async def fake_verify(signature: str, payment_required: str) -> dict:
+        return {"is_valid": True}
+
     async def fake_settle(signature: str, payment_required: str) -> dict:
+        nonlocal settle_called
+        settle_called = True
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -353,7 +347,8 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
     async def boom(city_code: str, address: str) -> dict[str, Any]:
         raise TimeoutError("upstream down")
 
-    monkeypatch.setattr(diligence_agent, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(diligence_agent, "verify_payment", fake_verify)
+    monkeypatch.setattr(diligence_agent, "settle_payment", fake_settle)
     monkeypatch.setattr(diligence_agent, "run_check", boom)
     client = TestClient(app)
     res = client.get(
@@ -361,13 +356,49 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
         params={"city_code": "mn", "address": "1700 Penn Ave N"},
         headers={"PAYMENT-SIGNATURE": "sig-paid"},
     )
-    assert res.status_code == 502
+    assert res.status_code == 503
     assert res.json()["error"] == "upstream_open_data_unavailable"
-    assert res.headers.get("payment-response")
+    assert settle_called is False
+    assert res.headers.get("payment-response") is None
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "error"
     assert records[0]["metadata"]["city_code"] == "mn"
-    assert "(paid)" in records[0]["subject"]
-    assert "0xfeedface" in records[0]["body"]
     assert "upstream_open_data_unavailable" in records[0]["body"]
+    assert "upstream_open_data_unavailable" in records[0]["body"]
+
+
+def test_non_mock_city_alerts_batch_to_one_dispatch(
+    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two city calls on a live provider produce one transport dispatch."""
+    monkeypatch.setattr(settings, "mailrail_enabled", True)
+    monkeypatch.setattr(settings, "mailrail_provider", "resend")
+    monkeypatch.setattr(settings, "mailrail_api_key", "re_test_key")
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _Resp:
+        status_code = 200
+
+    def fake_post(url: str, **kwargs: Any) -> _Resp:
+        calls.append((url, kwargs))
+        return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    first = agentmail.notify_city_call("catalog", channel="http", detail="first")
+    assert first is not None
+    assert first["delivered"] is False
+    assert calls == []
+    second = agentmail.notify_city_call("catalog", channel="http", detail="second")
+    assert second is not None
+    assert second["delivered"] is True
+    assert len(calls) == 1
+    parsed = urlparse(calls[0][0])
+    assert parsed.hostname == "api.resend.com"
+    posted = calls[0][1]["json"]["text"]
+    assert "first" in posted
+    assert "second" in posted
+    assert len(_ledger_records(mail_ledger)) == 1

@@ -17,6 +17,8 @@ Owner phone/email exist in the source data but are intentionally not served.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +26,18 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.discovery_schemas import ADDRESS_QUERY_SCHEMA
+
+log = logging.getLogger("x402.mn_compliance")
+
+CANONICAL_MN_DATA_BASE_URL = (
+    "https://services.arcgis.com/afSMGVsC7QlRK1kZ/ArcGIS/rest/services"
+)
+# Render/env typos that fail fast with ArcGIS "Invalid URL" — override to canonical.
+_STALE_MN_BASE_URL_MARKERS = ("afSMGVsArcGISTools",)
+
+_QUERY_ATTEMPTS = 3
+_QUERY_BACKOFF_SECONDS = (0.4, 1.0, 2.0)
 
 # ---- TTL cache for ArcGIS responses ----------------------------------------
 # Avoids re-hitting the city endpoint for repeated queries within the window.
@@ -52,8 +66,9 @@ LICENSE_FIELDS = (
     "licensedUnits,ownerName,ward,neighborhoodDesc,communityDesc,shortTermRental"
 )
 VIOLATION_FIELDS = (
-    "APN,Violation_Case_Number,Case_Type,Case_Group,Inspection_Result,"
-    "Inspection_Type_Desc,Start_Date,Completed_Date"
+    "APN,Violation_Case_Number,Case_Type,Case_Group,Status_Violation_Case,"
+    "Violation_Code,Violation_Code_Description,Status_Violation,Resolution_Code,"
+    "Processed_Date,Resolved_Date"
 )
 CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 
@@ -66,15 +81,9 @@ CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 # rather than describing the endpoint to another engineer.
 #
 # 500 chars is the CDP ceiling (_clamp_description); this sits under it.
-RESOURCE_DESCRIPTION = (
-    "Minneapolis rental license check — is this property licensed? Property due "
-    "diligence agent for Minneapolis Minnesota (Hennepin) housing compliance open "
-    "data. GET ?address= (street 1-120 chars) → compliance_verdict "
-    "(licensed_clean|licensed_with_violations|unlicensed|condemned_or_boarded), "
-    "rental license status/tier/units/expiration, violation cases, condemned/"
-    "boarded. Live City JSON. Tenant screening, landlord DD, lending. Sample: "
-    "/mn/property-check/sample."
-)
+from app.city_compliance import outcome_copy
+
+RESOURCE_DESCRIPTION = outcome_copy.mn_resource_description()
 
 # Per-resource Bazaar metadata (facilitator: name <=32, <=5 tags x <=32 chars).
 # Must NOT inherit the storefront defaults (base,intelligence) — those describe
@@ -83,36 +92,151 @@ RESOURCE_DESCRIPTION = (
 SERVICE_NAME = "MN Rental License Check"
 SERVICE_TAGS = ["minneapolis", "rental-license", "compliance", "housing", "diligence"]
 
+# City of Minneapolis closes a CaseViolations row with one of these tokens.
+# Abate/Closed is history. It stays in the report and does not flip the verdict.
+_CLOSED_STATUSES = frozenset({
+    "abate",
+    "abated",
+    "cancel",
+    "canceled",
+    "cancelled",
+    "close",
+    "closed",
+    "void",
+    "complied",
+    "compliance",
+    "no violation",
+    "no violations",
+})
+
 
 def _escape(value: str) -> str:
     """Escape a value for an ArcGIS SQL where clause (single-quote doubling)."""
     return value.replace("'", "''")
 
 
-def _iso(epoch_ms: Any) -> str | None:
-    if not isinstance(epoch_ms, (int, float)):
+def _iso(value: Any) -> str | None:
+    """ArcGIS dates arrive as epoch ms or as already-formatted strings."""
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        return raw[:10]
+    return None
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
         return None
-    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).date().isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def violation_is_open(row: dict) -> bool:
+    """True when this case row is still open.
+
+    A blank Status_Violation on an Enforce, Open, or Pending case is open.
+    Abate, Cancel, Closed, and Void close the row. Old Inspection_Result
+    values from the retired layer use the same tokens.
+    """
+    tokens = (
+        _text(row.get("Status_Violation_Case")),
+        _text(row.get("Status_Violation")),
+        _text(row.get("Resolution_Code")),
+        _text(row.get("Inspection_Result")),
+    )
+    for token in tokens:
+        if token and token.lower() in _CLOSED_STATUSES:
+            return False
+    return True
+
+
+def _violation_sort_key(row: dict) -> float:
+    for key in ("Processed_Date", "Resolved_Date", "Start_Date"):
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return 0.0
+
+
+def effective_mn_data_base_url() -> str:
+    """Return the ArcGIS services root, correcting known stale env overrides."""
+    configured = (settings.mn_data_base_url or "").strip().rstrip("/")
+    lowered = configured.lower()
+    if configured and any(m.lower() in lowered for m in _STALE_MN_BASE_URL_MARKERS):
+        log.warning(
+            "mn_data_base_url looks stale (%s); using canonical Minneapolis host",
+            configured,
+        )
+        return CANONICAL_MN_DATA_BASE_URL
+    return configured or CANONICAL_MN_DATA_BASE_URL
+
+
+def _require_feature_server_json(
+    response: httpx.Response, dataset: str
+) -> dict[str, Any]:
+    ctype = (response.headers.get("content-type") or "").lower()
+    if "json" not in ctype and "javascript" not in ctype:
+        raise ValueError(
+            f"{dataset} returned non-JSON ({ctype or 'missing content-type'})"
+        )
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"{dataset} FeatureServer JSON is not an object")
+    if "error" in payload:
+        err = payload["error"]
+        message = err.get("message") if isinstance(err, dict) else err
+        raise ValueError(f"{dataset} query error: {message}")
+    if "features" not in payload:
+        raise ValueError(f"{dataset} FeatureServer response missing features")
+    return payload
+
+
+def _http_headers() -> dict[str, str]:
+    return {
+        "Accept": "application/json",
+        "User-Agent": f"x402-mcp-mn-compliance/1.0 ({settings.contact_email})",
+    }
 
 
 async def _query(
     client: httpx.AsyncClient, dataset: str, where: str, out_fields: str, limit: int
 ) -> list[dict]:
-    response = await client.get(
-        f"{settings.mn_data_base_url}/{dataset}/FeatureServer/0/query",
-        params={
-            "where": where,
-            "outFields": out_fields,
-            "resultRecordCount": limit,
-            "returnGeometry": "false",
-            "f": "json",
-        },
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if "error" in payload:
-        raise ValueError(f"{dataset} query error: {payload['error']}")
-    return [f["attributes"] for f in payload.get("features", [])]
+    base = effective_mn_data_base_url()
+    url = f"{base}/{dataset}/FeatureServer/0/query"
+    params = {
+        "where": where,
+        "outFields": out_fields,
+        "resultRecordCount": limit,
+        "returnGeometry": "false",
+        "f": "json",
+    }
+    last_exc: Exception | None = None
+    for attempt in range(_QUERY_ATTEMPTS):
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            payload = _require_feature_server_json(response, dataset)
+            return [f["attributes"] for f in payload.get("features", [])]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            last_exc = exc
+            if attempt + 1 < _QUERY_ATTEMPTS:
+                await asyncio.sleep(_QUERY_BACKOFF_SECONDS[attempt])
+    raise RuntimeError(
+        f"{dataset} open-data query failed after {_QUERY_ATTEMPTS} attempts"
+    ) from last_exc
+
+
+async def _query_optional(
+    client: httpx.AsyncClient, dataset: str, where: str, out_fields: str, limit: int
+) -> list[dict]:
+    try:
+        return await _query(client, dataset, where, out_fields, limit)
+    except Exception:
+        log.warning("MN optional join %s failed (degraded response)", dataset, exc_info=True)
+        return []
 
 
 async def check_property(address: str) -> dict[str, Any]:
@@ -123,7 +247,11 @@ async def check_property(address: str) -> dict[str, Any]:
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient(timeout=25.0) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0, read=40.0),
+        follow_redirects=True,
+        headers=_http_headers(),
+    ) as client:
         licenses = await _query(
             client,
             "Active_Rental_Licenses",
@@ -136,7 +264,6 @@ async def check_property(address: str) -> dict[str, Any]:
         violations: list[dict] = []
         condemned: list[dict] = []
         if apns:
-            import asyncio
             apn_list = ", ".join(f"'{_escape(a)}'" for a in apns)
             violations, condemned = await asyncio.gather(
                 _query(
@@ -146,18 +273,16 @@ async def check_property(address: str) -> dict[str, Any]:
                     VIOLATION_FIELDS,
                     200,
                 ),
-                _query(
+                _query_optional(
                     client,
                     "Condemned_by_Boarding",
                     f"APN IN ({apn_list})",
                     CONDEMNED_FIELDS,
                     10,
-                )
+                ),
             )
         else:
-            # No license found — still check condemned/boarded by address so a
-            # completely unlicensed problem property is not reported as clean.
-            condemned = await _query(
+            condemned = await _query_optional(
                 client,
                 "Condemned_by_Boarding",
                 f"UPPER(Address) LIKE '{needle}%'",
@@ -166,20 +291,22 @@ async def check_property(address: str) -> dict[str, Any]:
             )
 
     recent_violations = sorted(
-        violations, key=lambda v: v.get("Start_Date") or 0, reverse=True
+        violations, key=_violation_sort_key, reverse=True
     )[:10]
 
     licensed = bool(licenses)
     condemned_flagged = bool(condemned)
     violation_total = len(violations)
+    open_total = sum(1 for row in violations if violation_is_open(row))
     # One-token decision for agent buyers. Severity order: condemned >
-    # unlicensed > licensed-with-open-history > clean. Derived only from the
+    # unlicensed > licensed with an open case > clean. Abated history stays
+    # in violation_cases and does not change the token. Derived only from the
     # three ArcGIS joins above — no scoring model.
     if condemned_flagged:
         compliance_verdict = "condemned_or_boarded"
     elif not licensed:
         compliance_verdict = "unlicensed"
-    elif violation_total > 0:
+    elif open_total > 0:
         compliance_verdict = "licensed_with_violations"
     else:
         compliance_verdict = "licensed_clean"
@@ -209,15 +336,23 @@ async def check_property(address: str) -> dict[str, Any]:
         "licensed": licensed,
         "violation_cases": {
             "total": violation_total,
+            "open": open_total,
+            "abated": violation_total - open_total,
             "recent": [
                 {
                     "case_number": v.get("Violation_Case_Number"),
                     "case_type": v.get("Case_Type"),
                     "case_group": v.get("Case_Group"),
-                    "inspection_result": v.get("Inspection_Result"),
-                    "inspection_type": v.get("Inspection_Type_Desc"),
-                    "start_date": _iso(v.get("Start_Date")),
-                    "completed_date": _iso(v.get("Completed_Date")),
+                    "case_status": _text(v.get("Status_Violation_Case")),
+                    "inspection_result": (
+                        _text(v.get("Status_Violation"))
+                        or _text(v.get("Inspection_Result"))
+                    ),
+                    "inspection_type": _text(v.get("Violation_Code_Description"))
+                    or _text(v.get("Inspection_Type_Desc")),
+                    "violation_code": _text(v.get("Violation_Code")),
+                    "start_date": _iso(v.get("Processed_Date") or v.get("Start_Date")),
+                    "completed_date": _iso(v.get("Resolved_Date") or v.get("Completed_Date")),
                 }
                 for v in recent_violations
             ],
@@ -237,13 +372,15 @@ async def check_property(address: str) -> dict[str, Any]:
             ],
         },
         "sources": [
-            f"{settings.mn_data_base_url}/Active_Rental_Licenses/FeatureServer/0",
-            f"{settings.mn_data_base_url}/CaseViolations/FeatureServer/0",
-            f"{settings.mn_data_base_url}/Condemned_by_Boarding/FeatureServer/0",
+            f"{effective_mn_data_base_url()}/Active_Rental_Licenses/FeatureServer/0",
+            f"{effective_mn_data_base_url()}/CaseViolations/FeatureServer/0",
+            f"{effective_mn_data_base_url()}/Condemned_by_Boarding/FeatureServer/0",
         ],
         "disclaimer": (
             "Public records from City of Minneapolis Open Data, served as-is; "
-            "not legal advice. Verify with the city before acting."
+            "not legal advice. Verify with the city before acting. "
+            "Condemned/boarded join may be omitted when that ArcGIS layer is "
+            "temporarily unavailable."
         ),
         "generated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }
@@ -268,6 +405,7 @@ SAMPLE_ADDRESS = "1700 Penn Ave N"
 # receive a report shaped like check_property()'s output. Small but faithful
 # excerpts — the CDP facilitator catalogs these verbatim at settle time.
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {"address": SAMPLE_ADDRESS}
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = ADDRESS_QUERY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "address_queried": "1700 Penn Ave N",
@@ -330,6 +468,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
         service_name=SERVICE_NAME,
         service_tags=SERVICE_TAGS,
@@ -345,6 +484,7 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
                 service_name=SERVICE_NAME,
                 service_tags=SERVICE_TAGS,
@@ -354,6 +494,30 @@ def build_payment_required_header() -> str:
     # Cached per (network, price, resource): the header is static and building
     # it hits the flaky CDP facilitator; serve last-known-good through an outage.
     return challenge_cache.get_or_build("mn-property-check", fp, _build)
+
+
+async def verify_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.verify_payment_payload(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+async def settle_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
 
 
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:

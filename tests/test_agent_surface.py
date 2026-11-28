@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.agent_surface import curated_directory_listings, trust_ratings
 from app.config import settings
 from app.main import app
 
@@ -77,33 +78,30 @@ def test_the_advertised_endpoints_exist() -> None:
         assert response.status_code != 404, f"{path} advertised but missing"
 
 
-def test_a_bare_probe_of_a_paid_endpoint_gets_the_challenge_not_a_422() -> None:
-    """How every crawler and agent meets us: a probe with no parameters/body.
+def test_well_formed_unpaid_probes_get_402_not_422() -> None:
+    """Catalog URLs with required params must 402 when the probe is well-formed."""
+    from tests.discovery_unpaid import probe_paid_route
 
-    `/mn/property-check` used to answer 422 here, because FastAPI's validation
-    of a required `address` ran before any payment logic. "Expected 402, got
-    400/422 from request validation running before the payment challenge" is on
-    x402scan's published list of registration failures — and that endpoint has
-    never been indexed by any catalog, while its 402-clean siblings both were.
-    A paid door that answers anything but 402 is a door nobody can find.
-    """
     body = client.get("/.well-known/x402").json()
     paid = [r for r in body["resource_details"] if r["price"] != "free"]
     assert paid, "no paid resources advertised"
 
+    skip_paths = {"/x402/policy-check"}  # env-gated; may 404 when disabled
     for r in paid:
         path = r["url"].replace(settings.public_base_url.rstrip("/"), "")
+        if path.startswith("/swarm/products/"):
+            continue  # composite URLs are dynamic listings, not OpenAPI-shaped probes
+        if path in skip_paths:
+            continue
         method = r.get("method", "GET")
-        response = client.request(method, path)  # unparameterised probe, exactly like a crawler
+        response = probe_paid_route(client, path, method=method)
         if response.status_code == 503:
-            continue  # seller not configured on this box; nothing to sell
+            continue
         assert response.status_code == 402, (
-            f"{path} answered {response.status_code} to an unparameterised {method} probe; "
-            "a discovery crawler will mark it non-registerable"
+            f"{path} answered {response.status_code} to a well-formed unpaid {method} probe"
         )
         assert "payment-required" in {k.lower() for k in response.headers}, (
-            f"{path} returned 402 with no PAYMENT-REQUIRED header — an agent "
-            "cannot pay a challenge it was never given"
+            f"{path} returned 402 with no PAYMENT-REQUIRED header"
         )
 
 
@@ -112,7 +110,8 @@ def test_agent_card_is_served_at_well_known() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["name"]
-    assert body["protocolVersion"] == "1.0"
+    assert body["protocolVersion"] == "0.3.0"
+    assert body["preferredTransport"] == "JSONRPC"
     assert body["capabilities"]["streaming"] is False
     assert body["capabilities"]["pushNotifications"] is False
     assert any(s["id"] == "us-cities-catalog" for s in body["skills"])
@@ -124,9 +123,14 @@ def test_agent_card_is_served_at_well_known() -> None:
         assert any(s["id"] == f"property-check-{code}" for s in body["skills"]), code
     for code in set(registry.known_codes()) - set(registry.public_codes()):
         assert not any(s["id"] == f"property-check-{code}" for s in body["skills"]), code
-    # Catalog URL is a supported interface.
-    urls = [i["url"] for i in body["supportedInterfaces"]]
-    assert any(u.endswith("/us/cities") for u in urls)
+    # Only the real A2A endpoint is a supported interface; the catalog is a link.
+    ifaces = body["supportedInterfaces"]
+    assert [i["url"] for i in ifaces] == [body["url"]]
+    assert ifaces[0]["protocolBinding"] == "JSONRPC"
+    assert ifaces[0]["protocolVersion"] == "0.3"
+    assert body["links"]["catalog"].endswith("/us/cities")
+    assert body["links"]["x402"].endswith("/.well-known/x402")
+    assert body["links"]["a2a"].endswith("/a2a")
     # x402 is the declared payment scheme.
     assert "x402" in body["securitySchemes"]
     assert body["securitySchemes"]["x402"]["name"] == "PAYMENT-SIGNATURE"
@@ -225,6 +229,57 @@ def test_well_known_x402_includes_payto() -> None:
     assert body["funding"].endswith("/.well-known/funding.json")
 
 
+def test_curated_directory_listings_present_on_discovery_surfaces() -> None:
+    expected = curated_directory_listings()
+    trust = trust_ratings()
+    assert expected[0]["name"] == "24K Labs"
+    assert expected[0]["url"].endswith("/us-city-open-data-compliance-network")
+    assert "24klabs.ai/badge.svg" in expected[0]["badge"]
+    assert "24klabs.ai/card.svg" in expected[0]["card"]
+    assert "%2F.well-known%2Fx402" in expected[0]["badge"]
+    assert trust[0]["name"] == "fuchss"
+    assert "x402.fuchss.app/endpoint" in trust[0]["report"]
+    assert "x402.fuchss.app/badge.svg" in trust[0]["badge"]
+
+    x402 = client.get("/.well-known/x402").json()
+    assert x402["listings"] == expected
+    assert x402["trust"] == trust
+
+    card = client.get("/.well-known/agent-card.json").json()
+    assert card["listings"] == expected
+    assert card["links"]["listings"] == expected
+    assert card["trust"] == trust
+    assert card["links"]["trust"] == trust
+
+    agents = client.get("/.well-known/agents.json").json()
+    assert agents["listings"] == expected
+    assert agents["trust"] == trust
+
+    market = client.get("/.well-known/agentic-market.json").json()
+    assert market["listings"] == expected
+    assert market["discovery"]["listings"] == expected
+    assert market["trust"] == trust
+    assert market["discovery"]["trust"] == trust
+
+    mcp_card = client.get("/.well-known/mcp/server-card.json").json()
+    assert mcp_card["listings"] == expected
+    assert mcp_card["trust"] == trust
+
+    funding = client.get("/.well-known/funding.json").json()
+    assert funding["discovery"]["listings"] == expected
+    assert funding["discovery"]["trust"] == trust
+
+    manifest = client.get("/.well-known/mcp").json()
+    assert manifest["listings"] == expected
+    assert manifest["trust"] == trust
+
+    llms = client.get("/llms.txt").text
+    assert "24klabs.ai/listing/us-city-open-data-compliance-network" in llms
+    assert "24klabs.ai/badge.svg" in llms
+    assert "24klabs.ai/card.svg" in llms
+    assert "x402.fuchss.app/endpoint" in llms
+
+
 def test_ai_plugin_json_served_at_well_known() -> None:
     response = client.get("/.well-known/ai-plugin.json")
     assert response.status_code == 200
@@ -314,3 +369,66 @@ def test_cross_linking_to_agentic_market() -> None:
 
 
 
+
+
+def test_agent_card_paid_skills_carry_x402_terms_matching_catalog() -> None:
+    """Every paid catalog resource maps to a skill with price/network/asset/payTo/endpoint."""
+    from app import agent_surface
+
+    card = client.get("/.well-known/agent-card.json").json()
+    pay_to = settings.x402_pay_to_address or agent_surface.DEFAULT_PAY_TO
+    by_url = {}
+    for sk in card["skills"]:
+        x = sk.get("x402")
+        if not x:
+            continue
+        assert x["network"] == settings.x402_default_network
+        assert x["asset"] == agent_surface.BASE_USDC
+        assert x["assetSymbol"] == "USDC"
+        assert x["payTo"] == pay_to
+        assert x["endpoint"]["url"].startswith("https://") or x["endpoint"]["url"].startswith("http")
+        assert x["endpoint"]["method"] in {"GET", "POST"}
+        if x["paid"]:
+            assert int(x["amount"]) > 0
+            assert x["scheme"] == "exact"
+            assert sk["security"] == [{"x402": []}]
+            by_url[x["endpoint"]["url"]] = x
+        for field in ("id", "name", "description", "tags", "examples", "inputModes", "outputModes"):
+            assert sk.get(field), (sk["id"], field)
+    catalog = client.get("/.well-known/x402").json()
+    for r in catalog["resource_details"]:
+        if r["price"] == "free" or r["url"].endswith("/mn/property-check"):
+            continue  # legacy MN alias is the same product as property-check-mn
+        assert r["url"] in by_url, f"paid resource {r['url']} has no skill"
+        assert by_url[r["url"]]["price"] == r["price"]
+        assert by_url[r["url"]]["amount"] == str(agent_surface._price_to_atomic_usdc(r["price"]))
+
+
+def test_agent_card_declares_canonical_a2a_x402_extension() -> None:
+    from app import agent_surface
+
+    card = client.get("/.well-known/agent-card.json").json()
+    exts = {e["uri"]: e for e in card["capabilities"]["extensions"]}
+    ext = exts[agent_surface.A2A_X402_EXTENSION_URI]
+    assert ext["uri"].endswith("a2a-x402/blob/main/spec/v0.2")
+    assert ext["params"]["network"] == settings.x402_default_network
+    assert ext["params"]["asset"] == agent_surface.BASE_USDC
+    assert agent_surface.A2A_X402_LEGACY_EXTENSION_URI in exts
+
+
+def test_llms_txt_points_at_direct_mcp_not_smithery() -> None:
+    """Smithery retires 2026-10-31; llms.txt must advertise the direct MCP URL."""
+    text = client.get("/llms.txt").text
+    assert "smithery.ai" not in text
+    assert "run.tools" not in text
+    assert "/mcp" in text.splitlines()[2]
+
+
+def test_well_known_x402_trust_txt() -> None:
+    response = client.get("/.well-known/x402-trust.txt")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert (
+        response.text.strip()
+        == "x402-trust-verification=v1:MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED_SXABnyL3_8nO1W_OsGPFjvKwfqyT3rOKfV93d5NS_uTyl8k9H9Xlfz7i3mnfYKyXZbuNMMtdMc-36uT4Y8YA"
+    )

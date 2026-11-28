@@ -11,7 +11,8 @@ from app import mcp_server
 from app.city_compliance import mcp_tools as city_mcp
 from app.city_compliance import registry
 from app.config import settings
-from app.tools_registry import EXPECTED_TOOL_NAMES
+from app.tools_registry import EXPECTED_TOOL_NAMES, TOOL_SPECS
+from x402.mcp.constants import MCP_PAYMENT_META_KEY
 
 
 @pytest.mark.asyncio
@@ -40,6 +41,17 @@ async def test_get_us_city_property_sample_unknown_city() -> None:
     data = await city_mcp.get_us_city_property_sample("not-a-city")
     assert data["error"] == "unknown_city"
     assert "mn" in data["known"]
+    assert "test" in data["known"]
+
+
+@pytest.mark.asyncio
+async def test_get_us_city_property_sample_test_sandbox_city() -> None:
+    data = await city_mcp.get_us_city_property_sample("test")
+    assert data["sample"] is True
+    assert data["city"] == "test"
+    assert data["report"]["compliance_verdict"] == "licensed_clean"
+    assert data["report"]["registered"] is True
+    assert data["sample_address"] == "123 Test St"
 
 
 @pytest.mark.asyncio
@@ -54,8 +66,8 @@ async def test_get_us_city_property_sample_ok(monkeypatch: pytest.MonkeyPatch) -
     assert data["sample"] is True
     assert data["city"] == "mn"
     assert data["report"]["compliance_verdict"] == "sample_ok"
-    assert data["next"]["action"] == "check_us_city_property"
-    assert "EVM_PRIVATE_KEY" in data["next"]["requires_env"]
+    assert data["next"]["action"] == "city.check"
+    assert data["next"]["mcp_payment_meta"] == MCP_PAYMENT_META_KEY
 
 
 @pytest.mark.asyncio
@@ -82,73 +94,30 @@ async def test_check_us_city_property_invalid_address() -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_us_city_property_no_wallet_handoff(
+async def test_check_us_city_property_seller_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", None)
+    async def fake_check(address: str) -> dict[str, Any]:
+        return {"address": address, "compliance_verdict": "paid_ok"}
 
-    async def fake_probe(params):  # noqa: ANN001
-        return {
-            "status_code": 402,
-            "url": str(params.url),
-            "sdk": "mock-probe",
-            "payment_required": {"x402Version": 2},
-        }
-
-    monkeypatch.setattr(city_mcp.x402_services, "get_payment_requirements", fake_probe)
-
-    data = await city_mcp.check_us_city_property("mn", "1700 Penn Ave N")
-    assert data["paid"] is False
-    assert data["reason"] == "buyer_wallet_not_configured"
-    assert data["city"] == "mn"
-    assert "address=" in data["paid_url"]
-    assert data["payment_probe"]["status_code"] == 402
-    assert data["mcp"]["tool"] == "check_us_city_property"
-    assert "pay_and_fetch" in data["mcp"]["alternate_tool"]
-
-
-@pytest.mark.asyncio
-async def test_check_us_city_property_with_wallet_pay_and_fetch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", "0x" + "ab" * 32)
-
-    async def fake_pay(params):  # noqa: ANN001
-        return {
-            "status_code": 200,
-            "url": str(params.url),
-            "body": {"compliance_verdict": "paid_ok"},
-            "sdk": "mock-pay",
-        }
-
-    monkeypatch.setattr(city_mcp.x402_services, "pay_and_fetch", fake_pay)
+    monkeypatch.setattr(registry.get_city("chi"), "check_property", fake_check)
 
     data = await city_mcp.check_us_city_property("chi", "121 N LaSalle St")
     assert data["paid"] is True
     assert data["city"] == "chi"
-    assert data["result"]["body"]["compliance_verdict"] == "paid_ok"
+    assert data["report"]["compliance_verdict"] == "paid_ok"
 
 
 @pytest.mark.asyncio
-async def test_check_us_city_property_mcp_wrapper_no_wallet(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "evm_private_key", None)
-
-    async def fake_probe(params):  # noqa: ANN001
-        return {"status_code": 402, "url": str(params.url)}
-
-    monkeypatch.setattr(city_mcp.x402_services, "get_payment_requirements", fake_probe)
-
-    raw = await mcp_server.check_us_city_property(
-        city_code="nyc",
-        address="1 Centre St",
-        agent_id="city-paid-agent",
+async def test_check_us_city_property_mcp_wrapper_unpaid() -> None:
+    result = await mcp_server.mcp._tool_manager.call_tool(
+        "city.check",
+        {"city_code": "nyc", "address": "1 Centre St", "agent_id": "city-paid-agent"},
+        convert_result=True,
     )
-    payload = json.loads(raw)
-    assert payload["meta"]["agent_id"]
-    assert payload["data"]["paid"] is False
-    assert payload["data"]["city"] == "nyc"
+    assert result.isError is True
+    assert result.structuredContent
+    assert result.structuredContent.get("x402Version") == 2
 
 
 def test_city_tools_in_registry() -> None:
@@ -160,8 +129,8 @@ def test_city_tools_in_registry() -> None:
         assert name in EXPECTED_TOOL_NAMES
 
 
-def test_city_check_description_advertises_price() -> None:
-    from app.tools_registry import TOOL_SPECS
-
+def test_city_check_description_advertises_outcome() -> None:
     spec = next(s for s in TOOL_SPECS if s["name"] == "city.check")
-    assert "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)." in spec["description"]
+    assert "verdict" in spec["description"]
+    assert "$0.01" in spec["description"]
+    assert spec["tier"] == "paid"

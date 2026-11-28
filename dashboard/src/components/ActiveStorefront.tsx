@@ -1,171 +1,57 @@
-import { useState } from "react";
-import type { SwarmProduct, LedgerRow } from "../api/client";
+import { useMemo, useState } from "react";
+import type { CityCatalogItem, DemandReport, LedgerRow, SwarmProduct } from "../api/client";
 import type { StreamEvent } from "../hooks/useSSE";
 import { CopyButton } from "./CopyButton";
-
-type ActiveCall = {
-  id: string;
-  name: string;
-  path: string;
-  priceUsdc: number;
-  costBasisUsdc: number;
-  category: "Canonical Data" | "US Compliance Network" | "Swarm Composite";
-  views: number;
-  sales: number;
-  status: "LIVE FOR SALE" | "SOLD";
-};
+import { demoCities } from "../fixtures/demo";
+import { mergeStorefrontCalls, type ActiveCall } from "../utils/storefront";
 
 import { API_BASE } from "../api/client";
 
 export function ActiveStorefront({
   products,
   revenueRows = [],
-  activityEvents = [],
+  activityEvents: _activityEvents = [],
+  cities = null,
+  demand = null,
+  demo = false,
 }: {
   products: SwarmProduct[];
   revenueRows?: LedgerRow[];
   activityEvents?: StreamEvent[];
+  cities?: CityCatalogItem[] | null;
+  demand?: DemandReport | null;
+  demo?: boolean;
 }) {
   const origin = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
 
-  // Base Built-in x402 Endpoints
-  const baseCalls: ActiveCall[] = [
-    {
-      id: "call-mn",
-      name: "MARC-HD Compliance Verification",
-      path: "/mn/property-check",
-      priceUsdc: 0.85,
-      costBasisUsdc: 0.0,
-      category: "Canonical Data",
-      views: 142,
-      sales: 18,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-sea",
-      name: "Seattle Property Compliance",
-      path: "/us/sea/property-check",
-      priceUsdc: 0.01,
-      costBasisUsdc: 0.0,
-      category: "US Compliance Network",
-      views: 98,
-      sales: 12,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-nyc",
-      name: "NYC Building & Zoning Snapshot",
-      path: "/us/nyc/property-check",
-      priceUsdc: 0.01,
-      costBasisUsdc: 0.0,
-      category: "US Compliance Network",
-      views: 115,
-      sales: 15,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-base-pulse",
-      name: "Base Mainnet RPC Pulse Stream",
-      path: "/pulse",
-      priceUsdc: 0.01,
-      costBasisUsdc: 0.0,
-      category: "Canonical Data",
-      views: 210,
-      sales: 34,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-tx-decision",
-      name: "Base Transaction Decision",
-      path: "/base/tx-decision",
-      priceUsdc: 0.01,
-      costBasisUsdc: 0.0,
-      category: "Canonical Data",
-      views: 184,
-      sales: 29,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-finality-check",
-      name: "Base Transaction Finality Check",
-      path: "/base/finality-check",
-      priceUsdc: 0.01,
-      costBasisUsdc: 0.0,
-      category: "Canonical Data",
-      views: 95,
-      sales: 11,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-us-rental-diligence",
-      name: "US Multi-City Rental Diligence Pack (AP2 aligned)",
-      path: "/tasks/us-rental-diligence",
-      priceUsdc: 1.50,
-      costBasisUsdc: 0.0,
-      category: "US Compliance Network",
-      views: 74,
-      sales: 8,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-a2a-card",
-      name: "A2A & AP2 Agent Card Discovery",
-      path: "/.well-known/agent-card.json",
-      priceUsdc: 0.00,
-      costBasisUsdc: 0.0,
-      category: "Canonical Data",
-      views: 240,
-      sales: 38,
-      status: "LIVE FOR SALE",
-    },
-    {
-      id: "call-a2a-resolve",
-      name: "A2A Remote Card Resolver (MCP a2a.resolve_card)",
-      path: "/a2a/resolve",
-      priceUsdc: 0.00,
-      costBasisUsdc: 0.0,
-      category: "Canonical Data",
-      views: 180,
-      sales: 29,
-      status: "LIVE FOR SALE",
-    },
-  ];
+  const catalogCities = demo ? demoCities : cities;
 
-  // Dynamic Swarm Products
-  const swarmCalls: ActiveCall[] = products.map((p) => {
-    // Count live sales from revenue ledger
-    const matchingSales = revenueRows.filter(
-      (r) => String(r.product_id || "") === p.product_id || String(r.path || "").includes(p.product_id)
-    ).length;
+  const allCalls = useMemo(
+    () =>
+      mergeStorefrontCalls({
+        cities: catalogCities,
+        demand,
+        products,
+        revenueRows,
+      }),
+    [catalogCities, demand, products, revenueRows],
+  );
 
-    // Count live views from activity events
-    const matchingViews = activityEvents.filter(
-      (e) => String((e.meta as Record<string, unknown> | undefined)?.run_id || "").includes(p.product_id) ||
-             String(e.tool || "").includes(p.product_id)
-    ).length;
-
-    return {
-      id: p.product_id,
-      name: p.topic || `Swarm Product ${p.product_id.slice(0, 8)}`,
-      path: `/swarm/products/${p.product_id}/purchase`,
-      priceUsdc: p.price_usdc,
-      costBasisUsdc: p.cost_basis_usdc,
-      category: "Swarm Composite",
-      views: Math.max(matchingViews, p.status === "sold" ? 24 : 12),
-      sales: p.revenue_usdc > 0 ? Math.max(matchingSales, 1) : matchingSales,
-      status: p.status === "sold" ? "SOLD" : "LIVE FOR SALE",
-    };
-  });
-
-  const allCalls = [...baseCalls, ...swarmCalls];
   const [filterCategory, setFilterCategory] = useState<string>("ALL");
 
-  const filteredCalls = filterCategory === "ALL" 
-    ? allCalls 
-    : allCalls.filter(c => c.category === filterCategory);
+  const filteredCalls =
+    filterCategory === "ALL" ? allCalls : allCalls.filter((c) => c.category === filterCategory);
 
   const totalViews = allCalls.reduce((sum, c) => sum + c.views, 0);
   const totalSales = allCalls.reduce((sum, c) => sum + c.sales, 0);
+
+  const formatPrice = (call: ActiveCall) =>
+    call.priceUsdc.toLocaleString(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   return (
     <section
@@ -179,7 +65,6 @@ export function ActiveStorefront({
         position: "relative",
       }}
     >
-      {/* Primary Focal Point Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -193,7 +78,6 @@ export function ActiveStorefront({
           </p>
         </div>
 
-        {/* Global Storefront Stats Badges */}
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <div
             className="mono"
@@ -233,7 +117,6 @@ export function ActiveStorefront({
         </div>
       </div>
 
-      {/* Category Filter Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: 12 }}>
         {["ALL", "Canonical Data", "US Compliance Network", "Swarm Composite"].map((cat) => (
           <button
@@ -257,7 +140,6 @@ export function ActiveStorefront({
         ))}
       </div>
 
-      {/* Grid of Active x402 Calls */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
         {filteredCalls.map((call) => {
           const fullUrl = `${origin}${call.path}`;
@@ -275,104 +157,58 @@ export function ActiveStorefront({
                 flexDirection: "column",
                 justifyContent: "space-between",
                 gap: 12,
-                boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-                transition: "all 0.2s ease",
               }}
             >
-              {/* Header Badge & Price */}
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 16, color: "#fff" }}>{call.name}</h3>
                   <span
                     className="mono"
                     style={{
                       fontSize: 10,
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      background: "rgba(16, 185, 129, 0.15)",
+                      color: "var(--green)",
                       fontWeight: 700,
-                      textTransform: "uppercase",
-                      color: call.status === "LIVE FOR SALE" ? "var(--green)" : "var(--amber)",
-                      background: call.status === "LIVE FOR SALE" ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 183, 3, 0.15)",
-                      padding: "3px 8px",
-                      borderRadius: 4,
-                      border: `1px solid ${call.status === "LIVE FOR SALE" ? "rgba(16, 185, 129, 0.3)" : "rgba(255, 183, 3, 0.3)"}`,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 4,
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: call.status === "LIVE FOR SALE" ? "var(--green)" : "var(--amber)" }} />
                     {call.status}
                   </span>
-                  <div className="mono" style={{ textAlign: "right" }}>
-                    <span style={{ fontSize: 18, color: "var(--neon-cyan)", fontWeight: 800 }}>
-                      ${call.priceUsdc.toFixed(2)}
-                    </span>
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>USDC</span>
-                  </div>
                 </div>
 
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>
-                  {call.name}
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: "var(--neon-cyan)",
+                    }}
+                  >
+                    {formatPrice(call)}
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>USDC</span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>·</span>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    Network: Base eip155:8453
+                  </span>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                  Category: {call.category} · Margin: +${margin.toFixed(2)} USDC
-                </div>
+
+                <p className="mono" style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-muted)", wordBreak: "break-all" }}>
+                  {call.path}
+                </p>
               </div>
 
-              {/* Call URL Box with Copy Button */}
-              <div
-                style={{
-                  background: "rgba(0, 0, 0, 0.4)",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <code
-                  className="mono"
-                  style={{
-                    fontSize: 11,
-                    color: "var(--neon-cyan)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={fullUrl}
-                >
-                  {fullUrl}
-                </code>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  👁️ {call.views} views · 💰 {call.sales} sales
+                  {margin > 0 && (
+                    <span style={{ marginLeft: 8 }}>margin {formatPrice({ ...call, priceUsdc: margin })}</span>
+                  )}
+                </div>
                 <CopyButton value={fullUrl} label="Copy URL" />
-              </div>
-
-              {/* Live Views & Live Sales Footer Metrics */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
-                  paddingTop: 8,
-                  borderTop: "1px solid rgba(255, 255, 255, 0.06)",
-                }}
-              >
-                <div style={{ background: "rgba(0, 240, 255, 0.05)", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(0, 240, 255, 0.15)" }}>
-                  <div className="mono" style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase" }}>
-                    Live Views
-                  </div>
-                  <div className="mono" style={{ fontSize: 14, color: "var(--neon-cyan)", fontWeight: 700 }}>
-                    👁️ {call.views} challenges
-                  </div>
-                </div>
-
-                <div style={{ background: "rgba(16, 185, 129, 0.05)", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(16, 185, 129, 0.15)" }}>
-                  <div className="mono" style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase" }}>
-                    Live Sales
-                  </div>
-                  <div className="mono" style={{ fontSize: 14, color: "var(--green)", fontWeight: 700 }}>
-                    💰 {call.sales} settled
-                  </div>
-                </div>
               </div>
             </div>
           );

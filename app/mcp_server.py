@@ -7,9 +7,9 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 
 from app import x402_services
@@ -23,6 +23,7 @@ from app.models import (
     ToolResponse,
     VerifyPaymentInput,
 )
+from app.mcp_payments import city_check_payment_wrapper
 from app.ops_events import emit_tool_event
 from app.swarm import orchestrator as swarm_orchestrator
 
@@ -60,8 +61,9 @@ INSTRUCTIONS = (
     "swarm.* composite research resale, pulse.base settlement timing, "
     "ops.metrics host health, city.* US open-data property compliance. "
     "Buyer path: x402.discover → x402.probe → x402.pay_and_fetch. "
-    "City path: city.list → city.sample → city.check. "
-    "Pro quota: commerce.pro_requirements → pay → commerce.activate_pro. "
+    "City path: city.list → city.sample → city.check (verdict + source link, $0.01). "
+    "Buyer policy audit: x402.policy_check — offline inspect PAYMENT-REQUIRED + policy (own-service fee). "
+    "Pro quota: commerce.activate_pro (MCP x402/payment) or commerce.pro_requirements → pay → activate. "
     "Credits: commerce.credits_requirements → pay → commerce.purchase_credits. "
     "Public seller hosts have no spend key — probe tools still work; "
     "pay-and-fetch needs EVM_PRIVATE_KEY. Every tool response includes commerce meta."
@@ -116,6 +118,12 @@ def _transport_security() -> TransportSecuritySettings:
         if host not in allowed:
             allowed.append(host)
             allowed.append(f"{host}:*")
+        # Gateways that proxy with their own Host also send their own Origin
+        # (e.g. https://x402-mcp--kwizzlesurp10.run.tools). Allowlisting only the
+        # Host made those requests 403 "Invalid Origin header".
+        origin = f"https://{host}"
+        if origin not in origins:
+            origins.append(origin)
     for host in _csv(getattr(settings, "mcp_allowed_hosts", "") or ""):
         if host not in allowed:
             allowed.append(host)
@@ -130,7 +138,20 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
-mcp = FastMCP(
+_LEGACY_TOOL_ALIASES = {
+    "get_agent_card": "x402.agent_card",
+}
+
+
+class CompatibilityFastMCP(FastMCP):
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        return await super().call_tool(
+            _LEGACY_TOOL_ALIASES.get(name, name),
+            arguments,
+        )
+
+
+mcp = CompatibilityFastMCP(
     "x402-micropayments",
     instructions=INSTRUCTIONS,
     website_url=settings.public_base_url,
@@ -522,6 +543,61 @@ async def verify_payment_payload(
 
 
 @mcp.tool(
+    name="x402.policy_check",
+    title="Offline buyer payment-policy consistency check",
+    description=(
+        "Decode a caller-supplied merchant PAYMENT-REQUIRED header and evaluate each accepts[] "
+        "option against an explicit buyer policy (networks, pay_to, assets, max atomic amount). "
+        "Does not fetch merchant URLs or settle the inspected purchase. "
+        "Unpaid → PaymentRequired for this server's analysis fee; pay via _meta['x402/payment']. "
+        "Pass policy as a JSON object string."
+    ),
+    annotations=WRITE_PAYMENT,
+    structured_output=False,
+)
+async def policy_check_tool(
+    payment_required_header: Desc[
+        str,
+        Field(
+            description="Inspected merchant PAYMENT-REQUIRED header value (base64 wire from HTTP 402).",
+        ),
+    ],
+    policy: Desc[
+        str,
+        Field(
+            description='Buyer policy JSON object as a string. Example: {"allowed_networks":["eip155:84532"],"max_amount_atomic":"10000000"}',
+        ),
+    ],
+    request_digest: Desc[
+        str | None,
+        Field(
+            default=None,
+            description="Optional JSON string with canonical_url, http_method, body_sha256.",
+        ),
+    ] = None,
+    idempotency_key: Desc[
+        str | None,
+        Field(default=None, description="Optional idempotency key (max 128 chars)."),
+    ] = None,
+    agent_id: Desc[
+        str | None,
+        Field(description="Optional agent identity for quota accounting."),
+    ] = None,
+    ctx: Context | None = None,
+) -> str | Any:
+    from app import mcp_x402_payment
+
+    return await mcp_x402_payment.handle_policy_check_mcp_tool(
+        payment_required_header_inspected=payment_required_header,
+        policy_json=policy,
+        request_digest_json=request_digest,
+        idempotency_key=idempotency_key,
+        agent_id=agent_id,
+        ctx=ctx,
+    )
+
+
+@mcp.tool(
     name="x402.networks",
     title="List x402 networks",
     description=(
@@ -572,29 +648,53 @@ async def get_pro_upgrade_requirements(
     title="Activate Pro tier",
     description=(
         "Verify a Pro-tier x402 payment and unlock Pro quota limits for the agent. "
-        "Call after commerce.pro_requirements and a completed USDC payment."
+        "MCP-native: call without payment to receive x402 requirements in the tool result, "
+        "then retry with _meta['x402/payment'] (@x402/mcp client). "
+        "Legacy: pass PAYMENT-SIGNATURE + PAYMENT-REQUIRED after commerce.pro_requirements."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def activate_pro_tier(
     payment_signature: Desc[
-        str,
-        Field(description="PAYMENT-SIGNATURE from the Pro-tier USDC payment."),
-    ],
+        str | None,
+        Field(
+            description=(
+                "Legacy HTTP-style PAYMENT-SIGNATURE. Omit for MCP x402/payment transport."
+            ),
+        ),
+    ] = None,
     payment_required: Desc[
-        str,
-        Field(description="PAYMENT-REQUIRED JSON returned by commerce.pro_requirements."),
-    ],
+        str | None,
+        Field(
+            description=(
+                "Legacy PAYMENT-REQUIRED from commerce.pro_requirements. "
+                "Ignored when using MCP _meta payment."
+            ),
+        ),
+    ] = None,
     agent_id: Desc[
         str | None,
         Field(description="Agent identity to grant Pro quota. Must match the requirements call."),
     ] = None,
-) -> str:
-    return await _execute_tool(
+    ctx: Context | None = None,
+) -> str | CallToolResult:
+    from app import mcp_x402_payment
+
+    return await mcp_x402_payment.handle_commerce_mcp_tool(
         "commerce.activate_pro",
-        agent_id,
-        lambda resolved: x402_services.activate_pro_tier(
-            payment_signature, payment_required, resolved
+        agent_id=agent_id,
+        ctx=ctx,
+        payment_signature=payment_signature,
+        payment_required=payment_required,
+        credits=None,
+        legacy_executor=lambda resolved: x402_services.activate_pro_tier(
+            payment_signature or "",
+            payment_required or "",
+            resolved,
+        ),
+        mcp_grant=lambda resolved, verification: x402_services.grant_pro_tier_after_settlement(
+            resolved, verification
         ),
     )
 
@@ -636,19 +736,22 @@ async def get_tool_credits_requirements(
     title="Purchase tool credits",
     description=(
         "Verify an x402 payment and add per-use tool credits to the agent. "
-        "Call after commerce.credits_requirements and a completed USDC payment."
+        "MCP-native: call without payment for x402 requirements, then retry with "
+        "_meta['x402/payment']. Legacy: PAYMENT-SIGNATURE + PAYMENT-REQUIRED after "
+        "commerce.credits_requirements."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def purchase_tool_credits(
     payment_signature: Desc[
-        str,
-        Field(description="PAYMENT-SIGNATURE from the credits USDC payment."),
-    ],
+        str | None,
+        Field(description="Legacy PAYMENT-SIGNATURE. Omit for MCP x402/payment transport."),
+    ] = None,
     payment_required: Desc[
-        str,
-        Field(description="PAYMENT-REQUIRED JSON returned by commerce.credits_requirements."),
-    ],
+        str | None,
+        Field(description="Legacy PAYMENT-REQUIRED from commerce.credits_requirements."),
+    ] = None,
     credits: Desc[
         int | None,
         Field(description="Credit pack size that was purchased. Must match the requirements call."),
@@ -657,15 +760,36 @@ async def purchase_tool_credits(
         str | None,
         Field(description="Agent identity to credit."),
     ] = None,
-) -> str:
+    ctx: Context | None = None,
+) -> str | CallToolResult:
+    from app import mcp_x402_payment
+    from app.commerce_payment import credits_to_grant
+
     pack = credits or settings.tool_credit_pack_size
 
-    return await _execute_tool(
+    def _mcp_grant(resolved: str, verification: dict) -> dict:
+        challenge = mcp_x402_payment.resolve_commerce_challenge(
+            "commerce.purchase_credits", resolved, pack
+        )
+        paid = credits_to_grant(challenge, pack)
+        return x402_services.grant_tool_credits_after_settlement(
+            resolved, paid, verification
+        )
+
+    return await mcp_x402_payment.handle_commerce_mcp_tool(
         "commerce.purchase_credits",
-        agent_id,
-        lambda resolved: x402_services.purchase_tool_credits(
-            payment_signature, payment_required, resolved, pack
+        agent_id=agent_id,
+        ctx=ctx,
+        payment_signature=payment_signature,
+        payment_required=payment_required,
+        credits=pack,
+        legacy_executor=lambda resolved: x402_services.purchase_tool_credits(
+            payment_signature or "",
+            payment_required or "",
+            resolved,
+            pack,
         ),
+        mcp_grant=_mcp_grant,
     )
 
 
@@ -841,8 +965,10 @@ async def get_os_metrics(
     name="city.list",
     title="List US compliance cities",
     description=(
-        "List US City Open-Data Compliance Network cities with paid_url, sample_url, and price. "
-        "Call first, then city.sample, then city.check for the paid address lookup."
+        "List US cities with paid_url and free sample_url for property compliance. "
+        "Start here — each paid lookup is $0.01 USDC and returns a normalized "
+        "verdict plus source link, not raw portal JSON. Then city.sample, then city.check. "
+        "Covers Minneapolis, Minnesota rental licensing (city_code mn) and other US cities."
     ),
     annotations=READONLY,
 )
@@ -865,8 +991,8 @@ async def list_us_cities(
     name="city.sample",
     title="US city property sample",
     description=(
-        "Get a free fixed-address property compliance sample for one US city code. "
-        "Use before city.check to validate city_code and response shape without paying."
+        "Free fixed-address preview of paid property-check JSON (verdict, summary, schema). "
+        "Use before city.check to validate parsing without spending $0.01 USDC."
     ),
     annotations=READONLY_EXTERNAL,
 )
@@ -874,7 +1000,10 @@ async def get_us_city_property_sample(
     city_code: Desc[
         str,
         Field(
-            description="City code from city.list. Examples: 'mn', 'sea', 'nyc', 'chi'."
+            description=(
+                "City code from city.list (or 'test' for sandbox). "
+                "Examples: 'mn', 'sea', 'nyc', 'chi', 'test'."
+            )
         ),
     ],
     agent_id: Desc[
@@ -897,11 +1026,13 @@ async def get_us_city_property_sample(
     name="city.check",
     title="Paid US city property check",
     description=(
-        "Run a paid US city property compliance check via x402 on the same HTTP resource buyers use. "
-        "Prefer city.sample first. Settles USDC when EVM_PRIVATE_KEY is set; otherwise returns a 402 probe. "
-        "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
+        "Is this US address licensed / flagged / showing open violations? "
+        "One city.check ($0.01 USDC, x402 on Base) returns verdict, summary, "
+        "dates, and source_url. Unpaid → PaymentRequired; pay via _meta['x402/payment']. "
+        "Prefer city.sample first."
     ),
     annotations=WRITE_PAYMENT,
+    structured_output=False,
 )
 async def check_us_city_property(
     city_code: Desc[
@@ -995,35 +1126,47 @@ async def mailrail_send(
     ] = None,
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused before send."),
     ] = None,
 ) -> str:
+    """Postmaster-only helper. Not registered as a public MCP tool."""
     from app import mailrail
+    from app.mailrail_agent import refuse_if_not_mailrail_agent
+
+    refused = refuse_if_not_mailrail_agent(agent_id)
+    if refused is not None:
+        return json.dumps(refused)
+
+    def _send(_resolved: str) -> dict:
+        sent = mailrail.send_agent_mail(
+            to=to,
+            subject=subject,
+            body=body,
+            event_id=event_id,
+        )
+        sent["agent_id"] = agent_id
+        return {"status": "ok", "mailrail": sent}
 
     return await _execute_tool(
         "mailrail.send",
         agent_id,
-        lambda _: _sync_result(
-            {
-                "status": "ok",
-                "mailrail": mailrail.send_agent_mail(
-                    to=to,
-                    subject=subject,
-                    body=body,
-                    event_id=event_id,
-                ),
-            }
-        ),
+        lambda resolved: _sync_result(_send(resolved)),
     )
 
 
 async def mailrail_status(
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused."),
     ] = None,
 ) -> str:
+    """Postmaster-only status. Not registered as a public MCP tool."""
     from app.config import settings
+    from app.mailrail_agent import refuse_if_not_mailrail_agent
+
+    refused = refuse_if_not_mailrail_agent(agent_id)
+    if refused is not None:
+        return json.dumps(refused)
 
     return await _execute_tool(
         "mailrail.status",
@@ -1037,7 +1180,7 @@ async def mailrail_status(
                 "admin_recipient": settings.mailrail_admin_recipient,
                 "has_api_key": bool(settings.mailrail_api_key),
                 "has_webhook": bool(settings.mailrail_webhook_url),
-                "has_smtp": bool(settings.mailrail_smtp_url),
+                "has_smtp": False,
             }
         ),
     )
@@ -1058,24 +1201,30 @@ async def mailrail_inbound(
     ],
     agent_id: Desc[
         str | None,
-        Field(description="Optional agent identity for quota accounting."),
+        Field(description="MailRail postmaster agent id. Any other caller is refused before ingest."),
     ] = None,
 ) -> str:
+    """Postmaster-only inbound helper. Not registered as a public MCP tool."""
     from app import mailrail
+    from app.mailrail_agent import refuse_if_not_mailrail_agent
+
+    refused = refuse_if_not_mailrail_agent(agent_id)
+    if refused is not None:
+        return json.dumps(refused)
+
+    def _ingest(_resolved: str) -> dict:
+        inbound = mailrail.process_inbound_mail(
+            sender=sender,
+            subject=subject,
+            body=body,
+        )
+        inbound["agent_id"] = agent_id
+        return {"status": "ok", "inbound": inbound}
 
     return await _execute_tool(
         "mailrail.inbound",
         agent_id,
-        lambda _: _sync_result(
-            {
-                "status": "ok",
-                "inbound": mailrail.process_inbound_mail(
-                    sender=sender,
-                    subject=subject,
-                    body=body,
-                ),
-            }
-        ),
+        lambda resolved: _sync_result(_ingest(resolved)),
     )
 
 
@@ -1149,7 +1298,7 @@ def prompt_city_compliance(
         "Call city.list to get supported city codes, paid_url, sample_url, and price. "
         f"Then city.sample with city_code={city_code!r} to validate the free envelope. "
         f"Then city.check with city_code={city_code!r} and address={address!r}. "
-        "If EVM_PRIVATE_KEY is unset, city.check returns a 402 probe rather than charging."
+        "Unpaid city.check returns PaymentRequired; retry with _meta['x402/payment']."
     )
 
 
@@ -1283,3 +1432,34 @@ def _simplify_schema(schema: Any) -> Any:
 # Simplify the parameter schemas of all registered tools to prevent validation errors (status 422) on strict client parsers.
 for tool in mcp._tool_manager._tools.values():
     tool.parameters = _simplify_schema(tool.parameters)
+
+# Seller x402 payment gate for city.check — applied after Tool.from_function so the
+# wrapper's synthetic ctx: Context parameter does not break Pydantic arg models.
+_city_check_tool = mcp._tool_manager._tools.get("city.check")
+if _city_check_tool is not None:
+    from mcp.server.fastmcp.utilities.context_injection import find_context_parameter
+    from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+
+    _city_check_tool.fn = city_check_payment_wrapper()(_city_check_tool.fn)
+    # Payment wrapper returns CallToolResult (PaymentRequired or settlement receipt).
+    # Keep unstructured output so FastMCP does not validate structuredContent as {result: str}.
+    _city_check_tool.fn_metadata = FuncMetadata(
+        arg_model=_city_check_tool.fn_metadata.arg_model
+    )
+    _city_check_tool.context_kwarg = find_context_parameter(_city_check_tool.fn)
+
+
+def _allow_call_tool_result(tool_name: str) -> None:
+    """Commerce tools return PaymentRequired CallToolResult when unpaid."""
+    tool = mcp._tool_manager._tools.get(tool_name)
+    if tool is None:
+        return
+    from mcp.server.fastmcp.utilities.context_injection import find_context_parameter
+    from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+
+    tool.fn_metadata = FuncMetadata(arg_model=tool.fn_metadata.arg_model)
+    tool.context_kwarg = find_context_parameter(tool.fn)
+
+
+for _commerce_mcp_tool in ("commerce.activate_pro", "commerce.purchase_credits"):
+    _allow_call_tool_result(_commerce_mcp_tool)

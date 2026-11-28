@@ -88,10 +88,17 @@ class Alerter:
     new event from the one it alerted 200 times already.
     """
 
-    def __init__(self, repo: str, label: str, limit: int = 400) -> None:
+    def __init__(
+        self,
+        repo: str,
+        label: str,
+        limit: int = 400,
+        max_alerts_per_run: int = MAX_ALERTS_PER_RUN,
+    ) -> None:
         self.repo = repo
         self.label = label
         self.limit = limit
+        self.max_alerts_per_run = max_alerts_per_run
         self.opened = 0
         self.suppressed = 0
         self._seen: set[str] | None = None
@@ -133,9 +140,11 @@ class Alerter:
         if key in seen:
             print(f"  already alerted: {key}")
             return False
-        if self.opened >= MAX_ALERTS_PER_RUN:
+        if self.opened >= self.max_alerts_per_run:
             self.suppressed += 1
-            print(f"  cap of {MAX_ALERTS_PER_RUN} alerts/run reached; suppressed: {key}")
+            print(
+                f"  cap of {self.max_alerts_per_run} alerts/run reached; suppressed: {key}"
+            )
             return False
 
         full_title = f"{defuse_mentions(title)} {marker(key)}"

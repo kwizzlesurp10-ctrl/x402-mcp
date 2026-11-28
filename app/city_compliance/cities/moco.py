@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -18,12 +19,7 @@ SPEC = CitySpec(
     state="MD",
     service_name="MoCo Housing License Check",
     tags=("montgomery", "rental-license", "housing", "compliance", "diligence"),
-    description=(
-        "Is this property licensed in Montgomery County MD? Property due "
-        "diligence agent for MoCo housing compliance open data — rental license "
-        "status/type/units plus active housing code violations. GET ?address= → "
-        "JSON. Tenant screening, landlord diligence (county-wide, not one city)."
-    ),
+    description=outcome_copy.paid_route_description(code="moco", name="Montgomery County"),
     sample_address="19515 FREDERICK RD",
     sample_note=(
         "Free fixed-address sample of Montgomery County housing licenses "

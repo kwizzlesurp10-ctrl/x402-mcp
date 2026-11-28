@@ -19,14 +19,16 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Includes app/static/a2a_marketplace/ (GET /). The dashboard stage below
+# replaces only app/static/mission_control/ (GET /dashboard).
 COPY app ./app
 COPY run_stdio.py .
 COPY manifests ./manifests
-COPY server.json smithery.yaml smithery.remote-config.json ./
+COPY server.json ./
 # Fresh SPA build overwrites any committed static bundle.
 COPY --from=dashboard /src/dist/ ./app/static/mission_control/
 
 ENV HOST=0.0.0.0
 
 # Render injects PORT at runtime; fall back to 8402 for local Docker usage.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8402}
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8402} --no-proxy-headers

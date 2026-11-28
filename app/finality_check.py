@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.discovery_schemas import FINALITY_QUERY_SCHEMA
 from app.pulse import _rpc
 
 RESOURCE_DESCRIPTION = (
@@ -35,6 +36,7 @@ RESOURCE_DESCRIPTION = (
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {
     "tx": "0x7fe54ef102682c07d2091d5623cb86df8be1ca929ae4cfb90fbdd6e73eba2c40"
 }
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = FINALITY_QUERY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "tx": "0x7fe54ef102682c07d2091d5623cb86df8be1ca929ae4cfb90fbdd6e73eba2c40",
@@ -134,3 +136,58 @@ async def check_finality(tx_hash: str) -> dict[str, Any]:
         "confirmations": confirmations,
         "why": why,
     }
+
+
+PRODUCT_ID = "base-finality-check"
+SERVICE_NAME = "Base finality check"
+
+
+def build_payment_required_header() -> str:
+    """Base64 x402 v2 PAYMENT-REQUIRED for A2A and direct seller paths."""
+    from app import challenge_cache
+    from app.models import BuildSellerRequirementsInput
+    from app.x402_services import build_seller_requirements
+
+    network = settings.x402_default_network
+    price = settings.finality_check_price
+    fp = challenge_cache.fingerprint(
+        network=network,
+        price=price,
+        resource=resource_url(),
+        pay_to=settings.x402_pay_to_address,
+        discoverable=settings.bazaar_discoverable,
+        description=RESOURCE_DESCRIPTION,
+        input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
+        output_example=DISCOVERY_OUTPUT_EXAMPLE,
+    )
+
+    def _build() -> str:
+        return build_seller_requirements(
+            BuildSellerRequirementsInput(
+                network=network,
+                price=price,
+                description=RESOURCE_DESCRIPTION,
+                resource_url=resource_url(),
+                mime_type="application/json",
+                discovery_method="GET",
+                discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
+                discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
+                service_name=SERVICE_NAME,
+            )
+        )["payment_required_header"]
+
+    return challenge_cache.get_or_build(PRODUCT_ID, fp, _build)
+
+
+async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app.x402_services import _verify_and_settle_payment
+
+    return await _verify_and_settle_payment(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )

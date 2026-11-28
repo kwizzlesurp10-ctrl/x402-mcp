@@ -19,6 +19,28 @@ def test_health() -> None:
     assert isinstance(body["pay_to_configured"], bool)
 
 
+def test_well_known_mcp_json_alias() -> None:
+    a = client.get("/.well-known/mcp")
+    b = client.get("/.well-known/mcp.json")
+    assert a.status_code == 200
+    assert b.status_code == 200
+    assert a.json() == b.json()
+
+
+def test_get_a2a_returns_agent_card() -> None:
+    response = client.get("/a2a")
+    assert response.status_code == 200
+    card = response.json()
+    assert card.get("name")
+    assert card.get("protocolVersion") or card.get("skills")
+
+
+def test_cities_alias_redirects() -> None:
+    response = client.get("/cities", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/us/cities")
+
+
 def test_well_known_mcp() -> None:
     response = client.get("/.well-known/mcp")
     assert response.status_code == 200
@@ -38,10 +60,14 @@ def test_well_known_mcp() -> None:
     assert "PAYMENT-REQUIRED" in manifest["x402"]["headers"]["payment_required"]
 
 
-def test_quota_peek_no_consume() -> None:
+def test_quota_peek_no_consume(monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "operator_token", "op-test")
+    auth = {"Authorization": "Bearer op-test"}
     agent = "peek-agent-unique"
-    first = client.get(f"/quota/{agent}").json()
-    second = client.get(f"/quota/{agent}").json()
+    first = client.get(f"/quota/{agent}", headers=auth).json()
+    second = client.get(f"/quota/{agent}", headers=auth).json()
     assert first["meta"]["calls_this_month"] == second["meta"]["calls_this_month"]
 
 

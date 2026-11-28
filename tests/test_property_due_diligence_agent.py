@@ -35,7 +35,10 @@ def test_get_402_without_payment(client: TestClient, monkeypatch: pytest.MonkeyP
         "build_payment_required_header",
         lambda: "hdr",
     )
-    r = client.get("/agent/property-due-diligence")
+    r = client.get(
+        "/agent/property-due-diligence",
+        params={"city_code": "mn", "address": "1700 Penn Ave N"},
+    )
     assert r.status_code == 402
     assert r.headers.get("payment-required") == "hdr"
     body = r.json()
@@ -46,6 +49,9 @@ def test_get_402_without_payment(client: TestClient, monkeypatch: pytest.MonkeyP
 
 def test_paid_path_validates_args(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent, "build_payment_required_header", lambda: "hdr")
+
+    async def _fake_verify(*_a, **_k):
+        return {"is_valid": True}
 
     async def _fake_settle(*_a, **_k):
         return {
@@ -64,7 +70,8 @@ def test_paid_path_validates_args(client: TestClient, monkeypatch: pytest.Monkey
             "agent": "property-due-diligence",
         }
 
-    monkeypatch.setattr(agent, "verify_and_settle", _fake_settle)
+    monkeypatch.setattr(agent, "verify_payment", _fake_verify)
+    monkeypatch.setattr(agent, "settle_payment", _fake_settle)
     monkeypatch.setattr(agent, "run_check", _fake_check)
 
     r = client.get(

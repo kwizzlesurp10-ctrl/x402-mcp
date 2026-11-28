@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from app.city_compliance.carto import escape_sql_literal, sql_query
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 
 CARTO = "https://phl.carto.com"
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="PA",
     service_name="Philly L&I Violations",
     tags=("philadelphia", "violations", "housing", "property", "code"),
-    description=(
-        "Does this Philadelphia address have open L&I property maintenance "
-        "violations? Query a street address and get violation codes, status, "
-        "case numbers, and dates from OpenDataPhilly. For tenant screening and "
-        "landlord diligence. Input: address string. Output: JSON, live City of "
-        "Philadelphia open data."
-    ),
+    description=outcome_copy.paid_route_description(code="phi", name="Philadelphia"),
     sample_address="1234 N LEITHGOW ST",
     sample_note=(
         "Free fixed-address sample of Philadelphia L&I violations. "

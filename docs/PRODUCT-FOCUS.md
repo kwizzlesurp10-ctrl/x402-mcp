@@ -3,6 +3,15 @@
 **Decided 2026-08-02, from `/demand` rather than from opinion.** Read this before
 building anything new on a paid endpoint.
 
+**Current decision (2026-10-08).** The reverse clause does not fire. The cashier
+change was a lost development burner wallet, and sales settled to that burner
+still count. Catalog placeholder rows are operator settles, not external buyers.
+Abated or closed Minneapolis cases stay in the report and do not return
+`licensed_with_violations`. Do not open another packaging pass. The next signal
+is a repeat external payer on the current cashier, from `GET /demand`
+(`sales_external`) and `GET /ledger/revenue`. Do not spend to manufacture that
+signal. The sections below are the history that produced this decision.
+
 **Directory / marketing Visit URLs (do not use Mission Control SPA):**
 
 | Role | URL |
@@ -195,3 +204,28 @@ because it manufactures confidence. `/demand` now splits `sales_external` /
 only, with `conversion_including_operator` retained so this correction stays
 auditable. Before trusting any conversion number from this repo, check which of
 the two you are reading.
+
+### 2026-10-08 — reverse clause does not fire
+
+The operative decision is the block at the top of this file. This entry is the
+dated record.
+
+The cashier rotation was a lost development burner, not evidence that earlier
+sales were fake. Those sales still count. The reverse clause stays off.
+
+`/demand` counted catalog placeholder transaction ids as external sales after
+that rotation, because the payer no longer matched `OPERATOR_WALLETS`. Those
+rows are operator settles. The project's own buyer-hot payer is an operator
+settle even when a wallet rotation dropped it out of `OPERATOR_WALLETS`. A
+different payer stays external when operator wallets are configured, and
+unknown when they are not. Do not treat every zero-padded address as a
+placeholder.
+
+`/mn/property-check` keeps abated and closed case rows in `violation_cases`
+and does not return `licensed_with_violations` for them. Only a case that is
+still open does. The discovery example and the challenge fingerprint are
+unchanged.
+
+Do not open another packaging pass. Do not spend the cashier balance to
+produce a sale. The next signal worth acting on is a repeat external payer
+on the current cashier.

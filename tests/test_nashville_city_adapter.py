@@ -75,7 +75,10 @@ def test_bna_is_public_at_city_network_price() -> None:
 
 
 def test_bna_unpaid_property_check_is_402_not_stub() -> None:
-    response = client.get("/us/bna/property-check")
+    response = client.get(
+        "/us/bna/property-check",
+        params={"address": bna.SPEC.sample_address},
+    )
     assert response.status_code != 404
     assert response.status_code != 501
     if response.status_code == 503:

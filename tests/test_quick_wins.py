@@ -74,11 +74,13 @@ def test_json_log_output(capfd: pytest.CaptureFixture) -> None:
 # ---- /quota auth -------------------------------------------------------------
 
 
-def test_quota_open_when_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When OPERATOR_TOKEN is unset, /quota is accessible without auth."""
+def test_quota_fails_closed_when_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When OPERATOR_TOKEN is unset, /quota is closed (no open id oracle)."""
     monkeypatch.setattr(settings, "operator_token", None)
     resp = client.get("/quota/test-agent")
-    assert resp.status_code == 200
+    assert resp.status_code == 503
+    resp = client.get("/quota/test-agent", headers={"Authorization": "Bearer "})
+    assert resp.status_code == 503
 
 
 def test_quota_rejects_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,10 +138,12 @@ _VIOLATIONS = {
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
                 "Case_Group": "Housing",
-                "Inspection_Result": "Violations Found",
-                "Inspection_Type_Desc": "Initial Inspection",
-                "Start_Date": 1735689600000,
-                "Completed_Date": 1738368000000,
+                "Status_Violation_Case": "Closed",
+                "Violation_Code": "HIS180",
+                "Violation_Code_Description": "Obtain Rental License; MCO 244.1810",
+                "Status_Violation": "Abate",
+                "Processed_Date": 1735689600000,
+                "Resolved_Date": 1738368000000,
             }
         }
     ]

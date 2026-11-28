@@ -37,7 +37,7 @@ class DiscoverServicesInput(BaseModel):
 
     query: str | None = Field(
         default=None,
-        description="Optional keyword filter applied client-side to discovered services",
+        description="Optional Bazaar search query (server-side CDP discovery search)",
     )
     limit: int = Field(default=20, ge=1, le=100, description="Max services to return")
     max_price_usdc: float | None = Field(
@@ -126,6 +126,17 @@ class BuildSellerRequirementsInput(BaseModel):
             "Example input: query params for GET/HEAD/DELETE, "
             "JSON body for POST/PUT/PATCH"
         ),
+    )
+    discovery_input_schema: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "JSON Schema for discovery input (query params or POST body). "
+            "Required for Bazaar catalog invocability when discoverable."
+        ),
+    )
+    discovery_output_schema: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional JSON Schema for Bazaar output; inferred from example when omitted.",
     )
     discovery_output_example: dict[str, Any] | None = Field(
         default=None,

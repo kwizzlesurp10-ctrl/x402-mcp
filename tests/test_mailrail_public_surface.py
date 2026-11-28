@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import mcp_server
 from app.config import settings
+from app.mailrail_agent import AGENT_ID
 from app.main import app
 from app.tools_registry import EXPECTED_TOOL_NAMES, is_public_mcp_tool
 
@@ -21,10 +22,29 @@ def test_mailrail_tools_are_not_on_public_mcp_list() -> None:
         assert not is_public_mcp_tool(banned)
 
 
+def test_unauthenticated_http_mailrail_message_routes_are_503_when_token_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No OPERATOR_TOKEN configured -> MailRail is closed with 503, never open."""
+    monkeypatch.setattr(settings, "operator_token", None)
+    client = TestClient(app)
+
+    assert client.get("/mailrail/ledger").status_code == 503
+    assert client.get("/mailrail/inbox").status_code == 503
+    assert client.get("/mailrail/stats").status_code == 503
+    inbound = client.post(
+        "/mailrail/inbound",
+        json={"sender": "public@evil.test", "subject": "hi", "body": "open relay?"},
+    )
+    assert inbound.status_code == 503
+    detail = inbound.json().get("detail") or inbound.json()
+    assert detail.get("error") == "operator_surface_disabled"
+
+
 def test_unauthenticated_http_mailrail_message_routes_are_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "operator_token", None)
+    monkeypatch.setattr(settings, "operator_token", "s3cret-token-for-tests")
     client = TestClient(app)
 
     assert client.get("/mailrail/ledger").status_code == 401
@@ -35,11 +55,6 @@ def test_unauthenticated_http_mailrail_message_routes_are_401(
         json={"sender": "public@evil.test", "subject": "hi", "body": "open relay?"},
     )
     assert inbound.status_code == 401
-    detail = inbound.json().get("detail") or inbound.json()
-    if isinstance(detail, dict):
-        assert detail.get("error") == "unauthorized"
-    else:
-        assert "unauthorized" in str(detail).lower()
 
 
 def test_wrong_bearer_is_401(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,22 +72,55 @@ def test_wrong_bearer_is_401(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def test_operator_bearer_without_mailrail_agent_is_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "operator_token", "s3cret")
+    client = TestClient(app)
+    res = client.get("/mailrail/ledger", headers={"Authorization": "Bearer s3cret"})
+    assert res.status_code == 403
+    detail = res.json().get("detail") or {}
+    assert detail.get("error") == "forbidden"
+    assert detail.get("required_agent_id") == "x402-mailrail-postmaster"
+
+
 def test_operator_bearer_can_read_empty_ledger(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     monkeypatch.setattr(settings, "operator_token", "s3cret")
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", tmp_path / "mailrail.jsonl")
     client = TestClient(app)
-    res = client.get("/mailrail/ledger", headers={"Authorization": "Bearer s3cret"})
+    bearer = {"Authorization": "Bearer s3cret"}
+    # Bearer alone is not the postmaster. The ledger stays locked.
+    assert client.get("/mailrail/ledger", headers=bearer).status_code == 403
+    res = client.get(
+        "/mailrail/ledger",
+        headers={**bearer, "X-Agent-Id": AGENT_ID},
+    )
     assert res.status_code == 200
     assert res.json()["count"] == 0
 
 
-def test_public_health_does_not_dump_recipients() -> None:
+def test_public_health_does_not_dump_recipients(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "contact_email", "ops-secret@x402.test")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "admin-secret@x402.test")
     client = TestClient(app)
     res = client.get("/mailrail/health")
     assert res.status_code == 200
     body = res.json()
+    assert body["ok"] is True
     assert "admin_recipient" not in body
     assert "from_address" not in body
     assert "has_api_key" not in body
+    assert "ops-secret@x402.test" not in res.text
+    assert "admin-secret@x402.test" not in res.text
+
+
+def test_public_agent_card_omits_operator_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "contact_email", "ops-secret@x402.test")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "admin-secret@x402.test")
+    client = TestClient(app)
+    res = client.get("/agent/mailrail")
+    assert res.status_code == 200
+    assert "ops-secret@x402.test" not in res.text
+    assert "admin-secret@x402.test" not in res.text

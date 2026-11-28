@@ -170,7 +170,11 @@ Fragile invariants (each has a guard test — see the profit-oracle agent file):
 - PINNED_PULSE_PRODUCT_ID = d22bbf5f3c4b4666a6f80980c7bc7c50 — do not change.
 - Public OpenAPI is an allowlist. /.well-known/x402 resources = bare URL strings.
 - MCP tools: mcp_server wrapper + tools_registry + README + test_readme +
-  test_assessor. All tools through _execute_tool. TOOL_COUNT is canonical.
+  test_assessor. All tools through _execute_tool except **`x402.policy_check`**:
+  it uses the same **quota + `emit_tool_event`** sequence as `_execute_tool`
+  (see `handle_policy_check_mcp_tool` in `app/mcp_x402_payment.py`) because
+  it returns official `CallToolResult` + `_meta['x402/payment-response']` on paid
+  success instead of a JSON `ToolResponse` string. TOOL_COUNT is canonical.
 - x-demand-ignore on every monitor. resource_key == product_id or the funnel dies.
 - Never commit ledger/spend.jsonl, revenue.jsonl, cache/.
 - Emit/record helpers never raise into a request path.

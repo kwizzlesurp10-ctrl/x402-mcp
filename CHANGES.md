@@ -4,6 +4,47 @@ This file documents deltas **only** within this repository (`x402-mcp/`).
 If this clone sits inside a larger parent workspace, use this manifest for goal
 verification instead of a repo-wide `git status` of the parent tree.
 
+## Smithery listing retired — connect directly (2026-10-20)
+
+- Smithery shuts down on **2026-10-31**: `*.run.tools` (incl. `x402-mcp--kwizzlesurp10.run.tools`), `server.smithery.ai`, the Smithery CLI, Connect and Toolbox stop working
+- `README.md`: removed Smithery badge, `npx @smithery/cli install` and `smithery mcp add` instructions; added direct-connect Quickstart for `https://x402-mcp.onrender.com/mcp` (generic `mcp.json`, Claude Code, Claude Desktop via `mcp-remote`) plus server/agent card links
+- `app/agent_surface.py` `llms_txt()`: header points at the direct MCP URL instead of the Smithery listing
+- `tests/test_readme.py`: asserts direct-connect instructions and that Smithery install paths are gone
+- Unchanged (possible later cleanup): Smithery CORS/host allowances in `app/main.py` and `app/mcp_server.py`, `smithery.yaml`, `smithery.remote-config.json`
+
+## P1: Lock stats/operator surfaces + agent identity (2026-10-19)
+
+Agent ids are the only key to an agent's quota, Pro tier and prepaid credits,
+so publishing them let anyone act as those agents.
+
+- New `app/operator_auth.py`: `is_operator` / `require_operator` (Bearer
+  `OPERATOR_TOKEN` or `X-Operator-Token`, `hmac.compare_digest`, fails closed
+  when unset) and `redact_agent_ids` (stable `agt_<sha256[:12]>` labels).
+- `GET /stats`: public callers get `summary` aggregates + `config` and an empty
+  `agents` list (`scope: "public"`); the per-agent list is operator-only.
+- `GET /quota/{agent_id}`: operator-only and now fails closed when
+  `OPERATOR_TOKEN` is unset (was open).
+- `GET /events` SSE and `GET /swarm/runs`: agent ids redacted for non-operators.
+- `POST /pulse/publish` and `POST /swarm/run`: operator token required on top of
+  the existing `DASHBOARD_ACTIONS` / `SWARM_ENABLED` gates.
+- `/dashboard/legacy` (and the SPA fallback) no longer render `OPERATOR_TOKEN`
+  into public HTML; the legacy terminal reads it from `localStorage.x402_op_token`.
+- MailRail operator guard uses the same constant-time compare.
+- desktop-admin sends its stored operator token on `/stats`.
+- Unchanged and public: `/health`, `/doctor`, paid 402 routes, `/ledger/*`.
+- Tests: `tests/test_operator_surfaces.py`.
+
+## Direct x402 Facilitator Endpoints (/verify, /settle, /supported, /facilitator) (2026-10-11)
+
+- Exposed standard x402 Facilitator endpoints directly in `app/main.py`:
+  - `POST /verify` & `POST /facilitator/verify`: Validates buyer payment authorization against payment requirements. Accepts both standard x402 JSON (`paymentPayload`, `paymentRequirements`) and base64 wire headers (`payment_signature`, `payment_required`).
+  - `POST /settle` & `POST /facilitator/settle`: Executes on-chain settlement via the server's configured relayer / CDP, dispatches MailRail receipts on success, and returns transaction hashes.
+  - `GET /supported` & `GET /facilitator/supported`: Returns supported settlement kinds, networks, and tokens.
+  - `GET /facilitator`: Service catalog and health endpoint returning active endpoints and documentation links, preventing 404s on facilitator base path.
+- Implemented `facilitator_supported`, `facilitator_verify`, `facilitator_settle`, and `_parse_facilitator_input` in `app/x402_services.py`.
+- Added unit tests in `tests/test_facilitator_endpoints.py`.
+
+
 ## A2A Discovery & AP2 Protocol Expansion (2026-09-29)
 
 - Aligned with Google Agent Payments Protocol (AP2 v1): declared `AP2_EXTENSION_URI` in `app/agent_surface.py` under `capabilities.extensions` alongside `a2a-x402`, with `stateTransitionHistory: True`
