@@ -104,28 +104,57 @@ def test_spend_velocity_anomaly(monkeypatch) -> None:
     assert "Spend velocity anomaly" in alerts[0]
 
 
+def _mailrail_check(report: dict) -> dict:
+    return next(c for c in report["checks"] if c["id"] == "mailrail")
+
+
 def test_doctor_mailrail_checks(monkeypatch) -> None:
     from app.config import settings
     from app.doctor import run_checks
 
-    # Default disabled mock
+    # Default disabled mock is a ledger-only debug log, not a sender.
     monkeypatch.setattr(settings, "mailrail_enabled", False)
+    monkeypatch.setattr(settings, "mailrail_provider", "mock")
     report = run_checks()
-    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    mail_check = _mailrail_check(report)
     assert mail_check["status"] == "pass"
+    assert "ledger only" in mail_check["message"]
+    assert "ephemeral" in mail_check["message"]
+    assert "Hermetic file ledger" not in mail_check["message"]
+    assert "SMTP active" not in mail_check["message"]
+
+    # Enabled mock uses the same honest ledger-only message.
+    monkeypatch.setattr(settings, "mailrail_enabled", True)
+    report = run_checks()
+    mail_check = _mailrail_check(report)
+    assert mail_check["status"] == "pass"
+    assert "ledger only" in mail_check["message"]
+    assert "ephemeral" in mail_check["message"]
+    assert "Hermetic file ledger" not in mail_check["message"]
+    assert "SMTP active" not in mail_check["message"]
+
+    # smtp is not passed as an active sender.
+    monkeypatch.setattr(settings, "mailrail_provider", "smtp")
+    monkeypatch.setattr(settings, "mailrail_smtp_url", "smtps://user:pass@smtp.example.com:465")
+    report = run_checks()
+    mail_check = _mailrail_check(report)
+    assert mail_check["status"] == "warn"
+    assert "ledger only" in mail_check["message"]
+    assert "ephemeral" in mail_check["message"]
+    assert "SMTP active" not in mail_check["message"]
+    assert "Hermetic file ledger" not in mail_check["message"]
 
     # Enabled with Resend valid
-    monkeypatch.setattr(settings, "mailrail_enabled", True)
     monkeypatch.setattr(settings, "mailrail_provider", "resend")
     monkeypatch.setattr(settings, "mailrail_api_key", "re_test_valid_key")
     report = run_checks()
-    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    mail_check = _mailrail_check(report)
     assert mail_check["status"] == "pass"
 
     # Enabled with Resend missing key
     monkeypatch.setattr(settings, "mailrail_api_key", None)
     report = run_checks()
-    mail_check = next(c for c in report["checks"] if c["id"] == "mailrail")
+    mail_check = _mailrail_check(report)
     assert mail_check["status"] == "fail"
 
     # AgentMail with key + webhook secret
