@@ -23,6 +23,7 @@ def mail_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger)
     monkeypatch.setattr(settings, "mailrail_admin_recipient", "ops@x402.test")
     _SEEN_KEYS.clear()
+    agentmail.reset_city_batch()
     return ledger
 
 
@@ -56,8 +57,10 @@ def test_two_catalog_calls_both_dispatch(mail_ledger: Path) -> None:
     """Each catalog browse must emit its own AgentMail (no process-lifetime dedup)."""
     res1 = agentmail.notify_city_call("catalog", channel="http", detail="first")
     res2 = agentmail.notify_city_call("catalog", channel="http", detail="second")
-    assert res1 is not None and res1["status"] == "sent"
-    assert res2 is not None and res2["status"] == "sent"
+    assert res1 is not None and res1["status"] == "disabled"
+    assert res1["delivered"] is False
+    assert res2 is not None and res2["status"] == "disabled"
+    assert res2["delivered"] is False
     records = _ledger_records(mail_ledger)
     assert len(records) == 2
     assert records[0]["event_id"] != records[1]["event_id"]
@@ -93,7 +96,8 @@ def test_paid_tx_hash_retries_deduplicate(mail_ledger: Path) -> None:
     }
     res1 = agentmail.notify_city_call(**kwargs)
     res2 = agentmail.notify_city_call(**kwargs)
-    assert res1 is not None and res1["status"] == "sent"
+    assert res1 is not None and res1["status"] == "disabled"
+    assert res1["delivered"] is False
     assert res2 is not None and res2["status"] == "deduplicated"
     assert len(_ledger_records(mail_ledger)) == 1
 
@@ -114,7 +118,8 @@ def test_request_id_retries_deduplicate(mail_ledger: Path) -> None:
         address="1 Centre St",
         request_id="probe-handoff-42",
     )
-    assert res1 is not None and res1["status"] == "sent"
+    assert res1 is not None and res1["status"] == "disabled"
+    assert res1["delivered"] is False
     assert res2 is not None and res2["status"] == "deduplicated"
     assert len(_ledger_records(mail_ledger)) == 1
 
@@ -127,7 +132,8 @@ def test_notify_city_call_records_ledger(mail_ledger: Path) -> None:
         detail="city_count=14",
     )
     assert res is not None
-    assert res["status"] == "sent"
+    assert res["status"] == "disabled"
+    assert res["delivered"] is False
     records = _ledger_records(mail_ledger)
     assert len(records) == 1
     assert records[0]["metadata"]["call_kind"] == "catalog"
@@ -339,3 +345,38 @@ def test_http_property_due_diligence_upstream_failure_sends_agentmail(
     assert "(paid)" in records[0]["subject"]
     assert "0xfeedface" in records[0]["body"]
     assert "upstream_open_data_unavailable" in records[0]["body"]
+
+
+def test_non_mock_city_alerts_batch_to_one_dispatch(
+    mail_ledger: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two city calls on a live provider produce one transport dispatch."""
+    monkeypatch.setattr(settings, "mailrail_enabled", True)
+    monkeypatch.setattr(settings, "mailrail_provider", "resend")
+    monkeypatch.setattr(settings, "mailrail_api_key", "re_test_key")
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _Resp:
+        status_code = 200
+
+    def fake_post(url: str, **kwargs: Any) -> _Resp:
+        calls.append((url, kwargs))
+        return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    first = agentmail.notify_city_call("catalog", channel="http", detail="first")
+    assert first is not None
+    assert first["delivered"] is False
+    assert calls == []
+    second = agentmail.notify_city_call("catalog", channel="http", detail="second")
+    assert second is not None
+    assert second["delivered"] is True
+    assert len(calls) == 1
+    assert "api.resend.com" in calls[0][0]
+    posted = calls[0][1]["json"]["text"]
+    assert "first" in posted
+    assert "second" in posted
+    assert len(_ledger_records(mail_ledger)) == 1

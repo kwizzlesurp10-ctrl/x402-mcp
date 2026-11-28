@@ -416,37 +416,40 @@ def run_checks() -> dict[str, Any]:
             else:
                 checks.append(_check("rpc", "Base RPC", "fail", "Both primary and fallback RPC failed", "Check network connection"))
 
-    # MailRail Messaging & Receipt Rail
-    if settings.mailrail_enabled:
-        provider = settings.mailrail_provider.lower()
-        if provider == "resend":
-            if settings.mailrail_api_key and settings.mailrail_api_key.startswith("re_"):
-                checks.append(_check("mailrail", "MailRail provider", "pass", f"Resend API active (from: {settings.mailrail_from_address})"))
-            else:
-                checks.append(_check("mailrail", "MailRail provider", "fail", "Resend selected but MAILRAIL_API_KEY missing or invalid", "Set MAILRAIL_API_KEY=re_..."))
-        elif provider == "webhook":
-            if settings.mailrail_webhook_url and settings.mailrail_webhook_url.startswith("http"):
-                checks.append(_check("mailrail", "MailRail provider", "pass", f"Webhook active (URL: {settings.mailrail_webhook_url[:30]}...)"))
-            else:
-                checks.append(_check("mailrail", "MailRail provider", "fail", "Webhook selected but MAILRAIL_WEBHOOK_URL missing or invalid", "Set MAILRAIL_WEBHOOK_URL=https://..."))
-        elif provider == "agentmail":
-            if settings.mailrail_api_key and settings.mailrail_from_address and "@" in settings.mailrail_from_address:
-                detail = f"AgentMail active (inbox: {settings.mailrail_inbox_id or settings.mailrail_from_address})"
-                if not settings.mailrail_agentmail_webhook_secret:
-                    checks.append(_check("mailrail", "MailRail provider", "warn", detail + " — inbound webhook secret not set", "Set MAILRAIL_AGENTMAIL_WEBHOOK_SECRET=whsec_..."))
-                else:
-                    checks.append(_check("mailrail", "MailRail provider", "pass", detail))
-            else:
-                checks.append(_check("mailrail", "MailRail provider", "fail", "AgentMail selected but MAILRAIL_API_KEY or FROM address missing", "Set MAILRAIL_API_KEY and MAILRAIL_FROM_ADDRESS"))
-        elif provider == "smtp":
-            if settings.mailrail_smtp_url and settings.mailrail_smtp_url.startswith(("smtp://", "smtps://")):
-                checks.append(_check("mailrail", "MailRail provider", "pass", f"SMTP active (from: {settings.mailrail_from_address})"))
-            else:
-                checks.append(_check("mailrail", "MailRail provider", "fail", "SMTP selected but MAILRAIL_SMTP_URL missing or invalid", "Set MAILRAIL_SMTP_URL=smtps://..."))
+    # MailRail. JSONL files are a restart-volatile debug log, not a Redis ledger.
+    # smtp and file are not senders and must not pass as an active transport.
+    from app.mailrail import LEDGER_ONLY_DOCTOR_MESSAGE
+
+    provider = (settings.mailrail_provider or "mock").strip().lower()
+    if settings.mailrail_enabled and provider == "resend":
+        if settings.mailrail_api_key and settings.mailrail_api_key.startswith("re_"):
+            checks.append(_check("mailrail", "MailRail provider", "pass", f"Resend API active (from: {settings.mailrail_from_address})"))
         else:
-            checks.append(_check("mailrail", "MailRail provider", "pass", "Hermetic file ledger active (ledger/mailrail.jsonl)"))
+            checks.append(_check("mailrail", "MailRail provider", "fail", "Resend selected but MAILRAIL_API_KEY missing or invalid", "Set MAILRAIL_API_KEY=re_..."))
+    elif settings.mailrail_enabled and provider == "webhook":
+        if settings.mailrail_webhook_url and settings.mailrail_webhook_url.startswith("http"):
+            checks.append(_check("mailrail", "MailRail provider", "pass", f"Webhook active (URL: {settings.mailrail_webhook_url[:30]}...)"))
+        else:
+            checks.append(_check("mailrail", "MailRail provider", "fail", "Webhook selected but MAILRAIL_WEBHOOK_URL missing or invalid", "Set MAILRAIL_WEBHOOK_URL=https://..."))
+    elif settings.mailrail_enabled and provider == "agentmail":
+        if settings.mailrail_api_key and settings.mailrail_from_address and "@" in settings.mailrail_from_address:
+            detail = f"AgentMail active (inbox: {settings.mailrail_inbox_id or settings.mailrail_from_address})"
+            if not settings.mailrail_agentmail_webhook_secret:
+                checks.append(_check("mailrail", "MailRail provider", "warn", detail + " — inbound webhook secret not set", "Set MAILRAIL_AGENTMAIL_WEBHOOK_SECRET=whsec_..."))
+            else:
+                checks.append(_check("mailrail", "MailRail provider", "pass", detail))
+        else:
+            checks.append(_check("mailrail", "MailRail provider", "fail", "AgentMail selected but MAILRAIL_API_KEY or FROM address missing", "Set MAILRAIL_API_KEY and MAILRAIL_FROM_ADDRESS"))
+    elif settings.mailrail_enabled and provider != "mock":
+        checks.append(_check(
+            "mailrail",
+            "MailRail provider",
+            "warn",
+            LEDGER_ONLY_DOCTOR_MESSAGE,
+            "smtp and file are not senders. Use mock, resend, webhook, or agentmail.",
+        ))
     else:
-        checks.append(_check("mailrail", "MailRail provider", "pass", "MailRail disabled (offline mock fallback active)"))
+        checks.append(_check("mailrail", "MailRail provider", "pass", LEDGER_ONLY_DOCTOR_MESSAGE))
 
     failed = sum(1 for c in checks if c["status"] == "fail")
     warned = sum(1 for c in checks if c["status"] == "warn")

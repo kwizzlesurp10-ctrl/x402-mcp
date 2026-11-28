@@ -101,11 +101,26 @@ def test_operator_bearer_can_read_empty_ledger(
     assert res.json()["count"] == 0
 
 
-def test_public_health_does_not_dump_recipients() -> None:
+def test_public_health_does_not_dump_recipients(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "contact_email", "ops-secret@x402.test")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "admin-secret@x402.test")
     client = TestClient(app)
     res = client.get("/mailrail/health")
     assert res.status_code == 200
     body = res.json()
+    assert body["ok"] is True
     assert "admin_recipient" not in body
     assert "from_address" not in body
     assert "has_api_key" not in body
+    assert "ops-secret@x402.test" not in res.text
+    assert "admin-secret@x402.test" not in res.text
+
+
+def test_public_agent_card_omits_operator_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "contact_email", "ops-secret@x402.test")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", "admin-secret@x402.test")
+    client = TestClient(app)
+    res = client.get("/agent/mailrail")
+    assert res.status_code == 200
+    assert "ops-secret@x402.test" not in res.text
+    assert "admin-secret@x402.test" not in res.text
