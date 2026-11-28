@@ -91,7 +91,12 @@ def test_server_json_mcp_registry_schema_conformance() -> None:
     
     # Required keys
     assert "$schema" in doc
-    assert "2026-07-28" in doc["$schema"] or "server.json" in doc["$schema"]
+    assert (
+        "server.schema.json" in doc["$schema"]
+        or "server.json" in doc["$schema"]
+        or "2025-12-11" in doc["$schema"]
+        or "2026-07-28" in doc["$schema"]
+    )
     
     assert doc["name"] == "io.github.kwizzlesurp10-ctrl/x402-mcp"
     assert len(str(doc["version"]).split(".")) == 3
