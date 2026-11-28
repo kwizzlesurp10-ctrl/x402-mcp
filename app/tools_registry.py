@@ -64,6 +64,18 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "tier": "free",
     },
     {
+        "name": "x402.policy_check",
+        "description": (
+            "Offline buyer payment-policy check: decode a caller-supplied merchant PAYMENT-REQUIRED "
+            "header and evaluate each accepts[] option against an explicit policy (networks, pay_to, "
+            "assets, atomic amount, timeouts). Does not fetch merchant URLs or prove settlement on "
+            "the inspected resource. Unpaid returns PaymentRequired for this server's separate "
+            "analysis fee; pay via _meta['x402/payment']. Policy is consistency only, not proof."
+        ),
+        "tier": "paid",
+        "requires_env": ["X402_PAY_TO_ADDRESS"],
+    },
+    {
         "name": "x402.networks",
         "description": (
             "List supported settlement networks, facilitators, and x402 v2 header names. "
@@ -84,7 +96,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "name": "commerce.activate_pro",
         "description": (
             "Verify a Pro-tier x402 payment and unlock Pro quota limits for the agent. "
-            "Call after commerce.pro_requirements and a completed USDC payment."
+            "MCP-native: call unpaid for x402 requirements, retry with _meta x402/payment; "
+            "or legacy PAYMENT-SIGNATURE after commerce.pro_requirements."
         ),
         "tier": "free",
     },
@@ -101,7 +114,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "name": "commerce.purchase_credits",
         "description": (
             "Verify an x402 payment and add per-use tool credits to the agent. "
-            "Call after commerce.credits_requirements and a completed USDC payment."
+            "MCP-native: unpaid call + _meta x402/payment retry; or legacy headers after "
+            "commerce.credits_requirements."
         ),
         "tier": "free",
     },
@@ -151,28 +165,31 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     {
         "name": "city.list",
         "description": (
-            "List US City Open-Data Compliance Network cities with paid_url, sample_url, and price. "
-            "Call first, then city.sample, then city.check for the paid address lookup."
+            "List US cities with paid_url and free sample_url for property compliance. "
+            "Start here — each paid lookup is $0.01 USDC and returns a normalized "
+            "verdict (licensed / not_licensed / violations_open / …) plus source link, "
+            "not raw portal JSON. Then city.sample (free shape), then city.check. "
+            "Covers Minneapolis, Minnesota rental licensing (city_code mn) and other US cities."
         ),
         "tier": "free",
     },
     {
         "name": "city.sample",
         "description": (
-            "Get a free fixed-address property compliance sample for one US city code. "
-            "Use before city.check to validate city_code and response shape without paying."
+            "Free fixed-address preview of paid property-check JSON: verdict, summary, "
+            "schema. Use before city.check to validate parsing without spending $0.01 USDC."
         ),
         "tier": "free",
     },
     {
         "name": "city.check",
         "description": (
-            "Run a paid US city property compliance check via x402 on the same HTTP resource buyers use. "
-            "Prefer city.sample first. Settles USDC when EVM_PRIVATE_KEY is set; otherwise returns a 402 probe. "
-            "Price: $0.01 per call (x402, USDC on Base/Solana/Arbitrum)."
+            "Is this US address licensed / flagged / showing open violations? "
+            "One city.check ($0.01 USDC, x402 on Base) returns verdict, summary, "
+            "dates, and source_url — skip querying city open-data portals yourself. "
+            "Unpaid → PaymentRequired; pay via _meta['x402/payment']. Prefer city.sample first."
         ),
-        "tier": "free",
-        "requires_env": ["EVM_PRIVATE_KEY"],
+        "tier": "paid",
     },
     {
         "name": "a2a.resolve_card",

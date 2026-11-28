@@ -95,6 +95,10 @@ describe("parsePriceUsdc", () => {
   it("parses catalog $0.01 strings", () => {
     expect(parsePriceUsdc("$0.01")).toBe(0.01);
   });
+
+  it("parses MN rental check $0.01 price strings", () => {
+    expect(parsePriceUsdc("$0.01")).toBe(0.01);
+  });
 });
 
 describe("pathFromUrl", () => {
@@ -155,6 +159,8 @@ describe("buildBazaarCatalog", () => {
       ],
     });
     expect(entries[0].path).toBe("/us/cities");
+    expect(entries.some((e) => e.path === "/.well-known/mcp")).toBe(true);
+    expect(entries.some((e) => e.id === "mcp-tools-catalog")).toBe(true);
     expect(entries.some((e) => e.path === `/swarm/products/${PINNED_PULSE_PRODUCT_ID}/purchase`)).toBe(
       true,
     );

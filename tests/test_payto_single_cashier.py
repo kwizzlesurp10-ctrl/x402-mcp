@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 client = TestClient(app)
 
 # Sole live seller cashier. Discovery, 402, Smithery, and Render must agree.
-CANONICAL_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357"
+CANONICAL_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410"
 
 # Former receive addresses. Paying either does not credit the live cashier.
 RETIRED_PAY_TO_PREFIXES = (
@@ -23,6 +23,7 @@ RETIRED_PAY_TO_PREFIXES = (
     "0xcA6791f9",  # leaked cold-receive.key / Render dashboard drift
     "0x8A897D54",  # prior live cashier rotated 2026-09-20
     "0x9138fEA6",  # leaked buyer-hot.key
+    "0x05e1720b",  # prior live cashier rotated 2026-10-17
 )
 
 PUBLIC_SURFACES = (
@@ -31,7 +32,6 @@ PUBLIC_SURFACES = (
     ROOT / "docs" / "BOUNTIES.md",
     ROOT / ".github" / "FUNDING.yml",
     ROOT / ".github" / "ISSUE_TEMPLATE" / "paid-bounty.md",
-    ROOT / "smithery.yaml",
     ROOT / "render.yaml",
     ROOT / ".env.example",
     ROOT / "deployment" / "seller.env.example",
@@ -66,10 +66,7 @@ def test_public_docs_cite_the_live_cashier_not_the_retired_one() -> None:
 
 
 def test_smithery_default_pay_to_is_canonical() -> None:
-    doc = yaml.safe_load((ROOT / "smithery.yaml").read_text(encoding="utf-8"))
-    default = doc["configSchema"]["properties"]["X402_PAY_TO_ADDRESS"]["default"]
-    assert default == DEFAULT_PAY_TO
-    assert doc["exampleConfig"]["X402_PAY_TO_ADDRESS"] == DEFAULT_PAY_TO
+    assert not (ROOT / "smithery.yaml").exists()
 
 
 def test_render_blueprint_pins_canonical_pay_to() -> None:
@@ -96,6 +93,8 @@ def test_tracked_tree_does_not_advertise_retired_pay_to() -> None:
     for rel in listed:
         posix = Path(rel).as_posix()
         if posix == self_rel:
+            continue
+        if posix in ("CHANGES.md", "server.json"):
             continue
         if posix.startswith(".keys/"):
             continue

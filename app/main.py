@@ -46,13 +46,14 @@ from app.mcp_server import mcp
 from app.models import BuildSellerRequirementsInput, GetPaymentRequirementsInput, InboundMailInput
 
 from app.ops_events import event_stream, format_sse
+from app.operator_auth import is_operator, redact_agent_ids, require_operator
 from app.payment_rails import build_payment_rails
 from app.a2a_discovery import resolve_agent_card
 from app.probe_rate_limit import ProbeRateLimitExceeded, probe_rate_limiter
 from app.ssrf_guard import SSRFBlockedError, validate_probe_url
 from app.swarm import orchestrator as swarm_orchestrator
 from app.swarm.registry import swarm_registry
-from app import cache_warmer, demand, os_monitor, wallet_read, x402_services
+from app import cache_warmer, demand, http_shared, os_monitor, wallet_read, x402_services, x402_latency
 
 setup_logging()
 logger = logging.getLogger("x402")
@@ -74,6 +75,9 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     Endpoints also sample on demand, so nothing breaks when the lifespan
     doesn't run (e.g. bare TestClient without a context manager).
     """
+    from app.operator_auth import check_operator_token_at_startup
+
+    check_operator_token_at_startup()
     sampler = (
         asyncio.create_task(os_monitor.sampler_loop())
         if settings.os_monitor_enabled
@@ -114,6 +118,7 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
             pulse_refresh.cancel()
             with suppress(asyncio.CancelledError):
                 await pulse_refresh
+        await http_shared.aclose_async_http_client()
 
 
 class UpstashAnalyticsMiddleware(BaseHTTPMiddleware):
@@ -148,40 +153,143 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+# Private ranges trusted on Render only: the container is reachable solely via
+# Render's internal proxy, and Render does not publish fixed proxy IPs.
+RENDER_DEFAULT_TRUSTED_PROXIES = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+
+def resolve_trusted_proxies() -> list[str]:
+    """Trusted proxy IPs/CIDRs. Never '*'. Empty list = trust nobody."""
+    raw = (settings.trusted_proxies or "").strip()
+    source = "TRUSTED_PROXIES"
+    if not raw and os.environ.get("RENDER"):
+        raw, source = RENDER_DEFAULT_TRUSTED_PROXIES, "Render default"
+    out = []
+    for p in raw.split(","):
+        p = p.strip()
+        if not p:
+            continue
+        if p == "*":
+            logger.error("TRUSTED_PROXIES='*' ignored: it allows client IP spoofing.")
+            continue
+        out.append(p)
+    logger.info("Trusted proxies (%s): %s", source, ",".join(out) or "none")
+    return out
+
+
+class TrustedProxyHeadersMiddleware(ProxyHeadersMiddleware):
+    """uvicorn ProxyHeaders, plus a record of the real socket peer.
+
+    The original peer is kept in scope['x402.peer_trusted'] so code that reads
+    X-Forwarded-Host can require the hop to come from a trusted proxy.
+    """
+
+    async def __call__(self, scope, receive, send):  # type: ignore[override]
+        self.trusted_hosts = _TRUSTED_HOSTS
+        if scope.get("type") in ("http", "websocket"):
+            client = scope.get("client")
+            host = client[0] if client else None
+            scope["x402.peer_trusted"] = bool(host) and host in self.trusted_hosts
+        return await super().__call__(scope, receive, send)
+
+
+def set_trusted_proxies(proxies: list[str]) -> None:
+    """(Re)load the trusted proxy list used by TrustedProxyHeadersMiddleware."""
+    global TRUSTED_PROXIES, _TRUSTED_HOSTS
+    from uvicorn.middleware.proxy_headers import _TrustedHosts
+
+    TRUSTED_PROXIES = [p for p in proxies if p != "*"]
+    _TRUSTED_HOSTS = _TrustedHosts(TRUSTED_PROXIES)
+
+
+TRUSTED_PROXIES: list[str] = []
+_TRUSTED_HOSTS = None
+set_trusted_proxies(resolve_trusted_proxies())
+app.add_middleware(TrustedProxyHeadersMiddleware, trusted_hosts=TRUSTED_PROXIES)
+
 app.add_middleware(UpstashAnalyticsMiddleware)
 
-# Dashboard CORS: local Vite only + exact extras (no free-tunnel wildcards).
+# CORS: exact origins only (env allowlist), explicit methods and headers.
+_DEFAULT_CORS_ORIGINS = (
+    "https://x402-mission-control.vercel.app",
+    "https://kwizzle-landing-page.onrender.com",
+    "https://kwizzlesurp.com",
+    "https://www.kwizzlesurp.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "https://smithery.ai",
+    "https://www.smithery.ai",
+    "https://server.smithery.ai",
+    # Smithery's per-server gateway host (listing deploymentUrl). Without it
+    # the CORS preflight is rejected 400 "Disallowed CORS origin".
+    "https://x402-mcp--kwizzlesurp10.run.tools",
+)
+
+CORS_ALLOWED_METHODS = ["GET", "POST", "DELETE", "OPTIONS", "HEAD"]
+CORS_ALLOWED_HEADERS = [
+    "Accept",
+    "Accept-Language",
+    "Authorization",
+    "Content-Type",
+    "Content-Language",
+    "Last-Event-Id",
+    "Mcp-Protocol-Version",
+    "Mcp-Session-Id",
+    "PAYMENT-SIGNATURE",
+    "X-PAYMENT",
+    "X-Agent-Id",
+    "X-A2A-Extensions",
+    "X-Operator-Token",
+    "X-NVM-Token",
+]
+
+
+def _split_csv(raw: str | None) -> list[str]:
+    return [p.strip().rstrip("/") for p in (raw or "").split(",") if p.strip()]
+
+
 def _cors_origins() -> list[str]:
-    origins = [
-        "https://x402-mission-control.vercel.app",
-        "https://kwizzle-landing-page.onrender.com",
-        "https://kwizzlesurp.com",
-        "https://www.kwizzlesurp.com",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ]
-    extra = getattr(settings, "cors_extra_origins", "") or ""
-    origins.extend(o.strip().rstrip("/") for o in extra.split(",") if o.strip())
-    return origins
+    """Exact-origin allowlist. Wildcards are dropped, never honoured."""
+    configured = _split_csv(getattr(settings, "cors_allowed_origins", ""))
+    origins = configured or list(_DEFAULT_CORS_ORIGINS)
+    origins.extend(_split_csv(getattr(settings, "cors_extra_origins", "")))
+    out: list[str] = []
+    for o in origins:
+        if "*" in o:
+            logger.warning("Ignoring wildcard CORS origin %r; list exact origins.", o)
+            continue
+        if o not in out:
+            out.append(o)
+    return out
 
 
-# MCP Streamable HTTP is POST + CORS preflight. Restricting methods to GET
-# when DASHBOARD_ACTIONS is off blocked Smithery/browser MCP clients.
-_cors_methods = ["GET", "POST", "DELETE", "OPTIONS", "HEAD"]
-if settings.dashboard_actions and "POST" not in _cors_methods:
-    _cors_methods.append("POST")
+def _cors_headers() -> list[str]:
+    extra = [h for h in _split_csv(getattr(settings, "cors_extra_headers", "")) if h != "*"]
+    return CORS_ALLOWED_HEADERS + [h for h in extra if h not in CORS_ALLOWED_HEADERS]
+
+
+def _mcp_cors_origins() -> list[str]:
+    override = _split_csv(getattr(settings, "mcp_cors_origins", ""))
+    if override == ["*"]:
+        return ["*"]
+    if override:
+        return [o for o in override if "*" not in o]
+    out = _cors_origins()
+    for o in _split_csv(settings.mcp_allowed_origins):
+        if "*" not in o and o not in out:
+            out.append(o)
+    return out
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins()
-    + [
-        "https://smithery.ai",
-        "https://www.smithery.ai",
-        "https://server.smithery.ai",
-    ],
-    allow_methods=_cors_methods,
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=_cors_headers(),
     expose_headers=[
         "PAYMENT-REQUIRED",
         "PAYMENT-RESPONSE",
@@ -191,15 +299,23 @@ app.add_middleware(
     ],
 )
 
+from app.discovery_cors import DiscoveryCorsMiddleware
+
+# Outermost: public discovery ACAO * before the strict origin allowlist below.
+app.add_middleware(DiscoveryCorsMiddleware)
+
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "[::1]", "::1")
 
 
 def _public_base_from_request(request: Request) -> str:
     """Public origin for seller resource URLs baked into signed 402 challenges.
 
-    Forwarded headers are only honoured when TRUST_FORWARDED_HOST is set.
+    Forwarded headers are only honoured when TRUST_FORWARDED_HOST is set AND
+    the request arrived from a configured trusted proxy (TRUSTED_PROXIES).
     """
     if not settings.trust_forwarded_host:
+        return settings.public_base_url.rstrip("/")
+    if not request.scope.get("x402.peer_trusted", False):
         return settings.public_base_url.rstrip("/")
 
     xf_proto = request.headers.get("x-forwarded-proto")
@@ -225,14 +341,18 @@ def _public_base_from_request(request: Request) -> str:
 from app import x402_middleware_pilot  # noqa: E402
 from app.city_compliance.routes import router as city_compliance_router  # noqa: E402
 from app.diligence_routes import router as diligence_router  # noqa: E402
+from app.policy_check_routes import router as policy_check_router  # noqa: E402
 from app.property_due_diligence_routes import (  # noqa: E402
     router as property_due_diligence_router,
 )
+from app.delivery_admin import router as delivery_admin_router  # noqa: E402
 
 x402_middleware_pilot.register(app)
 app.include_router(city_compliance_router)
 app.include_router(diligence_router)
+app.include_router(policy_check_router)
 app.include_router(property_due_diligence_router)
+app.include_router(delivery_admin_router)
 
 
 def _public_openapi() -> dict:
@@ -503,24 +623,28 @@ def _landing_page_html(request: Request) -> str:
 """
 
 
+_MISSION_CONTROL_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+    "font-src 'self' data: https://fonts.gstatic.com; "
+    "img-src 'self' data: blob: android-webview-video-poster:; "
+    "connect-src 'self' ws: wss: https://*.render.com; "
+    "frame-src 'self'; "
+    "object-src 'none';"
+)
+_MISSION_CONTROL_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": _MISSION_CONTROL_CSP,
+}
+
+
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)
 async def root(request: Request) -> HTMLResponse:
-    """Serve the React Mission Control Dashboard."""
+    """Public A2A marketplace. The operator SPA stays on /dashboard."""
     return HTMLResponse(
-        _mission_control_html(),
-        headers={
-            "Cache-Control": "no-store",
-            "Content-Security-Policy": (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
-                "font-src 'self' data: https://fonts.gstatic.com; "
-                "img-src 'self' data: blob: android-webview-video-poster:; "
-                "connect-src 'self' ws: wss: https://*.render.com; "
-                "frame-src 'self'; "
-                "object-src 'none';"
-            )
-        }
+        _marketplace_html(),
+        headers=_MISSION_CONTROL_HEADERS,
     )
 
 
@@ -550,7 +674,25 @@ async def favicon() -> Response:
 # (Docker multi-stage or local `pnpm build` + copy). Falls back to the legacy
 # single-file terminal if the SPA bundle is missing (e.g. partial checkouts).
 _MC_DIST = Path(__file__).resolve().parent / "static" / "mission_control"
+_MARKETPLACE_HTML = Path(__file__).resolve().parent / "static" / "a2a_marketplace" / "index.html"
 _BASE_APP_ID_META = '<meta name="base:app_id" content="6a7018e2a8c4f2b6db3b3e71" />'
+
+
+def _marketplace_html() -> str:
+    """Static marketplace for GET /. The Docker SPA copy only replaces mission_control/."""
+    html = _MARKETPLACE_HTML.read_text(encoding="utf-8")
+    if "base:app_id" not in html:
+        html = html.replace("<head>", f"<head>\n{_BASE_APP_ID_META}", 1)
+    return html
+
+
+# The operator token is NEVER rendered into a public page. The legacy terminal
+# reads it from the operator's own browser storage (paste once via
+# ``localStorage.setItem("x402_op_token", "<token>")``).
+_OP_TOKEN_JS = (
+    'var __OP_TOKEN__=(function(){try{return localStorage.getItem("x402_op_token")'
+    '||null}catch(e){return null}})();'
+)
 
 
 def _mission_control_html() -> str:
@@ -560,8 +702,7 @@ def _mission_control_html() -> str:
         if "base:app_id" not in html:
             html = html.replace("<head>", f"<head>\n{_BASE_APP_ID_META}", 1)
         return html
-    token_js = f"var __OP_TOKEN__={json.dumps(settings.operator_token)};"
-    return DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", token_js, 1)
+    return DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", _OP_TOKEN_JS, 1)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -570,15 +711,14 @@ async def dashboard() -> HTMLResponse:
     """React Mission Control SPA (Vercel layout), same-origin API."""
     return HTMLResponse(
         _mission_control_html(),
-        headers={"Cache-Control": "no-store"},
+        headers=_MISSION_CONTROL_HEADERS,
     )
 
 
 @app.get("/dashboard/legacy", response_class=HTMLResponse)
 async def dashboard_legacy() -> HTMLResponse:
     """Previous single-file operator terminal (kept for rollback/compare)."""
-    token_js = f"var __OP_TOKEN__={json.dumps(settings.operator_token)};"
-    html = DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", token_js, 1)
+    html = DASHBOARD_HTML.replace("/* __INJECT_TOKEN__ */", _OP_TOKEN_JS, 1)
     return HTMLResponse(html)
 
 
@@ -604,6 +744,12 @@ async def health() -> dict:
 
 @app.get("/.well-known/mcp")
 async def well_known_mcp() -> dict:
+    return build_mcp_manifest()
+
+
+@app.get("/.well-known/mcp.json")
+async def well_known_mcp_json() -> dict:
+    """Alias for crawlers that require the .json suffix."""
     return build_mcp_manifest()
 
 
@@ -671,6 +817,15 @@ async def well_known_ai_plugin_json() -> dict:
     return agent_surface.ai_plugin_json()
 
 
+@app.get("/.well-known/x402-trust.txt", response_class=PlainTextResponse)
+async def well_known_x402_trust_txt() -> str:
+    """Domain ownership proof for x402-trust.com provider verification."""
+    return (
+        "x402-trust-verification=v1:"
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAED_SXABnyL3_8nO1W_OsGPFjvKwfqyT3rOKfV93d5NS_uTyl8k9H9Xlfz7i3mnfYKyXZbuNMMtdMc-36uT4Y8YA\n"
+    )
+
+
 @app.get("/llms.txt", response_class=PlainTextResponse)
 async def llms_txt() -> str:
     """Agent-facing docs: endpoints, prices, and the failure modes that matter."""
@@ -679,38 +834,93 @@ async def llms_txt() -> str:
     return agent_surface.llms_txt()
 
 
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt() -> str:
+    """Allow crawlers on machine-readable discovery surfaces."""
+    return (
+        "User-agent: *\n"
+        "Allow: /.well-known/\n"
+        "Allow: /openapi.json\n"
+        "Allow: /llms.txt\n"
+        "Allow: /us/cities\n"
+    )
+
+
 from datetime import datetime, timedelta
 import asyncio
 
 _stats_cache = {"time": None, "data": None}
 
+def _stats_summary(agents: list[dict]) -> dict:
+    by_tier: dict[str, int] = {}
+    for row in agents:
+        tier = str(row.get("tier") or "unknown")
+        by_tier[tier] = by_tier.get(tier, 0) + 1
+    return {
+        "agent_count": len(agents),
+        "agents_by_tier": by_tier,
+        "agents_with_calls_this_month": sum(
+            1 for a in agents if (a.get("calls_this_month") or 0) > 0
+        ),
+        "calls_this_month_total": sum(int(a.get("calls_this_month") or 0) for a in agents),
+        "agents_with_credits": sum(
+            1 for a in agents if (a.get("tool_credits_remaining") or 0) > 0
+        ),
+        "sample_limit": getattr(quota_store, "SNAPSHOT_AGENT_LIMIT", None),
+    }
+
+
 @app.get("/stats")
-async def stats_snapshot() -> dict:
-    """Mission-control quota snapshot (read-only)."""
+async def stats_snapshot(request: Request) -> dict:
+    """Mission-control quota snapshot (read-only).
+
+    Public callers get aggregate counts only: agent ids are the sole key to an
+    agent's quota, Pro tier and prepaid credits, so listing them would let
+    anyone act as those agents. The per-agent list is returned only to the
+    operator (``Authorization: Bearer <OPERATOR_TOKEN>``). ``agents`` stays in
+    the public payload as an empty list so older dashboards keep rendering.
+    """
     now = datetime.now()
     if _stats_cache["time"] and now - _stats_cache["time"] < timedelta(seconds=10):
-        return _stats_cache["data"]
-    try:
-        data = quota_store.snapshot()
-    except Exception:
-        logger.exception("GET /stats snapshot failed")
-        data = {
-            "agents": [],
-            "config": {
-                "redis_mode": getattr(quota_store, "mode", "unknown"),
-                "snapshot_degraded": True,
-            },
-        }
-    _stats_cache["time"] = now
-    _stats_cache["data"] = data
-    return data
+        data = _stats_cache["data"]
+    else:
+        try:
+            data = quota_store.snapshot()
+        except Exception:
+            logger.exception("GET /stats snapshot failed")
+            data = {
+                "agents": [],
+                "config": {
+                    "redis_mode": getattr(quota_store, "mode", "unknown"),
+                    "snapshot_degraded": True,
+                },
+            }
+        _stats_cache["time"] = now
+        _stats_cache["data"] = data
+    agents = list(data.get("agents") or [])
+    out = {
+        "summary": _stats_summary(agents),
+        "config": data.get("config") or {},
+    }
+    if is_operator(request):
+        out["agents"] = agents
+        out["scope"] = "operator"
+        out.update(x402_latency.snapshot())
+    else:
+        out["agents"] = []
+        out["scope"] = "public"
+    return out
 
 
-def _mailrail_operator_guard(request: Request) -> None:
-    """Fail closed: OPERATOR_TOKEN plus the MailRail postmaster agent id."""
+def _mailrail_operator_guard(request: Request) -> str:
+    """Fail closed: OPERATOR_TOKEN plus an allowlisted MailRail agent.
+
+    Missing or wrong bearer is 401. A bearer with no agent, or the wrong
+    agent, is 403. Health stays public and does not use this guard.
+    """
     from app.mailrail_agent import authorize_http
 
-    authorize_http(request)
+    return authorize_http(request)
 
 
 @app.get("/mailrail/health")
@@ -746,15 +956,56 @@ async def mailrail_ledger(request: Request, limit: int = 50) -> dict:
 @app.post("/mailrail/inbound")
 async def mailrail_inbound(request: Request, payload: models.InboundMailInput) -> dict:
     """Ingest inbound postmaster mail. Operator-only."""
-    _mailrail_operator_guard(request)
+    agent_id = _mailrail_operator_guard(request)
     from app.mailrail import process_inbound_mail
 
-    return process_inbound_mail(
+    received = process_inbound_mail(
         sender=payload.sender,
         subject=payload.subject,
         body=payload.body,
         metadata=payload.metadata,
     )
+    received["agent_id"] = agent_id
+    return received
+
+
+@app.post("/mailrail/webhooks/agentmail")
+async def mailrail_agentmail_webhook(request: Request) -> dict:
+    """Ingest AgentMail message.received events (Svix-signed). Public URL; secret required."""
+    from app.mailrail import process_inbound_mail
+    from app.mailrail_agentmail import (
+        AgentMailWebhookConfigError,
+        AgentMailWebhookVerificationError,
+        MESSAGE_RECEIVED,
+        parse_message_received,
+        verify_agentmail_webhook,
+    )
+
+    body = await request.body()
+    try:
+        payload = verify_agentmail_webhook(body, request.headers)
+    except AgentMailWebhookConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AgentMailWebhookVerificationError as exc:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature") from exc
+
+    event_type = payload.get("event_type")
+    if event_type != MESSAGE_RECEIVED:
+        return {"status": "ignored", "event_type": event_type}
+
+    parsed = parse_message_received(payload)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail="Malformed message.received payload")
+
+    sender, subject, text_body, metadata = parsed
+    received = process_inbound_mail(
+        sender=sender,
+        subject=subject,
+        body=text_body,
+        metadata=metadata,
+    )
+    received["source"] = "agentmail_webhook"
+    return received
 
 
 @app.get("/mailrail/inbox")
@@ -804,12 +1055,18 @@ async def get_analytics() -> dict:
 
 
 @app.get("/events")
-async def tool_events() -> StreamingResponse:
-    """SSE stream of MCP tool invocations."""
+async def tool_events(request: Request) -> StreamingResponse:
+    """SSE stream of MCP tool invocations.
+
+    Agent ids are redacted to stable ``agt_…`` labels unless the caller is
+    the operator: the live stream would otherwise hand every caller's id to
+    anyone listening.
+    """
+    operator = is_operator(request)
 
     async def generate():
         async for event in event_stream():
-            yield format_sse(event)
+            yield format_sse(event if operator else redact_agent_ids(event))
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -928,6 +1185,47 @@ async def probe_url(
         ) from exc
 
 
+@app.get("/a2a")
+async def a2a_get_agent_card() -> dict:
+    """GET /a2a returns the Agent Card so A2A clients can discover without guessing /.well-known/."""
+    from app import agent_surface
+
+    return agent_surface.agent_card()
+
+
+@app.post("/a2a")
+async def a2a_jsonrpc_endpoint(request: Request) -> JSONResponse:
+    """A2A JSON-RPC transport (message/send, tasks/get, tasks/cancel) with x402-a2a."""
+    from app.a2a_rpc import extension_activation_response_headers, handle_jsonrpc
+
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "parse error"},
+            },
+        )
+    ext_requested = request.headers.get("X-A2A-Extensions") or request.headers.get(
+        "A2A-Extensions"
+    )
+    payload = await handle_jsonrpc(
+        body,
+        user_agent=request.headers.get("user-agent"),
+        headers=request.headers,
+        request_scope=request.scope,
+    )
+    return JSONResponse(
+        content=payload,
+        headers=extension_activation_response_headers(ext_requested),
+    )
+
+
 @app.get("/a2a/resolve")
 async def a2a_resolve_endpoint(
     request: Request,
@@ -949,6 +1247,92 @@ async def a2a_resolve_endpoint(
         raise HTTPException(
             status_code=502, detail="upstream a2a target unreachable"
         ) from exc
+
+
+# ============================================================================
+# Standard x402 Facilitator Routes (/verify, /settle, /supported, /facilitator)
+# ============================================================================
+
+
+@app.get("/supported")
+@app.get("/facilitator/supported")
+async def facilitator_supported_endpoint() -> dict:
+    """Standard x402 Facilitator supported mechanisms & networks discovery."""
+    return x402_services.facilitator_supported()
+
+
+@app.get("/facilitator")
+async def facilitator_info_endpoint(request: Request) -> dict:
+    """Facilitator catalog & health endpoint.
+
+    Prevents 404s when developers or user agents probe the facilitator root URL.
+    """
+    base = _public_base_from_request(request)
+    return {
+        "service": "x402-facilitator",
+        "status": "ok",
+        "version": "v2",
+        "default_network": settings.x402_default_network,
+        "endpoints": {
+            "supported": f"{base}/supported",
+            "verify": f"{base}/verify",
+            "settle": f"{base}/settle",
+        },
+        "docs": "https://docs.x402.org",
+    }
+
+
+@app.post("/verify")
+@app.post("/facilitator/verify")
+async def facilitator_verify_endpoint(request: Request) -> JSONResponse:
+    """Standard x402 Facilitator verify endpoint.
+
+    Validates buyer signature against payment requirements before content release.
+    Accepts:
+      - Standard JSON: { "x402Version": 2, "paymentPayload": ..., "paymentRequirements": ... }
+      - Base64 / Header: { "payment_signature": "...", "payment_required": "..." }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "isValid": False,
+                "is_valid": False,
+                "invalidReason": "malformed_request: invalid JSON",
+                "invalid_reason": "malformed_request: invalid JSON",
+            },
+        )
+    result = await x402_services.facilitator_verify(body)
+    return JSONResponse(status_code=200, content=result)
+
+
+@app.post("/settle")
+@app.post("/facilitator/settle")
+async def facilitator_settle_endpoint(request: Request) -> JSONResponse:
+    """Standard x402 Facilitator settle endpoint.
+
+    Broadcasts on-chain settlement via the configured relayer / CDP.
+    Accepts:
+      - Standard JSON: { "x402Version": 2, "paymentPayload": ..., "paymentRequirements": ... }
+      - Base64 / Header: { "payment_signature": "...", "payment_required": "..." }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "malformed_request: invalid JSON",
+                "txHash": None,
+                "transaction": None,
+            },
+        )
+    result = await x402_services.facilitator_settle(body)
+    status_code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=status_code, content=result)
 
 
 @app.post("/seller/requirements")
@@ -1032,9 +1416,15 @@ async def ledger_rows(name: Literal["spend", "revenue"]) -> list[dict]:
 
 
 @app.get("/swarm/runs")
-async def swarm_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]:
-    """Recent swarm Agency runs (buy → compose → list), newest first."""
-    return swarm_registry.recent_runs(limit)
+async def swarm_runs(
+    request: Request, limit: int = Query(default=50, ge=1, le=200)
+) -> list[dict]:
+    """Recent swarm Agency runs (buy → compose → list), newest first.
+
+    Agent ids are redacted for non-operator callers.
+    """
+    runs = swarm_registry.recent_runs(limit)
+    return runs if is_operator(request) else redact_agent_ids(runs)
 
 
 @app.get("/swarm/products")
@@ -1069,12 +1459,17 @@ async def base_pulse() -> dict:
 
 
 @app.post("/pulse/publish")
-async def pulse_publish() -> dict:
-    """Synthesize a live Pulse and list it as a payable x402 product."""
+async def pulse_publish(request: Request) -> dict:
+    """Synthesize a live Pulse and list it as a payable x402 product.
+
+    Operator-only: publishing mints a new listing id and can abandon the
+    cataloged purchase URL, so it is never a public action.
+    """
     if not settings.dashboard_actions:
         raise HTTPException(
             status_code=403, detail="DASHBOARD_ACTIONS is disabled; publishing is off."
         )
+    require_operator(request)
     from app.swarm import publisher
 
     agent_id = quota_store.resolve_agent_id(None)
@@ -1091,12 +1486,14 @@ async def pulse_publish() -> dict:
 
 
 @app.post("/swarm/run")
-async def swarm_run(body: SwarmRunRequest) -> dict:
+async def swarm_run(body: SwarmRunRequest, request: Request) -> dict:
     """Run one swarm cycle in-process so the listing is hosted by this server.
 
     Two independent gates, because they mean different things: SWARM_ENABLED
     says this deployment has a buyer role at all, DASHBOARD_ACTIONS says
     mutating HTTP actions are allowed. A seller-only box wants the first off.
+    Operator-only on top of both: it spends from the buyer wallet under a
+    caller-chosen agent id.
     """
     if not settings.swarm_enabled:
         raise HTTPException(
@@ -1107,6 +1504,7 @@ async def swarm_run(body: SwarmRunRequest) -> dict:
         raise HTTPException(
             status_code=403, detail="DASHBOARD_ACTIONS is disabled; running is off."
         )
+    require_operator(request)
     agent_id = quota_store.resolve_agent_id(body.agent_id)
     return await swarm_orchestrator.run_swarm_research(
         body.topic, agent_id, body.max_price_usdc, body.allow_paid_inputs
@@ -1214,12 +1612,20 @@ async def swarm_revenue() -> dict:
 async def quota_status(request: Request, agent_id: str):
     """Debug endpoint: inspect quota without consuming a call.
 
-    Protected by OPERATOR_TOKEN when set — send ``Authorization: Bearer <token>``.
+    Operator-only — send ``Authorization: Bearer <OPERATOR_TOKEN>``. Fails
+    closed when OPERATOR_TOKEN is unset: an open per-id quota lookup is an
+    oracle for which agent ids exist and how many credits they hold.
     """
-    if settings.operator_token:
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {settings.operator_token}":
-            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    if not settings.operator_token:
+        from app.operator_auth import OPERATOR_DISABLED_DETAIL
+
+        return JSONResponse(status_code=503, content=dict(OPERATOR_DISABLED_DETAIL))
+    if not is_operator(request):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "unauthorized"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     snapshot = quota_store.peek(agent_id)
     meta = quota_store.build_meta(snapshot)
     return {"meta": meta.model_dump()}
@@ -1274,9 +1680,16 @@ async def mn_property_check_sample() -> JSONResponse:
 
     from app.city_compliance import agentmail, registry
 
+    from app.city_compliance import publish
+
     mn_spec = registry.get_city("mn").SPEC
     try:
-        report = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
+        raw = await mn_compliance.check_property(mn_compliance.SAMPLE_ADDRESS)
+        report = publish.prepare_city_report(
+            raw,
+            spec=mn_spec,
+            address_fallback=mn_compliance.SAMPLE_ADDRESS,
+        )
     except Exception:
         log.warning("mn/property-check/sample upstream failed", exc_info=True)
         agentmail.notify_city_call(
@@ -1288,13 +1701,12 @@ async def mn_property_check_sample() -> JSONResponse:
             address=mn_compliance.SAMPLE_ADDRESS,
             detail="upstream_open_data_unavailable",
         )
-        return JSONResponse(
-            status_code=502,
-            content={
-                "error": "upstream_open_data_unavailable",
-                "city": "mn",
-                "detail": "city open-data source timed out or refused; retry shortly",
-            },
+        from app.city_compliance import degraded
+
+        report = publish.prepare_city_report(
+            degraded.upstream_unavailable_report(mn_spec, mn_compliance.SAMPLE_ADDRESS),
+            spec=mn_spec,
+            address_fallback=mn_compliance.SAMPLE_ADDRESS,
         )
     agentmail.notify_city_call(
         "sample",
@@ -1367,24 +1779,30 @@ async def mn_property_check(
         )
     signature = request.headers.get("PAYMENT-SIGNATURE")
     if not signature:
+        from app.unpaid_validation import input_hint_address
+
+        base = settings.public_base_url.rstrip("/")
+        content: dict[str, object] = {
+            "error": "payment_required",
+            "resource": mn_compliance.resource_url(),
+            "price": settings.mn_property_check_price,
+            "network": settings.x402_default_network,
+            "description": mn_compliance.RESOURCE_DESCRIPTION,
+            "sample_url": f"{base}/mn/property-check/sample",
+            "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
+            "requirements are in the PAYMENT-REQUIRED response header. "
+            "Free fixed-address sample (no payment): GET /mn/property-check/sample.",
+        }
+        hint = input_hint_address(address)
+        if hint:
+            content.update(hint)
         log.info("mn/property-check 402 (no signature)", extra={"address": address, "status_code": 402})
         if not demand.is_self_traffic(request.headers):
             demand.record_challenge("mn-property-check", request.headers.get("user-agent"))
-        base = settings.public_base_url.rstrip("/")
         return JSONResponse(
             status_code=402,
             headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_required",
-                "resource": mn_compliance.resource_url(),
-                "price": settings.mn_property_check_price,
-                "network": settings.x402_default_network,
-                "description": mn_compliance.RESOURCE_DESCRIPTION,
-                "sample_url": f"{base}/mn/property-check/sample",
-                "how_to_pay": "Retry with PAYMENT-SIGNATURE header (x402 v2); "
-                "requirements are in the PAYMENT-REQUIRED response header. "
-                "Free fixed-address sample (no payment): GET /mn/property-check/sample.",
-            },
+            content=content,
         )
 
     # Paid caller: validate before spending their money, never after.
@@ -1394,82 +1812,53 @@ async def mn_property_check(
             content={"error": "invalid_address", "detail": "address must be 1-120 chars"},
         )
 
-    result = await mn_compliance.verify_and_settle(signature, payment_required)
-    if not result["is_valid"] or not result["payment_settled"]:
-        log.warning("mn/property-check payment invalid", extra={"address": address, "status_code": 402})
-        return JSONResponse(
-            status_code=402,
-            headers={"PAYMENT-REQUIRED": payment_required},
-            content={
-                "error": "payment_invalid",
-                "invalid_reason": result.get("invalid_reason"),
-                "settlement_error": result.get("settlement_error"),
-            },
-        )
+    from app.city_compliance import agentmail, paid_delivery, registry
 
-    try:
-        report = await mn_compliance.check_property(address)
-    except Exception:
-        log.warning("mn/property-check join failed after settle", exc_info=True)
-        settlement = result.get("settlement") or {}
-        tx = settlement.get("transaction") or settlement.get("txHash")
-        from app.city_compliance import agentmail, registry
+    mn_spec = registry.get_city("mn").SPEC
+    mn_mod = registry.get_city("mn")
+    addr = address.strip()
 
-        mn_spec = registry.get_city("mn").SPEC
+    def _notify_error(*, paid: bool, detail: str) -> None:
         agentmail.notify_city_call(
             "error",
             city_code="mn",
             city_name=mn_spec.name,
             state=mn_spec.state,
             channel="http",
-            address=address.strip(),
+            address=addr,
             price=settings.mn_property_check_price,
+            paid=paid,
+            detail=detail,
+        )
+
+    def _notify_success(*, report: dict, tx: str | None, payer: str | None) -> None:
+        latency = round((time.monotonic() - t0) * 1000)
+        log.info(
+            "mn/property-check settled",
+            extra={"address": address, "status_code": 200, "latency_ms": latency},
+        )
+        agentmail.notify_city_call(
+            "paid_settle",
+            city_code="mn",
+            city_name=mn_spec.name,
+            state=mn_spec.state,
+            channel="http",
+            address=addr,
+            price=settings.mn_property_check_price,
+            verdict=agentmail.verdict_from_report(report),
             paid=True,
-            tx_hash=str(tx) if tx else None,
-            payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-            detail="upstream_open_data_unavailable",
-        )
-        import base64
-        import json as _json
-
-        receipt = base64.b64encode(_json.dumps(settlement).encode()).decode()
-        return JSONResponse(
-            status_code=502,
-            headers={"PAYMENT-RESPONSE": receipt},
-            content={
-                "error": "upstream_open_data_unavailable",
-                "city": "mn",
-                "detail": (
-                    "Payment settled but Minneapolis open-data join failed; "
-                    "retry this address shortly or contact support with PAYMENT-RESPONSE."
-                ),
-                "payment_settled": True,
-            },
+            tx_hash=tx,
+            payer=payer,
+            detail="canonical /mn/property-check",
         )
 
-    latency = round((time.monotonic() - t0) * 1000)
-    log.info("mn/property-check settled", extra={"address": address, "status_code": 200, "latency_ms": latency})
-
-    settlement = result.get("settlement") or {}
-    tx = settlement.get("transaction") or settlement.get("txHash")
-    from app.city_compliance import agentmail, registry
-
-    mn_spec = registry.get_city("mn").SPEC
-    agentmail.notify_city_call(
-        "paid_settle",
-        city_code="mn",
-        city_name=mn_spec.name,
-        state=mn_spec.state,
-        channel="http",
-        address=address.strip(),
-        price=settings.mn_property_check_price,
-        verdict=agentmail.verdict_from_report(report),
-        paid=True,
-        tx_hash=str(tx) if tx else None,
-        payer=str(settlement.get("payer")) if settlement.get("payer") else None,
-        detail="canonical /mn/property-check",
-    )
-    try:
+    def _record_revenue(
+        *,
+        tx: str | None,
+        payer: object,
+        request_input: object | None = None,
+        response_body: object | None = None,
+    ) -> None:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
@@ -1478,17 +1867,27 @@ async def mn_property_check(
             amount_usdc=parse_price_usdc(settings.mn_property_check_price),
             network=settings.x402_default_network,
             product_id="mn-property-check",
-            tx=str(tx) if tx else None,
-            payer=settlement.get("payer"),
+            tx=tx,
+            payer=payer,
+            request_input=request_input,
+            response_body=response_body,
         )
-    except Exception:  # ledger write must never break paid delivery
-        log.warning("mn/property-check revenue ledger write failed", exc_info=True)
 
-    import base64
-    import json as _json
-
-    receipt = base64.b64encode(_json.dumps(result["settlement"]).encode()).decode()
-    return JSONResponse(content=report, headers={"PAYMENT-RESPONSE": receipt})
+    return await paid_delivery.deliver_paid_city_report(
+        signature=signature,
+        payment_required=payment_required,
+        mod=mn_mod,
+        spec=mn_spec,
+        address=addr,
+        product_id="mn-property-check",
+        price=settings.mn_property_check_price,
+        verify_payment=mn_compliance.verify_payment,
+        settle_payment=mn_compliance.settle_payment,
+        notify_error=_notify_error,
+        notify_success=_notify_success,
+        record_revenue=_record_revenue,
+        log_prefix="mn/property-check",
+    )
 
 
 @app.get("/base/tx-decision")
@@ -1598,6 +1997,8 @@ async def base_tx_decision(
             product_id="base-tx-decision",
             tx=str(tx) if tx else None,
             payer=settlement.get("payer"),
+            request_input={"gas": gas, "urgency": urgency},
+            response_body=decision,
         )
     except Exception:  # ledger write must never break paid delivery
         log.warning("base/tx-decision revenue ledger write failed", exc_info=True)
@@ -1759,22 +2160,6 @@ async def demo_paid_resource(request: Request) -> JSONResponse:
     settlement = result.get("settlement") or {}
     paid_ok = result.get("payment_settled") is True
 
-    if paid_ok:
-        try:
-            from app.swarm import ledger_writer
-            from app.swarm.publisher import parse_price_usdc
-
-            ledger_writer.record_revenue(
-                agent_id="seller-demo",
-                amount_usdc=parse_price_usdc(built["price"]),
-                network=built["network"],
-                product_id="seller-demo",
-                tx=settlement.get("transaction") or settlement.get("txHash"),
-                payer=settlement.get("payer"),
-            )
-        except Exception:
-            log.warning("demo/paid revenue ledger write failed", exc_info=True)
-
     headers: dict[str, str] = {}
     if paid_ok and settlement:
         try:
@@ -1788,23 +2173,39 @@ async def demo_paid_resource(request: Request) -> JSONResponse:
         except Exception:
             pass
 
-    return JSONResponse(
-        status_code=200 if paid_ok else 402,
-        content={
-            "ok": paid_ok,
-            "message": "Payment settled — seller demo payload unlocked"
-            if paid_ok
-            else "Verified but settlement failed",
-            "secret": "x402-seller-demo-ok" if paid_ok else None,
-            "seller_pay_to": built["pay_to"],
-            "price": built["price"],
-            "network": built["network"],
-            "payment_settled": paid_ok,
-            "settlement": settlement,
-            "settlement_error": result.get("settlement_error"),
-        },
-        headers=headers,
-    )
+    demo_content = {
+        "ok": paid_ok,
+        "message": "Payment settled — seller demo payload unlocked"
+        if paid_ok
+        else "Verified but settlement failed",
+        "secret": "x402-seller-demo-ok" if paid_ok else None,
+        "seller_pay_to": built["pay_to"],
+        "price": built["price"],
+        "network": built["network"],
+        "payment_settled": paid_ok,
+        "settlement": settlement,
+        "settlement_error": result.get("settlement_error"),
+    }
+    if paid_ok:
+        try:
+            from app.swarm import ledger_writer
+            from app.swarm.publisher import parse_price_usdc
+
+            ledger_writer.record_revenue(
+                agent_id="seller-demo",
+                amount_usdc=parse_price_usdc(built["price"]),
+                network=built["network"],
+                product_id="seller-demo",
+                tx=settlement.get("transaction") or settlement.get("txHash"),
+                payer=settlement.get("payer"),
+                request_input={},
+                response_body=demo_content,
+                delivery_route="/demo/paid",
+            )
+        except Exception:
+            log.warning("demo/paid revenue/delivery ledger write failed", exc_info=True)
+
+    return JSONResponse(status_code=200 if paid_ok else 402, content=demo_content, headers=headers)
 
 
 @app.get("/demo/paid/info")
@@ -1864,10 +2265,10 @@ async def ops_status() -> dict:
 
 
 _MCP_CORS = dict(
-    allow_origins=["*"],
+    allow_origins=_mcp_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=_cors_headers(),
     expose_headers=["Mcp-Session-Id", "Last-Event-Id"],
 )
 
@@ -1893,11 +2294,44 @@ class McpAcceptCompatMiddleware:
         await self.app(scope, receive, send)
 
 
+class McpBarePathAliasMiddleware:
+    """Serve MCP Streamable HTTP at /mcp as well as the canonical /mcp/mcp.
+
+    The transport is mounted at /mcp with FastMCP's own route at /mcp, so the
+    endpoint is /mcp/mcp. Rewrite /mcp and /mcp/ to /mcp/mcp for MCP traffic
+    (POST/DELETE or SSE GET with Accept: text/event-stream). For a plain browser
+    or crawler GET (no SSE Accept), return the JSON MCP manifest (200 OK)
+    instead of Starlette's 307 -> /mcp/ -> 404 "Not Found".
+    """
+
+    _ALIASES = ("/mcp", "/mcp/")
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") in self._ALIASES:
+            method = scope.get("method", "GET")
+            accept = b""
+            for k, v in scope.get("headers", []):
+                if k == b"accept":
+                    accept = v
+                    break
+            if method != "GET" or b"text/event-stream" in accept:
+                scope = {**scope, "path": "/mcp/mcp", "raw_path": b"/mcp/mcp"}
+            else:
+                response = JSONResponse(build_mcp_manifest())
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 # Mount MCP Streamable HTTP / SSE transport when available.
 if _mcp_http_app is not None:
     _mcp_http_app.add_middleware(CORSMiddleware, **_MCP_CORS)
     _mcp_http_app.add_middleware(McpAcceptCompatMiddleware)
     app.mount("/mcp", _mcp_http_app)
+    app.add_middleware(McpBarePathAliasMiddleware)
 
 try:
     # Legacy SSE mount. Smithery and MCP clients should use Streamable HTTP

@@ -13,7 +13,7 @@ export interface BubbleProps {
   rim?: number;
   iridescence?: number;
   intensity?: number;
-
+  ambient?: boolean;
   colorA?: [number, number, number];
   colorB?: [number, number, number];
   children?: React.ReactNode;
@@ -21,22 +21,25 @@ export interface BubbleProps {
   className?: string;
 }
 
+const DEFAULT_COLOR_A: [number, number, number] = [0.2902, 0.4549, 0.7216];
+const DEFAULT_COLOR_B: [number, number, number] = [0.4118, 0.4118, 0.4157];
+
 export function Bubble({
-  size = 30,
-  trail = 24,
-  follow = 0.5,
-  blend = 14,
-  speed = 2,
-  refraction = 80,
+  size = 8,
+  trail = 2,
+  follow = 0.35,
+  blend = 2,
+  speed = 1.5,
+  refraction = 40,
   dispersion = 1,
   frost = 0,
-  shine = 0.25,
-  rim = 0.5,
-  iridescence = 1,
-  intensity = 0.9,
-
-  colorA = [0.2902, 0.4549, 0.7216],
-  colorB = [0.4118, 0.4118, 0.4157],
+  shine = 0.05,
+  rim = 0.1,
+  iridescence = 0.3,
+  intensity = 0.15,
+  ambient = false,
+  colorA = DEFAULT_COLOR_A,
+  colorB = DEFAULT_COLOR_B,
   children,
   style,
   className,
@@ -44,13 +47,24 @@ export function Bubble({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const colorAStr = colorA.join(",");
+  const colorBStr = colorB.join(",");
+
   useEffect(() => {
+    // Accessibility: disable canvas animation if reduced motion preferred, trail is 0, or ambient mode active
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion || trail <= 0 || ambient) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let animId: number;
+    let animId: number | null = null;
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
@@ -61,100 +75,146 @@ export function Bubble({
     };
     window.addEventListener("resize", handleResize);
 
-    // Mouse tracking positions for glassy liquid droplet trail
     let targetX = width / 2;
     let targetY = height / 2;
+    let lastMoveTime = Date.now();
+    let currentAlpha = 0;
+    let isMouseInWindow = false;
 
-    const points: Array<{ x: number; y: number; vx: number; vy: number; r: number }> = [];
-    const maxTrail = Math.max(5, Math.min(50, trail));
+    // Fix min-trail clamping bug: allow 1-20 trails
+    const maxTrail = Math.max(1, Math.min(20, trail));
+    const points: Array<{ x: number; y: number; r: number }> = [];
 
     for (let i = 0; i < maxTrail; i++) {
-      points.push({ x: targetX, y: targetY, vx: 0, vy: 0, r: size * (1 - i / (maxTrail * 1.5)) });
+      points.push({
+        x: targetX,
+        y: targetY,
+        r: size * Math.max(0.4, 1 - i / (maxTrail * 2)),
+      });
     }
+
+    const startAnimation = () => {
+      if (animId === null) {
+        animId = requestAnimationFrame(render);
+      }
+    };
 
     const handleMouseMove = (e: MouseEvent) => {
       targetX = e.clientX;
       targetY = e.clientY;
+      lastMoveTime = Date.now();
+      isMouseInWindow = true;
+      startAnimation();
     };
-    window.addEventListener("mousemove", handleMouseMove);
+
+    const handleMouseLeave = () => {
+      isMouseInWindow = false;
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    document.addEventListener("mouseleave", handleMouseLeave);
 
     let time = 0;
     const render = () => {
-      time += 0.02 * speed;
+      const now = Date.now();
+      const idleTime = now - lastMoveTime;
+
+      // Smooth fade out when stationary (>350ms idle) or mouse left window
+      if (!isMouseInWindow || idleTime > 350) {
+        currentAlpha = Math.max(0, currentAlpha - 0.04);
+      } else {
+        currentAlpha = Math.min(1, currentAlpha + 0.08);
+      }
+
       ctx.clearRect(0, 0, width, height);
 
-      // Physics interpolation for trailing glassy droplets
-      let leadX = targetX;
-      let leadY = targetY;
+      if (currentAlpha > 0.005) {
+        time += 0.02 * speed;
+        let leadX = targetX;
+        let leadY = targetY;
 
-      points.forEach((p, index) => {
-        const factor = follow * (index === 0 ? 0.4 : 0.25);
-        p.x += (leadX - p.x) * factor;
-        p.y += (leadY - p.y) * factor;
-        leadX = p.x;
-        leadY = p.y;
+        points.forEach((p, index) => {
+          const factor = follow * (index === 0 ? 0.45 : 0.28);
+          p.x += (leadX - p.x) * factor;
+          p.y += (leadY - p.y) * factor;
+          leadX = p.x;
+          leadY = p.y;
 
-        // Render glassy droplet with iridescence, shine, and rim lighting
-        ctx.save();
-        ctx.beginPath();
-        const currentRadius = Math.max(3, p.r);
-        ctx.arc(p.x, p.y, currentRadius, 0, Math.PI * 2);
+          ctx.save();
+          ctx.beginPath();
+          const currentRadius = Math.max(2, p.r);
+          ctx.arc(p.x, p.y, currentRadius, 0, Math.PI * 2);
 
-        // Glassy droplet radial gradient with colorA, colorB, and iridescence
-        const grad = ctx.createRadialGradient(
-          p.x - currentRadius * 0.35,
-          p.y - currentRadius * 0.35,
-          currentRadius * 0.05,
-          p.x,
-          p.y,
-          currentRadius
-        );
+          const grad = ctx.createRadialGradient(
+            p.x - currentRadius * 0.35,
+            p.y - currentRadius * 0.35,
+            currentRadius * 0.05,
+            p.x,
+            p.y,
+            currentRadius
+          );
 
-        const rA = Math.floor(colorA[0] * 255);
-        const gA = Math.floor(colorA[1] * 255);
-        const bA = Math.floor(colorA[2] * 255);
+          const [rA, gA, bA] = colorA.map((v) => Math.floor(v * 255));
+          const [rB, gB, bB] = colorB.map((v) => Math.floor(v * 255));
 
-        const rB = Math.floor(colorB[0] * 255);
-        const gB = Math.floor(colorB[1] * 255);
-        const bB = Math.floor(colorB[2] * 255);
+          const iriShift = Math.sin(time + index * 0.3) * 30 * iridescence;
+          const effectiveIntensity = intensity * currentAlpha * (1 - (index / maxTrail) * 0.5);
 
-        // Iridescent reflection highlight
-        const iriShift = Math.sin(time + index * 0.3) * 40 * iridescence;
-        const hlColor = `rgba(${Math.min(255, 255 + iriShift)}, 255, 255, ${intensity * (1 - index / maxTrail)})`;
-        const bodyColorA = `rgba(${rA}, ${gA}, ${bA}, ${0.5 * intensity * (1 - index / maxTrail)})`;
-        const bodyColorB = `rgba(${rB}, ${gB}, ${bB}, ${0.2 * intensity * (1 - index / maxTrail)})`;
+          const hlColor = `rgba(${Math.min(255, 255 + iriShift)}, 255, 255, ${effectiveIntensity})`;
+          const bodyColorA = `rgba(${rA}, ${gA}, ${bA}, ${0.35 * effectiveIntensity})`;
+          const bodyColorB = `rgba(${rB}, ${gB}, ${bB}, ${0.15 * effectiveIntensity})`;
 
-        grad.addColorStop(0, hlColor);
-        grad.addColorStop(0.3, bodyColorA);
-        grad.addColorStop(0.85, bodyColorB);
-        grad.addColorStop(1, `rgba(0, 240, 255, ${0.4 * rim})`);
+          grad.addColorStop(0, hlColor);
+          grad.addColorStop(0.35, bodyColorA);
+          grad.addColorStop(0.85, bodyColorB);
+          grad.addColorStop(1, `rgba(0, 240, 255, ${0.2 * rim * currentAlpha})`);
 
-        ctx.fillStyle = grad;
-        ctx.shadowColor = `rgba(0, 240, 255, ${0.6 * shine})`;
-        ctx.shadowBlur = blend + (refraction / 10);
-        ctx.fill();
+          ctx.fillStyle = grad;
+          if (shine > 0 && blend > 0) {
+            ctx.shadowColor = `rgba(0, 240, 255, ${0.3 * shine * currentAlpha})`;
+            ctx.shadowBlur = blend + refraction / 20;
+          }
+          ctx.fill();
 
-        // Rim highlight stroke
-        if (rim > 0) {
-          ctx.strokeStyle = `rgba(255, 255, 255, ${0.5 * rim * (1 - index / maxTrail)})`;
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
-        }
+          if (rim > 0) {
+            ctx.strokeStyle = `rgba(255, 255, 255, ${0.3 * rim * currentAlpha})`;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
 
-        ctx.restore();
-      });
+          ctx.restore();
+        });
 
-      animId = requestAnimationFrame(render);
+        animId = requestAnimationFrame(render);
+      } else {
+        // Stop RAF loop when idle and alpha is 0 (0% CPU/GPU overhead when stationary)
+        animId = null;
+      }
     };
-
-    render();
 
     return () => {
-      cancelAnimationFrame(animId);
+      if (animId !== null) cancelAnimationFrame(animId);
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseleave", handleMouseLeave);
     };
-  }, [size, trail, follow, blend, speed, refraction, dispersion, frost, shine, rim, iridescence, intensity, colorA, colorB]);
+  }, [
+    size,
+    trail,
+    follow,
+    blend,
+    speed,
+    refraction,
+    dispersion,
+    frost,
+    shine,
+    rim,
+    iridescence,
+    intensity,
+    ambient,
+    colorAStr,
+    colorBStr,
+  ]);
 
   return (
     <div ref={containerRef} className={className} style={{ position: "relative", width: "100%", height: "100%", ...style }}>
@@ -164,7 +224,7 @@ export function Bubble({
           position: "fixed",
           inset: 0,
           pointerEvents: "none",
-          zIndex: 9999,
+          zIndex: 15,
         }}
       />
       {children}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmAssessment, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
+import { api, type CityCatalogItem, type DemandReport, type DoctorCheck, type LedgerRow, type OsSnapshot, type PulseResponse, type StatsResponse, type SwarmAssessment, type SwarmProduct, type SwarmRevenue, type WalletResponse } from "./api/client";
+import type { TelemetryResponse } from "./types/api";
 import { ActiveStorefront } from "./components/ActiveStorefront";
+import { McpInstructions } from "./components/McpInstructions";
 import { CommandPalette } from "./components/CommandPalette";
 import { OsHealthPanel } from "./components/OsHealthPanel";
 import { PulsePanel } from "./components/PulsePanel";
@@ -15,7 +17,7 @@ import { SellerWizard } from "./components/SellerWizard";
 import { VirtualizedLedger } from "./components/VirtualizedLedger";
 import { WalletPanel } from "./components/WalletPanel";
 import { OperatorHeader } from "./components/OperatorHeader";
-import { demoActivity, demoDoctor, demoOs, demoRevenue, demoSpend, demoStats } from "./fixtures/demo";
+import { demoActivity, demoCities, demoDemand, demoDoctor, demoOs, demoRevenue, demoSpend, demoStats } from "./fixtures/demo";
 import { explain } from "./glossary";
 import { useSSE, type StreamEvent } from "./hooks/useSSE";
 import { downloadText, ledgerToCsv } from "./utils/ledger";
@@ -31,6 +33,9 @@ import { ChainDistributionBar } from "./components/ChainDistributionBar";
 import { FacilitatorLeaderboard } from "./components/FacilitatorLeaderboard";
 import { BazaarResourceExplorer } from "./components/BazaarResourceExplorer";
 import { Bubble } from "./components/canvasui/Bubble";
+
+const BUBBLE_COLOR_A: [number, number, number] = [0.2902, 0.4549, 0.7216];
+const BUBBLE_COLOR_B: [number, number, number] = [0.4118, 0.4118, 0.4157];
 
 type Density = "guided" | "standard" | "operator";
 
@@ -75,6 +80,8 @@ export default function App() {
   const [ledgerFilterAgent, setLedgerFilterAgent] = useState("");
   const [tourOpen, setTourOpen] = useState(() => !localStorage.getItem("tourSeen"));
   const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
+  const [storefrontCities, setStorefrontCities] = useState<CityCatalogItem[] | null>(null);
+  const [storefrontDemand, setStorefrontDemand] = useState<DemandReport | null>(null);
 
 
 
@@ -182,13 +189,23 @@ export default function App() {
             status_note: "Revenue concentrates where sellers resell a real cost basis.",
             next_action: "Design one product that joins restricted multi-source data.",
           },
+          {
+            id: "synthesis_publisher",
+            name: "Synthesis publisher (Base Network Pulse + tx-decision)",
+            priority_score: 3.9,
+            raw_score: 3.9,
+            blocked_by: [],
+            human_gated: false,
+            status_note: "LEGACY per PRODUCT-FOCUS + live /demand: thousands of challenges, ~0% external conversion. Free-RPC arithmetic a buyer can inline. Stay deployed as a legacy reference; no features, no re-index settles, no lead outreach. Delisting cliff (2026-08-21) has passed.",
+            next_action: "Do nothing on this product.",
+          },
         ],
         recommended_route: {
           id: "mn_invest",
-          name: "Invest in /mn/property-check",
+          name: "MARC-HD Compliance Verification",
           priority_score: 8.5,
-          why: "PRODUCT-FOCUS unfrozen — improve offer quality on the access-barrier SKU.",
-          next_action: "Ship buyer-facing accuracy and clearer packaging on /mn/property-check.",
+          why: "MARC-HD compliance diligence is shipped and live at $0.85.",
+          next_action: "Maintain diligence verification engine and monitor usage.",
         },
         backlog: [
           { charter: "orchestrator", title: "Orchestrator & state manager", status: "partial", human_gated: false, detail: "Swarm orchestrator exists; no weekly trigger yet." },
@@ -268,6 +285,8 @@ export default function App() {
           window: "Next ~10 min favorable",
         },
       });
+      setStorefrontCities(demoCities);
+      setStorefrontDemand(demoDemand);
       setError(null);
       return;
     }
@@ -303,6 +322,10 @@ export default function App() {
     if (tel.ok) setTelemetry(tel.value);
     api.pulse().then(setPulse).catch(() => {});
     api.os().then(setOs).catch(() => {});
+    void Promise.allSettled([api.usCities(), api.demand()]).then(([cRes, demRes]) => {
+      if (cRes.status === "fulfilled") setStorefrontCities(cRes.value.cities);
+      if (demRes.status === "fulfilled") setStorefrontDemand(demRes.value);
+    });
     if (s.ok) {
       const rateRemaining = s.value.agents.length
         ? Math.min(...s.value.agents.map((a) => a.rate_limit_remaining))
@@ -413,21 +436,20 @@ export default function App() {
 
   return (
     <Bubble
-      size={15}
+      size={8}
       trail={2}
-      follow={0.5}
-      blend={8}
-      speed={2}
-      refraction={80}
+      follow={0.35}
+      blend={2}
+      speed={1.5}
+      refraction={40}
       dispersion={1}
       frost={0}
-      shine={0.1}
-      rim={0.3}
-      iridescence={0.5}
-      intensity={0.3}
-
-      colorA={[0.2902, 0.4549, 0.7216]}
-      colorB={[0.4118, 0.4118, 0.4157]}
+      shine={0.05}
+      rim={0.1}
+      iridescence={0.3}
+      intensity={0.15}
+      colorA={BUBBLE_COLOR_A}
+      colorB={BUBBLE_COLOR_B}
     >
       <div>
         {demo && (
@@ -623,7 +645,7 @@ export default function App() {
                   }}
                 />
               </div>
-              <small>Break-even: sell ~{Math.ceil(Math.abs(netAtomic) / 10_000)} calls at $0.01</small>
+              <small>Break-even: sell ~{Math.ceil(Math.abs(netAtomic) / 850_000)} calls at $0.85 (or ~{Math.ceil(Math.abs(netAtomic) / 10_000)} at $0.01)</small>
             </div>
           )}
           {netAtomic >= 0 && revenue.length > 0 && (
@@ -677,7 +699,15 @@ export default function App() {
 
         <div className="hide-mobile" style={{ display: "contents" }}>
           <OsHealthPanel os={os} />
-          <ActiveStorefront products={products} revenueRows={revenue} activityEvents={activity} />
+          <McpInstructions />
+          <ActiveStorefront
+            products={products}
+            revenueRows={revenue}
+            activityEvents={activity}
+            cities={storefrontCities}
+            demand={storefrontDemand}
+            demo={demo}
+          />
         </div>
 
         <SwarmAssessmentPanel assessment={swarmAssessment} density={density} />
@@ -795,6 +825,18 @@ export default function App() {
 
       {density !== "operator" && (
         <footer style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>
+          <span>
+            Listed on{" "}
+            <a
+              href="https://24klabs.ai/listing/us-city-open-data-compliance-network"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--neon-cyan)" }}
+            >
+              24K Labs
+            </a>
+            .
+          </span>{" "}
           Glossary: {explain("402")}
         </footer>
       )}

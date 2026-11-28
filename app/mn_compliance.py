@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.discovery_schemas import ADDRESS_QUERY_SCHEMA
 
 log = logging.getLogger("x402.mn_compliance")
 
@@ -65,8 +66,9 @@ LICENSE_FIELDS = (
     "licensedUnits,ownerName,ward,neighborhoodDesc,communityDesc,shortTermRental"
 )
 VIOLATION_FIELDS = (
-    "APN,Violation_Case_Number,Case_Type,Case_Group,Inspection_Result,"
-    "Inspection_Type_Desc,Start_Date,Completed_Date"
+    "APN,Violation_Case_Number,Case_Type,Case_Group,Status_Violation_Case,"
+    "Violation_Code,Violation_Code_Description,Status_Violation,Resolution_Code,"
+    "Processed_Date,Resolved_Date"
 )
 CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 
@@ -79,15 +81,9 @@ CONDEMNED_FIELDS = "APN,Address,VBR_Date,CONB,Ward,Neighborho"
 # rather than describing the endpoint to another engineer.
 #
 # 500 chars is the CDP ceiling (_clamp_description); this sits under it.
-RESOURCE_DESCRIPTION = (
-    "Minneapolis rental license check — is this property licensed? Property due "
-    "diligence agent for Minneapolis Minnesota (Hennepin) housing compliance open "
-    "data. GET ?address= (street 1-120 chars) → compliance_verdict "
-    "(licensed_clean|licensed_with_violations|unlicensed|condemned_or_boarded), "
-    "rental license status/tier/units/expiration, violation cases, condemned/"
-    "boarded. Live City JSON. Tenant screening, landlord DD, lending. Sample: "
-    "/mn/property-check/sample."
-)
+from app.city_compliance import outcome_copy
+
+RESOURCE_DESCRIPTION = outcome_copy.mn_resource_description()
 
 # Per-resource Bazaar metadata (facilitator: name <=32, <=5 tags x <=32 chars).
 # Must NOT inherit the storefront defaults (base,intelligence) — those describe
@@ -96,16 +92,73 @@ RESOURCE_DESCRIPTION = (
 SERVICE_NAME = "MN Rental License Check"
 SERVICE_TAGS = ["minneapolis", "rental-license", "compliance", "housing", "diligence"]
 
+# City of Minneapolis closes a CaseViolations row with one of these tokens.
+# Abate/Closed is history. It stays in the report and does not flip the verdict.
+_CLOSED_STATUSES = frozenset({
+    "abate",
+    "abated",
+    "cancel",
+    "canceled",
+    "cancelled",
+    "close",
+    "closed",
+    "void",
+    "complied",
+    "compliance",
+    "no violation",
+    "no violations",
+})
+
 
 def _escape(value: str) -> str:
     """Escape a value for an ArcGIS SQL where clause (single-quote doubling)."""
     return value.replace("'", "''")
 
 
-def _iso(epoch_ms: Any) -> str | None:
-    if not isinstance(epoch_ms, (int, float)):
+def _iso(value: Any) -> str | None:
+    """ArcGIS dates arrive as epoch ms or as already-formatted strings."""
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date().isoformat()
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        return raw[:10]
+    return None
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
         return None
-    return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc).date().isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def violation_is_open(row: dict) -> bool:
+    """True when this case row is still open.
+
+    A blank Status_Violation on an Enforce, Open, or Pending case is open.
+    Abate, Cancel, Closed, and Void close the row. Old Inspection_Result
+    values from the retired layer use the same tokens.
+    """
+    tokens = (
+        _text(row.get("Status_Violation_Case")),
+        _text(row.get("Status_Violation")),
+        _text(row.get("Resolution_Code")),
+        _text(row.get("Inspection_Result")),
+    )
+    for token in tokens:
+        if token and token.lower() in _CLOSED_STATUSES:
+            return False
+    return True
+
+
+def _violation_sort_key(row: dict) -> float:
+    for key in ("Processed_Date", "Resolved_Date", "Start_Date"):
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return 0.0
 
 
 def effective_mn_data_base_url() -> str:
@@ -238,20 +291,22 @@ async def check_property(address: str) -> dict[str, Any]:
             )
 
     recent_violations = sorted(
-        violations, key=lambda v: v.get("Start_Date") or 0, reverse=True
+        violations, key=_violation_sort_key, reverse=True
     )[:10]
 
     licensed = bool(licenses)
     condemned_flagged = bool(condemned)
     violation_total = len(violations)
+    open_total = sum(1 for row in violations if violation_is_open(row))
     # One-token decision for agent buyers. Severity order: condemned >
-    # unlicensed > licensed-with-open-history > clean. Derived only from the
+    # unlicensed > licensed with an open case > clean. Abated history stays
+    # in violation_cases and does not change the token. Derived only from the
     # three ArcGIS joins above — no scoring model.
     if condemned_flagged:
         compliance_verdict = "condemned_or_boarded"
     elif not licensed:
         compliance_verdict = "unlicensed"
-    elif violation_total > 0:
+    elif open_total > 0:
         compliance_verdict = "licensed_with_violations"
     else:
         compliance_verdict = "licensed_clean"
@@ -281,15 +336,23 @@ async def check_property(address: str) -> dict[str, Any]:
         "licensed": licensed,
         "violation_cases": {
             "total": violation_total,
+            "open": open_total,
+            "abated": violation_total - open_total,
             "recent": [
                 {
                     "case_number": v.get("Violation_Case_Number"),
                     "case_type": v.get("Case_Type"),
                     "case_group": v.get("Case_Group"),
-                    "inspection_result": v.get("Inspection_Result"),
-                    "inspection_type": v.get("Inspection_Type_Desc"),
-                    "start_date": _iso(v.get("Start_Date")),
-                    "completed_date": _iso(v.get("Completed_Date")),
+                    "case_status": _text(v.get("Status_Violation_Case")),
+                    "inspection_result": (
+                        _text(v.get("Status_Violation"))
+                        or _text(v.get("Inspection_Result"))
+                    ),
+                    "inspection_type": _text(v.get("Violation_Code_Description"))
+                    or _text(v.get("Inspection_Type_Desc")),
+                    "violation_code": _text(v.get("Violation_Code")),
+                    "start_date": _iso(v.get("Processed_Date") or v.get("Start_Date")),
+                    "completed_date": _iso(v.get("Resolved_Date") or v.get("Completed_Date")),
                 }
                 for v in recent_violations
             ],
@@ -342,6 +405,7 @@ SAMPLE_ADDRESS = "1700 Penn Ave N"
 # receive a report shaped like check_property()'s output. Small but faithful
 # excerpts — the CDP facilitator catalogs these verbatim at settle time.
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {"address": SAMPLE_ADDRESS}
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = ADDRESS_QUERY_SCHEMA
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "address_queried": "1700 Penn Ave N",
@@ -404,6 +468,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
         service_name=SERVICE_NAME,
         service_tags=SERVICE_TAGS,
@@ -419,6 +484,7 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
                 service_name=SERVICE_NAME,
                 service_tags=SERVICE_TAGS,
@@ -428,6 +494,30 @@ def build_payment_required_header() -> str:
     # Cached per (network, price, resource): the header is static and building
     # it hits the flaky CDP facilitator; serve last-known-good through an outage.
     return challenge_cache.get_or_build("mn-property-check", fp, _build)
+
+
+async def verify_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.verify_payment_payload(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
+
+
+async def settle_payment(payment_signature: str, payment_required: str) -> dict:
+    from app.models import VerifyPaymentInput
+    from app import x402_services
+
+    return await x402_services.settle_payment_after_verify(
+        VerifyPaymentInput(
+            payment_signature=payment_signature,
+            payment_required=payment_required,
+        )
+    )
 
 
 async def verify_and_settle(payment_signature: str, payment_required: str) -> dict:

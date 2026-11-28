@@ -21,6 +21,7 @@ from typing import Any
 
 from app import pulse
 from app.config import settings
+from app.discovery_schemas import TX_DECISION_QUERY_SCHEMA
 from app.pulse import (
     GAS_ERC20_TRANSFER,
     GAS_ETH_TRANSFER,
@@ -141,6 +142,8 @@ RESOURCE_DESCRIPTION = (
 )
 
 DISCOVERY_INPUT_EXAMPLE: dict[str, Any] = {"gas": "usdc", "urgency": "flexible"}
+DISCOVERY_INPUT_SCHEMA: dict[str, Any] = TX_DECISION_QUERY_SCHEMA
+SERVICE_NAME = "Base tx decision"
 
 DISCOVERY_OUTPUT_EXAMPLE: dict[str, Any] = {
     "submit": True,
@@ -177,6 +180,7 @@ def build_payment_required_header() -> str:
         discoverable=settings.bazaar_discoverable,
         description=RESOURCE_DESCRIPTION,
         input_example=DISCOVERY_INPUT_EXAMPLE,
+        input_schema=DISCOVERY_INPUT_SCHEMA,
         output_example=DISCOVERY_OUTPUT_EXAMPLE,
     )
 
@@ -190,7 +194,9 @@ def build_payment_required_header() -> str:
                 mime_type="application/json",
                 discovery_method="GET",
                 discovery_input_example=DISCOVERY_INPUT_EXAMPLE,
+                discovery_input_schema=DISCOVERY_INPUT_SCHEMA,
                 discovery_output_example=DISCOVERY_OUTPUT_EXAMPLE,
+                service_name=SERVICE_NAME,
             )
         )["payment_required_header"]
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import address_like_clause, soda_get, source_url
 
@@ -17,13 +18,7 @@ SPEC = CitySpec(
     state="MO",
     service_name="KC Exterior Building Violations",
     tags=("kansascity", "violations", "housing", "property", "code"),
-    description=(
-        "Does this Kansas City, Missouri address have open exterior building "
-        "code violations? Query a street address and get case numbers, "
-        "ordinance citations, status, and corrective action from city open "
-        "data. For landlord diligence and agent workflows. Input: address "
-        "string. Output: JSON, live City of Kansas City open data."
-    ),
+    description=outcome_copy.paid_route_description(code="kc", name="Kansas City"),
     sample_address="12100 E 61st Ter",
     sample_note=(
         "Free fixed-address sample of Kansas City open exterior building "

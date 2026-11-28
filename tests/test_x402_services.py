@@ -109,7 +109,7 @@ async def test_discover_services_does_not_filter_by_seller_pay_to(
     monkeypatch.setattr(
         settings,
         "x402_pay_to_address",
-        "0x05e1720bB82F86B5bc7940a99FDC702E32256357",
+        "0x0d25A44f74868eCE53B305C97139CF4B62963410",
     )
     monkeypatch.setattr(settings, "cdp_discovery_search_url", "https://discovery.test/search")
     monkeypatch.setattr(

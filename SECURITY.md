@@ -44,3 +44,46 @@ This policy covers the x402-mcp codebase, its dependencies as used in the projec
 MailRail send/inbound and message ledgers are **operator-only**. They are not public MCP tools. HTTP ingest/ledger/inbox/stats require `Authorization: Bearer $OPERATOR_TOKEN` and fail closed if the token is unset. See [docs/MAILRAIL-PUBLIC-SURFACE.md](docs/MAILRAIL-PUBLIC-SURFACE.md).
 
 Thank you for helping keep x402-mcp and the agent commerce ecosystem secure.
+
+## Operator surfaces and agent identity
+
+`OPERATOR_TOKEN` (sent as `Authorization: Bearer …`, compared in constant time)
+is the single, **required** operator credential. Callers without it see
+`/stats` aggregates only (no agent ids), and `/events` and `/swarm/runs`
+redact agent ids. A wrong or missing bearer on `/quota/{agent_id}`,
+`/pulse/publish`, `/swarm/run` or MailRail gets 401.
+
+If the server has no `OPERATOR_TOKEN` configured at all, those operator
+routes return **503 `operator_surface_disabled`** (never open) and startup
+logs an error. Set `REQUIRE_OPERATOR_TOKEN=true` to make the process refuse
+to start without it. Use a long random value (>= 24 chars; e.g.
+`openssl rand -hex 32`). The token is never rendered into HTML.
+
+
+## Change control for CODEOWNERS and workflows
+
+`.github/CODEOWNERS`, everything under `.github/workflows/`, and
+`scripts/add_only_guard.py` decide who can change this repo and what CI is
+allowed to do. Changes to them need more than one click from the owner
+account:
+
+- **Second human reviewer, or a hardware key.** A change to these paths must
+  be approved by a second human who is not the PR author. If no second
+  person is available, the approving account must sign in with a hardware
+  security key (FIDO2/WebAuthn, e.g. a YubiKey) only. Remove TOTP/SMS
+  fallbacks from that account.
+- **Agents never approve these.** Automation and AI agents often run with
+  the owner's token. A PR approved, environment-approved, or merged by that
+  token proves nothing about a human decision, and GitHub can't tell the
+  difference. Use a separate fine-grained token for agents that has no
+  `administration`, `workflows`, or environment-approval rights.
+- **The 15-minute wait is only a notification.** The `operator-approve`
+  environment's wait timer and its `change-control` issue tell the owner
+  that a change is pending. They are not a cryptographic control. Anyone
+  holding the owner token can approve the pending deployment through the
+  API once the timer runs out. Treat the issue as an alarm that needs a
+  human to look at it, and keep the real gate in branch protection.
+- **Branch protection on `master`:** require PRs; require review from
+  Code Owners; require approval of the most recent push; dismiss stale
+  approvals; require the `change-control` check; disallow force-push and
+  deletion; include administrators.

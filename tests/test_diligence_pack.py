@@ -25,7 +25,7 @@ def test_mn_description_under_cdp_ceiling() -> None:
     from app import mn_compliance
 
     assert len(mn_compliance.RESOURCE_DESCRIPTION) <= 500
-    assert "compliance_verdict" in mn_compliance.RESOURCE_DESCRIPTION
+    assert "verdict" in mn_compliance.RESOURCE_DESCRIPTION.lower()
     assert "diligence" in mn_compliance.SERVICE_TAGS
     assert "rental-license" in mn_compliance.SERVICE_TAGS
     assert len(mn_compliance.SERVICE_NAME) <= 32

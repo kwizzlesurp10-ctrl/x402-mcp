@@ -89,6 +89,26 @@ export interface ProbeResponse {
   payment_required_body?: Record<string, unknown> | null;
 }
 
+export interface FacilitatorInfo {
+  id: string;
+  name: string;
+  url: string;
+  uptime: string;
+  avgLatencyMs: number;
+  feeRate?: string;
+  supportedSchemes: string[];
+  chains: string[];
+  status: "active" | "degraded" | "syncing";
+}
+
+export interface TelemetryResponse {
+  total_volume_usdc: number;
+  total_transactions: number;
+  facilitators: FacilitatorInfo[];
+  uptime_pct: number;
+}
+
 export type ConnectionStatus = "connected" | "polling" | "disconnected";
 
 export type DensityMode = "guided" | "standard" | "operator";
+

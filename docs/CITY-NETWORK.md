@@ -1,5 +1,7 @@
 # US City Open-Data Compliance Network
 
+<a href="https://24klabs.ai/listing/us-city-open-data-compliance-network"><img src="https://24klabs.ai/card.svg?resource=https%3A%2F%2Fx402-mcp.onrender.com%2F.well-known%2Fx402" alt="US City Open-Data Compliance Network on the 24K Labs curated list"></a>
+
 Multi-city paid x402 product under `/us/{code}/property-check`.
 
 ## Canonical Visit / Resource URLs

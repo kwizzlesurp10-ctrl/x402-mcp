@@ -128,6 +128,7 @@ def test_every_builder_input_is_covered_by_the_fingerprint() -> None:
         discoverable=True,
         description="d",
         input_example={"address": "a"},
+        input_schema={"type": "object", "properties": {"address": {"type": "string"}}},
         output_example={"licensed": True},
         service_name="MN Rental Compliance",
         service_tags=["minneapolis", "rental"],
@@ -141,6 +142,10 @@ def test_every_builder_input_is_covered_by_the_fingerprint() -> None:
         ("discoverable", False),
         ("description", "different"),
         ("input_example", {"address": "b"}),
+        (
+            "input_schema",
+            {"type": "object", "properties": {"address": {"type": "string", "minLength": 2}}},
+        ),
         ("output_example", {"licensed": False}),
         ("service_name", "Other Service"),
         ("service_tags", ["base", "intelligence"]),

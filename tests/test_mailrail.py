@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from app.config import settings
+from app.mailrail_agent import AGENT_ID
 from app.mailrail import (
     defuse_mentions,
+    dispatch_settlement_receipt,
     event_key,
     format_settlement_receipt,
     send_agent_mail,
@@ -52,8 +54,8 @@ def test_send_agent_mail_mock_and_dedup(tmp_path: Path, monkeypatch: pytest.Monk
         body="Settled 10 USDC for scout-01",
         event_id="evt_test_001",
     )
-    assert res1["status"] == "sent"
-    assert res1["delivered"] is True
+    assert res1["status"] == "disabled"
+    assert res1["delivered"] is False
     assert "`@watch`" in res1["subject"]
 
     res2 = send_agent_mail(
@@ -73,17 +75,55 @@ def test_send_agent_mail_mock_and_dedup(tmp_path: Path, monkeypatch: pytest.Monk
     assert record["to"] == "operator@x402.org"
 
 
-def test_format_settlement_receipt() -> None:
+def test_format_settlement_receipt_scales_atomic_usdc() -> None:
     subject, body = format_settlement_receipt(
         payer="0x1234567890abcdef",
-        amount_usdc=0.015,
+        amount="10000",
         resource="/mn/property-check",
         tx_hash="0xabcd1234",
     )
-    assert "0.0150" in subject
+    assert "0.01" in subject
+    assert "10000" not in subject
+    assert "10000" not in body
     assert "/mn/property-check" in subject
     assert "0x1234567890abcdef" in body
     assert "0xabcd1234" in body
+
+
+def test_format_settlement_receipt_does_not_guess_non_integer_amount() -> None:
+    decimal_subject, _decimal_body = format_settlement_receipt(
+        payer="0xabc",
+        amount="0.01",
+        resource="/demo",
+    )
+    missing_subject, _missing_body = format_settlement_receipt(
+        payer="0xabc",
+        amount=None,
+        resource="/demo",
+    )
+    assert "n/a" in decimal_subject
+    assert "0.01" not in decimal_subject
+    assert "n/a" in missing_subject
+    assert "0.0000" not in missing_subject
+
+
+def test_empty_admin_recipient_addresses_receipt_to_contact_email(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", tmp_path / "mailrail.jsonl")
+    monkeypatch.setattr(settings, "mailrail_admin_recipient", None)
+    monkeypatch.setattr(settings, "contact_email", "ops-receipt@x402.test")
+    monkeypatch.setattr(settings, "mailrail_provider", "mock")
+    _SEEN_KEYS.clear()
+    res = dispatch_settlement_receipt(
+        payer="0xabc",
+        amount="10000",
+        resource="/mn/property-check",
+        tx_hash="0xreceipt",
+    )
+    assert res["to"] == "ops-receipt@x402.test"
+    assert "0.01" in res["subject"]
+    assert "10000" not in res["subject"]
 
 
 def test_live_resend_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -112,14 +152,15 @@ def test_live_resend_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     assert "api.resend.com" in calls[0][0]
 
 
-def test_smtp_provider_ledgers_without_http_dispatch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("provider", ["smtp", "file"])
+def test_dropped_providers_do_not_deliver(
+    provider: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """SMTP may pass doctor checks but send_agent_mail does not dispatch it."""
+    """smtp and file are not selectable and must not report delivered."""
     ledger_file = tmp_path / "mailrail.jsonl"
     monkeypatch.setattr("app.mailrail.MAILRAIL_LEDGER_FILE", ledger_file)
     monkeypatch.setattr(settings, "mailrail_enabled", True)
-    monkeypatch.setattr(settings, "mailrail_provider", "smtp")
+    monkeypatch.setattr(settings, "mailrail_provider", provider)
     monkeypatch.setattr(settings, "mailrail_smtp_url", "smtps://user:pass@smtp.example.com:465")
     _SEEN_KEYS.clear()
 
@@ -127,7 +168,7 @@ def test_smtp_provider_ledgers_without_http_dispatch(
 
     def fake_post(*_a: object, **_k: object) -> None:
         calls.append((_a, _k))
-        raise AssertionError("SMTP must not issue HTTP dispatch")
+        raise AssertionError("dropped providers must not issue HTTP dispatch")
 
     import httpx
 
@@ -137,14 +178,14 @@ def test_smtp_provider_ledgers_without_http_dispatch(
         "ops@localhost",
         "SMTP stanza",
         "doctor-only",
-        event_id="smtp_no_dispatch",
+        event_id=f"{provider}_no_dispatch",
     )
-    assert res["status"] == "sent"
-    assert res["delivered"] is True
+    assert res["status"] == "disabled"
+    assert res["delivered"] is False
     assert calls == []
     record = json.loads(ledger_file.read_text(encoding="utf-8").strip().splitlines()[0])
-    assert record["provider"] == "smtp"
-    assert record["status"] == "sent"
+    assert record["provider"] == "unsupported"
+    assert record["status"] == "disabled"
 
 
 def test_live_webhook_dispatch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -182,7 +223,7 @@ async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.Monkey
     _SEEN_KEYS.clear()
 
     # Status check tool
-    status_raw = await mailrail_status(agent_id="x402-mailrail-postmaster")
+    status_raw = await mailrail_status(agent_id=AGENT_ID)
     status_data = json.loads(status_raw)
     assert status_data["data"]["status"] == "ok"
     assert "provider" in status_data["data"]
@@ -193,11 +234,12 @@ async def test_mailrail_fastmcp_tools(tmp_path: Path, monkeypatch: pytest.Monkey
         subject="Report ready",
         body="Findings attached.",
         event_id="mcp_test_01",
-        agent_id="x402-mailrail-postmaster",
+        agent_id=AGENT_ID,
     )
     send_data = json.loads(send_raw)
     assert send_data["data"]["status"] == "ok"
-    assert send_data["data"]["mailrail"]["delivered"] is True
+    assert send_data["data"]["mailrail"]["delivered"] is False
+    assert send_data["data"]["mailrail"]["status"] == "disabled"
 
 
 def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,10 +252,7 @@ def test_mailrail_http_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     _SEEN_KEYS.clear()
 
     client = TestClient(app)
-    auth = {
-        "Authorization": "Bearer s3cret",
-        "X-Agent-Id": "x402-mailrail-postmaster",
-    }
+    auth = {"Authorization": "Bearer s3cret", "X-Agent-Id": AGENT_ID}
 
     # Health check stays public
     res_health = client.get("/mailrail/health")
@@ -281,7 +320,7 @@ async def test_mailrail_inbound_mcp_tool(tmp_path: Path, monkeypatch: pytest.Mon
         sender="scout-agent@network.ai",
         subject="Service alert",
         body="Upstream pricing dropped.",
-        agent_id="x402-mailrail-postmaster",
+        agent_id=AGENT_ID,
     )
     res_data = json.loads(res_raw)
     assert res_data["data"]["status"] == "ok"

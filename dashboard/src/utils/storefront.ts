@@ -4,7 +4,7 @@ import type { CityCatalogItem, DemandReport, DemandResource, SwarmProduct, Ledge
 /** Bazaar-indexed Pulse listing — must match render.yaml PINNED_PULSE_PRODUCT_ID. */
 export const PINNED_PULSE_PRODUCT_ID = "d22bbf5f3c4b4666a6f80980c7bc7c50";
 
-export const DEFAULT_PAY_TO = "0x05e1720bB82F86B5bc7940a99FDC702E32256357";
+export const DEFAULT_PAY_TO = "0x0d25A44f74868eCE53B305C97139CF4B62963410";
 
 export type StorefrontCategory = "Canonical Data" | "US Compliance Network" | "Swarm Composite";
 
@@ -162,6 +162,82 @@ export function buildStorefrontCalls(opts: {
   ];
 }
 
+/** Non-city paid HTTP surfaces — prices mirror backend defaults in app/config.py. */
+const CANONICAL_PAID_RESOURCES: Array<{
+  id: string;
+  name: string;
+  path: string;
+  price: string;
+  category: StorefrontCategory;
+  demandKey: string;
+}> = [
+  {
+    id: "base-tx-decision",
+    name: "Base Transaction Decision",
+    path: "/base/tx-decision",
+    price: "$0.01",
+    category: "Canonical Data",
+    demandKey: "base-tx-decision",
+  },
+  {
+    id: "base-finality-check",
+    name: "Base Transaction Finality Check",
+    path: "/base/finality-check",
+    price: "$0.01",
+    category: "Canonical Data",
+    demandKey: "base-finality-check",
+  },
+  {
+    id: "us-rental-diligence-pack",
+    name: "US Multi-City Rental Diligence Pack",
+    path: "/tasks/us-rental-diligence",
+    price: "$1.50",
+    category: "US Compliance Network",
+    demandKey: "us-rental-diligence-pack",
+  },
+  {
+    id: "property-due-diligence-agent",
+    name: "Property Due Diligence Agent",
+    path: "/agent/property-due-diligence",
+    price: "$0.01",
+    category: "US Compliance Network",
+    demandKey: "property-due-diligence-agent",
+  },
+];
+
+export function buildCanonicalPaidCalls(demand: DemandReport | null | undefined): ActiveCall[] {
+  const index = indexDemand(demand);
+  return CANONICAL_PAID_RESOURCES.map((row) => {
+    const stats = index.get(row.demandKey) ?? { ...EMPTY_DEMAND, resource: row.demandKey };
+    return {
+      id: row.id,
+      name: row.name,
+      path: row.path,
+      samplePath: null,
+      priceUsdc: parsePriceUsdc(row.price),
+      costBasisUsdc: 0,
+      category: row.category,
+      views: stats.challenges_served,
+      qualifiedViews: stats.qualified_views,
+      sales: stats.sales_external,
+      operatorSettles: stats.sales_operator,
+      status: "LIVE FOR SALE",
+    };
+  });
+}
+
+export function mergeStorefrontCalls(opts: {
+  cities?: CityCatalogItem[] | null;
+  demand?: DemandReport | null;
+  products?: SwarmProduct[] | null;
+  revenueRows?: LedgerRow[] | null;
+}): ActiveCall[] {
+  const catalog = buildStorefrontCalls(opts);
+  const seen = new Set(catalog.map((c) => c.path));
+  const extra = buildCanonicalPaidCalls(opts.demand).filter((c) => !seen.has(c.path));
+  return [...catalog, ...extra].filter((c) => c.priceUsdc > 0);
+}
+
 const FREE_BAZAAR_ENTRIES: BazaarEntry[] = [
   {
     id: "us-city-catalog",
@@ -191,6 +267,16 @@ const FREE_BAZAAR_ENTRIES: BazaarEntry[] = [
     path: "/.well-known/agent-card.json",
     description:
       "A2A v0.1 agent card with AP2 v1 commerce extension, Base USDC cashier rails, and us-rental-diligence-pack skill schema.",
+  },
+  {
+    id: "mcp-tools-catalog",
+    name: "Model Context Protocol (MCP) Public Catalog (21 tools)",
+    category: "MCP Manifest (free)",
+    priceUsdc: 0,
+    network: "Base Mainnet (8453)",
+    path: "/.well-known/mcp",
+    description:
+      "FastMCP tool catalog exposing production tools: city compliance ($0.01), commerce, swarm agency, and A2A resolution.",
   },
 ];
 

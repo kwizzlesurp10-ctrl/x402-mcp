@@ -276,7 +276,7 @@ footer{padding:10px 20px;color:var(--faint);font-size:11px;letter-spacing:.06em}
     <div id="tape" role="log" aria-live="polite"></div>
   </section>
 </main>
-<footer>x402 micropayments mcp · buyer + seller tooling · quota engine live</footer>
+<footer>x402 micropayments mcp · buyer + seller tooling · quota engine live · <a href="https://24klabs.ai/listing/us-city-open-data-compliance-network" target="_blank" rel="noopener noreferrer">24K Labs curated listing</a></footer>
 
 <script>
 "use strict";

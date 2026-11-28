@@ -7,7 +7,7 @@ purpose. Nothing here is invented.
 - Source of truth: `https://github.com/kwizzlesurp10-ctrl/x402-mcp` (issues labeled `sale`)
 - Live counters: `https://x402-mcp.onrender.com/stats`
 - Cashier: `https://x402-mcp.onrender.com/.well-known/funding.json`
-- Canonical payTo: `0x05e1720bB82F86B5bc7940a99FDC702E32256357` (Base USDC)
+- Canonical payTo: `0x0d25A44f74868eCE53B305C97139CF4B62963410` (Base USDC)
 - Generated: 2026-09-17
 
 ## 1. Gross USDC received by payTo

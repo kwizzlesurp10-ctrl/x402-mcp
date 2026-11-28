@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import mn_compliance
+from app.city_compliance import registry
 from app.config import settings
 from app.main import app
 
@@ -30,19 +31,16 @@ def test_seller_unconfigured_returns_503(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_an_unpaid_request_gets_the_challenge_before_any_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Deliberate contract change (2026-08-02): unpaid always means 402.
-
-    A missing or blank `address` used to return 422 to an unpaid caller — and
-    since a discovery crawler probes with no parameters at all, that is what
-    x402scan and CDP saw every time they looked at this endpoint. Neither ever
-    indexed it. Validation now happens on the paid path only.
-    """
+    """Unpaid always means 402 — discovery crawlers probe with no parameters."""
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
 
     for params in ({"address": "   "}, {}):
         response = client.get("/mn/property-check", params=params)
         assert response.status_code == 402, params
-        assert "PAYMENT-REQUIRED" in response.headers
+        assert response.headers.get("PAYMENT-REQUIRED")
+        body = response.json()
+        assert body["error"] == "payment_required"
+        assert body.get("input_hint")
 
 
 def test_a_paid_request_with_a_blank_address_is_rejected_before_it_is_charged(
@@ -54,7 +52,8 @@ def test_a_paid_request_with_a_blank_address_is_rejected_before_it_is_charged(
     async def must_not_settle(signature: str, payment_required: str) -> dict:
         raise AssertionError("settlement attempted for an invalid address")
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", must_not_settle)
+    monkeypatch.setattr(mn_compliance, "verify_payment", must_not_settle)
+    monkeypatch.setattr(mn_compliance, "settle_payment", must_not_settle)
 
     response = client.get(
         "/mn/property-check",
@@ -179,8 +178,15 @@ def test_paid_request_serves_report_with_receipt(
 ) -> None:
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
 
-    async def fake_settle(signature: str, payment_required: str) -> dict:
+    calls: list[str] = []
+
+    async def fake_verify(signature: str, payment_required: str) -> dict:
         assert signature == "sig-abc"
+        calls.append("verify")
+        return {"is_valid": True, "invalid_reason": None}
+
+    async def fake_settle(signature: str, payment_required: str) -> dict:
+        calls.append("settle")
         return {
             "is_valid": True,
             "payment_settled": True,
@@ -190,10 +196,12 @@ def test_paid_request_serves_report_with_receipt(
         }
 
     async def fake_report(address: str) -> dict:
+        calls.append("fetch")
         return {"address_queried": address, "licensed": True}
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
-    monkeypatch.setattr(mn_compliance, "check_property", fake_report)
+    monkeypatch.setattr(mn_compliance, "verify_payment", fake_verify)
+    monkeypatch.setattr(mn_compliance, "settle_payment", fake_settle)
+    monkeypatch.setattr(registry.get_city("mn"), "check_property", fake_report)
 
     response = client.get(
         "/mn/property-check",
@@ -218,7 +226,7 @@ def test_invalid_payment_returns_402(monkeypatch: pytest.MonkeyPatch) -> None:
             "settlement_error": None,
         }
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
+    monkeypatch.setattr(mn_compliance, "verify_payment", fake_settle)
     response = client.get(
         "/mn/property-check",
         params={"address": "1700 Penn Ave N"},
@@ -245,6 +253,7 @@ def test_malformed_signature_is_402_not_500(monkeypatch: pytest.MonkeyPatch) -> 
     body = response.json()
     assert body["error"] == "payment_invalid"
     assert body.get("invalid_reason")
+
 
 
 # ---- data layer against a mock ArcGIS backend -------------------------------
@@ -280,10 +289,12 @@ _VIOLATIONS = {
                 "Violation_Case_Number": "RS-2025-01",
                 "Case_Type": "Rental License",
                 "Case_Group": "Housing",
-                "Inspection_Result": "Violations Found",
-                "Inspection_Type_Desc": "Initial Inspection",
-                "Start_Date": 1735689600000,
-                "Completed_Date": 1738368000000,
+                "Status_Violation_Case": "Closed",
+                "Violation_Code": "HIS180",
+                "Violation_Code_Description": "Obtain Rental License; MCO 244.1810",
+                "Status_Violation": "Abate",
+                "Processed_Date": 1735689600000,
+                "Resolved_Date": 1738368000000,
             }
         }
     ]
@@ -321,7 +332,9 @@ def mock_arcgis(monkeypatch: pytest.MonkeyPatch) -> str:
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setattr(settings, "mn_data_base_url", f"http://127.0.0.1:{port}")
+    mn_compliance._cache.clear()
     yield f"http://127.0.0.1:{port}"
+    mn_compliance._cache.clear()
     server.shutdown()
 
 
@@ -330,13 +343,19 @@ async def test_check_property_composes_report(mock_arcgis: str) -> None:
     report = await mn_compliance.check_property("1700 Penn Ave N")
 
     assert report["licensed"] is True
-    assert report["compliance_verdict"] == "licensed_with_violations"
+    # Abate + Closed is history. It stays in the report and is not an open case.
+    assert report["compliance_verdict"] == "licensed_clean"
     license_record = report["rental_licenses"][0]
     assert license_record["license_number"] == "LIC394217"
     assert license_record["tier"] == "Tier 1"
     assert license_record["expiration_date"] == "2027-03-01"
-    assert report["violation_cases"]["total"] >= 1
-    assert "case_number" in report["violation_cases"]["recent"][0]
+    cases = report["violation_cases"]
+    assert cases["total"] >= 1
+    assert cases["open"] == 0
+    assert cases["abated"] >= 1
+    recent = cases["recent"][0]
+    assert recent["case_number"] == "RS-2025-01"
+    assert recent["inspection_result"] == "Abate"
     assert report["condemned_or_boarded"]["flagged"] is False
     assert "disclaimer" in report
     # owner contact details must never be served
@@ -368,6 +387,9 @@ def test_paid_request_records_revenue_ledger_row(
     monkeypatch.setattr(settings, "x402_pay_to_address", TEST_PAY_TO)
     monkeypatch.setattr(ledger_io, "LEDGER", tmp_path)
 
+    async def fake_verify(signature: str, payment_required: str) -> dict:
+        return {"is_valid": True, "invalid_reason": None}
+
     async def fake_settle(signature: str, payment_required: str) -> dict:
         return {
             "is_valid": True,
@@ -380,8 +402,9 @@ def test_paid_request_records_revenue_ledger_row(
     async def fake_report(address: str) -> dict:
         return {"address_queried": address, "licensed": True}
 
-    monkeypatch.setattr(mn_compliance, "verify_and_settle", fake_settle)
-    monkeypatch.setattr(mn_compliance, "check_property", fake_report)
+    monkeypatch.setattr(mn_compliance, "verify_payment", fake_verify)
+    monkeypatch.setattr(mn_compliance, "settle_payment", fake_settle)
+    monkeypatch.setattr(registry.get_city("mn"), "check_property", fake_report)
 
     response = client.get(
         "/mn/property-check",

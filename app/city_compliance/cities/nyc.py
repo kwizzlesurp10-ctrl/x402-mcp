@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any
 
+from app.city_compliance import outcome_copy
 from app.city_compliance.models import CitySpec, base_report
 from app.city_compliance.socrata import escape_soda, soda_get, source_url
 
@@ -19,14 +20,7 @@ SPEC = CitySpec(
     state="NY",
     service_name="NYC HPD Violations Address",
     tags=("nyc", "hpd", "violations", "housing", "diligence"),
-    description=(
-        "NYC HPD violations address check: is this property licensed / HPD-"
-        "registered, and are there open Housing Maintenance Code violations? "
-        "Property due diligence agent for New York City multi-dwelling housing "
-        "compliance open data. GET ?address= (house + street, optional borough) "
-        "→ registration window, BIN/block/lot, recent HMC violations JSON. "
-        "Tenant screening, landlord DD."
-    ),
+    description=outcome_copy.paid_route_description(code="nyc", name="New York City"),
     sample_address="787 EAST 56 STREET BROOKLYN",
     sample_note=(
         "Free fixed-address sample of NYC HPD registration + HMC violation join. "

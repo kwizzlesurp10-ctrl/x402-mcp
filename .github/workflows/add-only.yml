@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   classify:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     outputs:
       mutation: ${{ steps.guard.outputs.mutation }}
       summary: ${{ steps.guard.outputs.summary }}
@@ -68,7 +68,7 @@ jobs:
   notify:
     needs: classify
     if: needs.classify.outputs.mutation == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,7 +144,7 @@ jobs:
   add-only-ok:
     needs: classify
     if: needs.classify.outputs.mutation != 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - run: echo "add-only ok — no existing files mutated"
 
@@ -152,14 +152,14 @@ jobs:
     needs: classify
     if: needs.classify.outputs.mutation == 'true'
     environment: operator-approve
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - run: echo "operator clicked Approve on environment operator-approve"
 
   change-control:
     needs: [classify, add-only-ok, operator-approve]
     if: always() && needs.classify.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Require add-only path or operator click
         run: |
@@ -172,3 +172,40 @@ jobs:
           fi
           echo "change-control: fail — existing files mutated and operator has not approved"
           exit 1
+
+      # Close the change-control issue this run answered.
+      #
+      # WHY THIS EXISTS: `notify` opened an issue for every mutation and
+      # nothing ever closed one. 63 were open at once with 0 closed, so the
+      # queue said nothing about what still needed a decision. The decision
+      # is recorded right here in this job's conclusion, so the issue should
+      # close with it.
+      #
+      # The subject key is the same one `notify` used, so this closes exactly
+      # the issue this run raised and no other. A FAILED check leaves the
+      # issue open, which is the whole point: an unapproved mutation stays
+      # visible.
+      - name: Close the change-control issue this run answered
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, "scripts")
+          from close_change_control_issues import close_for_subject
+
+          pr = os.environ.get("PR_NUMBER") or ""
+          sha = os.environ.get("HEAD_SHA") or ""
+          ref = os.environ.get("REF_NAME") or ""
+          subject = f"pr-{pr}" if pr else f"push-{ref}-{sha[:12]}"
+          close_for_subject(subject)
+          # Never fail the workflow here. A failure to close an issue must
+          # not turn a green change-control check red and block a merge.
+          PY
