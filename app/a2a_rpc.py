@@ -314,8 +314,11 @@ class SkillBinding:
     verify_and_settle: Callable[[str, str], Awaitable[dict[str, Any]]] | None
     validate_input: Callable[[dict[str, Any]], str | None]
     execute: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
-    record_revenue: Callable[[dict[str, Any], dict[str, Any]], None] | None = None
+    record_revenue: Callable[..., None] | None = None
     payment_text: str = "Payment is required to run this skill."
+    verify_payment: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
+    settle_payment: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
+    settle_after_fulfillment: bool = False
 
 
 def _payment_required_body(header: str) -> dict[str, Any]:
@@ -453,9 +456,7 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         verify_and_settle=tx_decision.verify_and_settle,
         validate_input=_tx_validate,
         execute=_tx_execute,
-        record_revenue=lambda st, _r: _record_product_revenue(
-            "base-tx-decision", settings.tx_decision_price, st
-        ),
+        record_revenue=_skill_record_revenue("base-tx-decision", settings.tx_decision_price),
         payment_text="Payment is required for Base transaction decision intelligence.",
     )
 
@@ -479,8 +480,8 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             verify_and_settle=finality_check.verify_and_settle,
             validate_input=_fin_validate,
             execute=_fin_execute,
-            record_revenue=lambda st, _r: _record_product_revenue(
-                "base-finality-check", settings.finality_check_price, st
+            record_revenue=_skill_record_revenue(
+                "base-finality-check", settings.finality_check_price
             ),
             payment_text="Payment is required for Base transaction finality classification.",
         )
@@ -521,8 +522,8 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         verify_and_settle=diligence_pack.verify_and_settle,
         validate_input=_diligence_validate,
         execute=_diligence_execute,
-        record_revenue=lambda st, _r: _record_product_revenue(
-            diligence_pack.PRODUCT_ID, diligence_pack.price_string(), st
+        record_revenue=_skill_record_revenue(
+            diligence_pack.PRODUCT_ID, diligence_pack.price_string()
         ),
         payment_text="Payment is required for the US multi-city rental diligence pack.",
     )
@@ -565,8 +566,8 @@ def _skill_bindings() -> dict[str, SkillBinding]:
             verify_and_settle=policy_check.verify_and_settle,
             validate_input=_policy_check_validate,
             execute=_policy_check_execute,
-            record_revenue=lambda st, _r: _record_product_revenue(
-                policy_check.PRODUCT_ID, policy_check.price_string(), st
+            record_revenue=_skill_record_revenue(
+                policy_check.PRODUCT_ID, policy_check.price_string()
             ),
             payment_text="Payment is required for offline buyer payment-policy consistency analysis.",
         )
@@ -592,11 +593,12 @@ def _skill_bindings() -> dict[str, SkillBinding]:
         price_usdc=pdd_agent.PRICE,
         build_payment_header=pdd_agent.build_payment_required_header,
         verify_and_settle=pdd_agent.verify_and_settle,
+        verify_payment=pdd_agent.verify_payment,
+        settle_payment=pdd_agent.settle_payment,
+        settle_after_fulfillment=True,
         validate_input=_pdd_validate,
         execute=_pdd_execute,
-        record_revenue=lambda st, _r: _record_product_revenue(
-            pdd_agent.PRODUCT_ID, pdd_agent.PRICE, st
-        ),
+        record_revenue=_skill_record_revenue(pdd_agent.PRODUCT_ID, pdd_agent.PRICE),
         payment_text="Payment is required for the property due diligence agent.",
     )
 
@@ -646,37 +648,105 @@ def _skill_bindings() -> dict[str, SkillBinding]:
                 )
             ),
             verify_and_settle=city_gate.verify_and_settle,
+            verify_payment=city_gate.verify_payment,
+            settle_payment=city_gate.settle_payment,
+            settle_after_fulfillment=True,
             validate_input=_city_validate,
             execute=_city_execute,
-            record_revenue=lambda st, _r, p=pid, pr=entry["price"]: _record_product_revenue(
-                p, pr, st
-            ),
+            record_revenue=_skill_record_revenue(pid, entry["price"]),
             payment_text=f"Payment is required for {entry['name']} property compliance check.",
         )
 
     return bindings
 
 
+def _skill_record_revenue(product_id: str, price: str):
+    def _rec(
+        settlement: dict[str, Any],
+        request_input: dict[str, Any],
+        response_body: Any | None = None,
+        *,
+        revenue_only: bool = True,
+    ) -> None:
+        _record_product_revenue(
+            product_id,
+            price,
+            settlement,
+            request_input=request_input,
+            response_body=response_body,
+            revenue_only=revenue_only,
+        )
+
+    return _rec
+
+
 def _record_product_revenue(
     product_id: str,
     price: str,
     settlement: dict[str, Any],
+    *,
+    request_input: dict[str, Any] | None = None,
+    response_body: Any | None = None,
+    revenue_only: bool = True,
 ) -> None:
     try:
         from app.swarm import ledger_writer
         from app.swarm.publisher import parse_price_usdc
 
         tx = settlement.get("transaction") or settlement.get("txHash")
-        ledger_writer.record_revenue(
-            agent_id=product_id,
-            amount_usdc=parse_price_usdc(price),
-            network=settings.x402_default_network,
-            product_id=product_id,
-            tx=str(tx) if tx else None,
-            payer=settlement.get("payer"),
-        )
+        amount = parse_price_usdc(price)
+        payer = settlement.get("payer")
+        if revenue_only:
+            ledger_writer.record_revenue(
+                agent_id=product_id,
+                amount_usdc=amount,
+                network=settings.x402_default_network,
+                product_id=product_id,
+                tx=str(tx) if tx else None,
+                payer=payer,
+                request_input=request_input,
+                response_body=response_body,
+                delivery_route=f"a2a:{product_id}",
+            )
+        elif response_body is not None:
+            from app import delivery_store
+
+            delivery_store.try_record_delivery(
+                tx=str(tx) if tx else None,
+                route=f"a2a:{product_id}",
+                product_id=product_id,
+                amount_usdc=amount,
+                payer=str(payer) if payer else None,
+                request_input=request_input or {},
+                response_body=response_body,
+            )
     except Exception:  # noqa: BLE001
         log.warning("a2a revenue ledger write failed product=%s", product_id, exc_info=True)
+
+
+# The agent card advertises the generic ``us-city-property-check`` skill
+# (input: city_code + address). Route it to the per-city binding so agents
+# that discover the network skill (e.g. "Minneapolis, city_code=mn") can buy
+# it over A2A instead of getting "unknown skillId".
+CITY_NETWORK_SKILL_ID = "us-city-property-check"
+
+
+def _resolve_city_network_alias(
+    skill_id: str,
+    skill_input: dict[str, Any],
+    bindings: dict[str, SkillBinding],
+) -> tuple[str, dict[str, Any], str | None]:
+    if skill_id != CITY_NETWORK_SKILL_ID:
+        return skill_id, skill_input, None
+    code = str(skill_input.get("city_code") or "").strip().lower()
+    target = f"property-check-{code}" if code else ""
+    if not code or target not in bindings:
+        codes = sorted(
+            k.removeprefix("property-check-") for k in bindings if k.startswith("property-check-")
+        )
+        return skill_id, skill_input, f"city_code must be one of {codes}"
+    rest = {k: v for k, v in skill_input.items() if k != "city_code"}
+    return target, rest, None
 
 
 def _resolve_skill_id(message: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
@@ -862,6 +932,9 @@ async def _message_send(
         )
 
     bindings = _skill_bindings()
+    skill_id, skill_input, alias_err = _resolve_city_network_alias(skill_id, skill_input, bindings)
+    if alias_err:
+        return _jsonrpc_error(req_id, JSONRPC_INVALID_PARAMS, alias_err)
     binding = bindings.get(skill_id)
     if binding is None:
         return _jsonrpc_error(
@@ -1269,18 +1342,40 @@ async def _continue_paid_task(
             input_digest=input_digest,
         )
     else:
-        assert binding.verify_and_settle is not None
+        deferred_settle = (
+            binding.settle_after_fulfillment
+            and binding.verify_payment is not None
+            and binding.settle_payment is not None
+        )
         tv0 = time.perf_counter()
-        result = await binding.verify_and_settle(signature, header)
+        if deferred_settle:
+            assert binding.verify_payment is not None
+            result = await binding.verify_payment(signature, header)
+            result = {
+                **result,
+                "payment_settled": False,
+                "settlement": None,
+                "settlement_error": None,
+            }
+            stored["settle_after_fulfillment"] = True
+        else:
+            assert binding.verify_and_settle is not None
+            result = await binding.verify_and_settle(signature, header)
     x402_latency.record_span("a2a", "verify_settle", tv0)
     settlement = result.get("settlement") or {}
     receipt = _settlement_receipt(settlement, network=network)
     if not result.get("is_valid"):
         receipt["success"] = False
         receipt["errorReason"] = result.get("invalid_reason") or "invalid_signature"
+    elif stored.get("settle_after_fulfillment"):
+        receipt["success"] = True
+        receipt["deferredSettlement"] = True
     receipts = list(stored.get("receipts") or []) + [receipt]
 
-    if not result.get("is_valid") or not result.get("payment_settled"):
+    payment_ok = result.get("is_valid") and (
+        result.get("payment_settled") or stored.get("settle_after_fulfillment")
+    )
+    if not payment_ok:
         if stored.get("skillId") == "buyer-payment-policy-check" and policy_pc_claim_key:
             from app import policy_check as pc
 
@@ -1361,7 +1456,11 @@ async def _continue_paid_task(
             )
 
         if binding.record_revenue:
-            binding.record_revenue(settlement, stored.get("input") or {})
+            binding.record_revenue(
+                settlement,
+                stored.get("input") or {},
+                deliverable_pc,
+            )
 
         msg = _agent_message(
             "Payment completed. Skill result attached as artifact.",
@@ -1388,7 +1487,7 @@ async def _continue_paid_task(
             )
         return _jsonrpc_result(req_id, _client_task_view(stored))
 
-    if binding.record_revenue:
+    if binding.record_revenue and not stored.get("settle_after_fulfillment"):
         binding.record_revenue(settlement, stored.get("input") or {})
 
     skill_input = stored.get("input") or {}
@@ -1447,6 +1546,49 @@ async def _continue_paid_task(
         te0 = time.perf_counter()
         deliverable = await binding.execute(skill_input)
         x402_latency.record_span("a2a", "fulfillment_execute", te0)
+        if (
+            stored.get("settle_after_fulfillment")
+            and binding.settle_payment is not None
+        ):
+            settle_result = await binding.settle_payment(signature, header)
+            if not settle_result.get("payment_settled"):
+                msg = _agent_message(
+                    "Open-data fetch succeeded but settlement failed; payment not charged.",
+                    {
+                        META_STATUS: "payment-failed",
+                        META_ERROR: "SETTLEMENT_FAILED",
+                        META_RECEIPTS: receipts,
+                    },
+                )
+                task = _task_dict(task_id=task_id, state="input-required", message=msg)
+                stored.update(task)
+                stored["receipts"] = receipts
+                if not _persist_task(task_id, stored):
+                    out = _jsonrpc_error(
+                        req_id,
+                        JSONRPC_INTERNAL_ERROR,
+                        "task persistence unavailable",
+                        {"taskId": task_id},
+                    )
+                else:
+                    out = _jsonrpc_result(req_id, _client_task_view(stored))
+                return out
+            settlement = settle_result.get("settlement") or {}
+            settle_receipt = _settlement_receipt(settlement, network=network)
+            receipts = list(stored.get("receipts") or []) + [settle_receipt]
+            if binding.record_revenue:
+                binding.record_revenue(
+                    settlement,
+                    stored.get("input") or {},
+                    deliverable,
+                )
+        elif deliverable is not None and binding.record_revenue:
+            binding.record_revenue(
+                settlement,
+                stored.get("input") or {},
+                deliverable,
+                revenue_only=False,
+            )
         msg = _agent_message(
             "Payment completed. Skill result attached as artifact.",
             {
@@ -1473,15 +1615,28 @@ async def _continue_paid_task(
         else:
             out = _jsonrpc_result(req_id, _client_task_view(stored))
     except Exception:  # noqa: BLE001
-        log.warning("a2a skill execution failed after settle", exc_info=True)
+        log.warning("a2a skill execution failed", exc_info=True)
+        status = (
+            "Upstream data unavailable; payment was not charged."
+            if stored.get("settle_after_fulfillment")
+            else "Payment settled but skill execution failed."
+        )
         msg = _agent_message(
-            "Payment settled but skill execution failed.",
+            status,
             {
-                META_STATUS: "payment-completed",
+                META_STATUS: (
+                    "payment-failed"
+                    if stored.get("settle_after_fulfillment")
+                    else "payment-completed"
+                ),
                 META_RECEIPTS: receipts,
             },
         )
-        task = _task_dict(task_id=task_id, state="failed", message=msg)
+        task = _task_dict(
+            task_id=task_id,
+            state="failed" if stored.get("settle_after_fulfillment") else "failed",
+            message=msg,
+        )
         stored.update(task)
         stored["receipts"] = receipts
         if not _persist_task(task_id, stored):

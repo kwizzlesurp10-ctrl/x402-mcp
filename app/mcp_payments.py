@@ -144,6 +144,9 @@ def _record_city_check_settlement(ctx: Any) -> None:
 
         from app.swarm import ledger_writer
 
+        from app.delivery_store import take_pending_delivery_body
+
+        response_body = take_pending_delivery_body()
         ledger_writer.record_revenue(
             agent_id=product_id,
             amount_usdc=amount,
@@ -155,6 +158,9 @@ def _record_city_check_settlement(ctx: Any) -> None:
             product_id=product_id,
             tx=str(tx) if tx else None,
             payer=str(payer) if payer else None,
+            request_input=dict(getattr(ctx, "arguments", None) or {}),
+            response_body=response_body,
+            delivery_route="mcp:city.check",
         )
     except Exception:
         log.warning("city.check MCP settlement ledger write failed", exc_info=True)

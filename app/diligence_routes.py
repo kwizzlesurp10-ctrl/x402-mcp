@@ -225,6 +225,8 @@ async def diligence_pack_post(request: Request) -> JSONResponse:
             product_id=diligence_pack.PRODUCT_ID,
             tx=str(tx) if tx else None,
             payer=settlement.get("payer"),
+            request_input=body.model_dump(mode="json"),
+            response_body=pack,
         )
     except Exception:  # noqa: BLE001
         log.warning("diligence-pack revenue ledger write failed", exc_info=True)

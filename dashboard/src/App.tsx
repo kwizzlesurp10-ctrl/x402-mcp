@@ -825,6 +825,18 @@ export default function App() {
 
       {density !== "operator" && (
         <footer style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>
+          <span>
+            Listed on{" "}
+            <a
+              href="https://24klabs.ai/listing/us-city-open-data-compliance-network"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--neon-cyan)" }}
+            >
+              24K Labs
+            </a>
+            .
+          </span>{" "}
           Glossary: {explain("402")}
         </footer>
       )}
